@@ -1,26 +1,50 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --background: #f3f4f6;
+  --foreground: #111827;
 }
 
 body {
-  background: var(--background);
+  margin: 0;
+  background-color: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+  min-height: 100vh;
 }
+
+* {
+  box-sizing: border-box;
+}
+
+.dark .bg-white {
+  background-color: #111827;
+}
+
+.dark .text-gray-950,
+.dark .text-gray-900,
+.dark .text-gray-800,
+.dark .text-gray-700 {
+  color: #f9fafb;
+}
+
+.dark .text-gray-600,
+.dark .text-gray-500 {
+  color: #9ca3af;
+}
+
+.dark .border-gray-200,
+.dark .border-gray-100 {
+  border-color: #374151;
+}
+
+.dark input,
+.dark select,
+.dark textarea {
+  background-color: #111827;
+  color: #f9fafb;
+  border-color: #374151;
+}
+
