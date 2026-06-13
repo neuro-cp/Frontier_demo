@@ -79,6 +79,23 @@ This version has breaking changes — APIs, conventions, and file structure may 
 import { jobs } from "@/lib/jobs";
 import { useWorkspace } from "@/components/WorkspaceContext";
 
+function getJobColor(status: string) {
+  switch (status) {
+    case "Lead":
+      return "bg-gray-500";
+    case "Quoted":
+      return "bg-yellow-500";
+    case "Scheduled":
+      return "bg-blue-500";
+    case "Completed":
+      return "bg-green-500";
+    case "Paid":
+      return "bg-purple-500";
+    default:
+      return "bg-gray-500";
+  }
+}
+
 export default function CalendarPage() {
   const { activeWorkspace } = useWorkspace();
 
@@ -86,7 +103,7 @@ export default function CalendarPage() {
     (job) => job.workspaceId === activeWorkspace.id
   );
 
-  const days = Array.from({ length: 35 }, (_, i) => i + 1);
+  const days = Array.from({ length: 35 }, (_, index) => index + 1);
 
   return (
     <div className="space-y-6">
@@ -100,49 +117,43 @@ export default function CalendarPage() {
         </p>
       </div>
 
-      <div className="rounded-lg bg-white p-6 shadow dark:bg-gray-900">
+      <div className="rounded-2xl bg-white p-4 shadow dark:bg-gray-900 sm:p-6">
         <h2 className="mb-4 text-xl font-semibold text-gray-950 dark:text-gray-100">
           June 2026
         </h2>
 
-        <div className="grid grid-cols-7 gap-2">
-          {days.map((day) => {
-            const dayString = `2026-06-${String(day).padStart(2, "0")}`;
+        <div className="overflow-x-auto">
+          <div className="grid min-w-full grid-cols-7 gap-1 lg:gap-2">
+            {days.map((day) => {
+              const dayString = `2026-06-${String(day).padStart(2, "0")}`;
 
-            const dayJobs = workspaceJobs.filter(
-              (job) => job.date === dayString
-            );
+              const dayJobs = workspaceJobs.filter(
+                (job) => job.date === dayString
+              );
 
-            return (
-              <div
-                key={day}
-                className="min-h-28 rounded-lg border border-gray-200 p-2 dark:border-gray-800"
-              >
-                <div className="font-semibold text-gray-950 dark:text-gray-100">
-                  {day <= 30 ? day : ""}
-                </div>
-
-                {dayJobs.map((job) => (
-                  <div
-                    key={job.id}
-                    className={`mt-1 rounded p-1 text-xs text-white ${
-                      job.status === "Lead"
-                        ? "bg-gray-500"
-                        : job.status === "Quoted"
-                        ? "bg-yellow-500"
-                        : job.status === "Scheduled"
-                        ? "bg-blue-500"
-                        : job.status === "Completed"
-                        ? "bg-green-500"
-                        : "bg-purple-500"
-                    }`}
-                  >
-                    {job.name}
+              return (
+                <div
+                  key={day}
+                  className="min-h-24 rounded-lg border border-gray-200 p-2 dark:border-gray-800 lg:min-h-28"
+                >
+                  <div className="font-semibold text-gray-950 dark:text-gray-100">
+                    {day <= 30 ? day : ""}
                   </div>
-                ))}
-              </div>
-            );
-          })}
+
+                  {dayJobs.map((job) => (
+                    <div
+                      key={job.id}
+                      className={`mt-1 rounded px-2 py-1 text-xs font-medium text-white ${getJobColor(
+                        job.status
+                      )}`}
+                    >
+                      {job.name}
+                    </div>
+                  ))}
+                </div>
+              );
+            })}
+          </div>
         </div>
 
         {workspaceJobs.length === 0 && (
@@ -247,7 +258,7 @@ export default function ClientsPage() {
 
   return (
     <div className="space-y-6 text-gray-950 dark:text-gray-100">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-3xl font-bold">Clients</h1>
 
@@ -256,13 +267,13 @@ export default function ClientsPage() {
           </p>
         </div>
 
-        <button className="rounded-lg bg-blue-600 px-4 py-2 text-white hover:bg-blue-700">
+        <button className="w-full rounded-lg bg-blue-600 px-4 py-2 text-center text-white hover:bg-blue-700 sm:w-auto">
           + Add Client
         </button>
       </div>
 
-      <div className="overflow-hidden rounded-lg bg-white shadow dark:bg-gray-900">
-        <table className="w-full">
+      <div className="overflow-x-auto rounded-lg bg-white shadow dark:bg-gray-900">
+        <table className="min-w-[600px] w-full">
           <thead className="bg-gray-100 dark:bg-gray-800">
             <tr className="text-gray-700 dark:text-gray-300">
               <th className="p-4 text-left">Name</th>
@@ -278,7 +289,7 @@ export default function ClientsPage() {
                   key={client.id}
                   className="border-t border-gray-200 text-gray-900 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-100 dark:hover:bg-gray-800"
                 >
-                  <td className="p-4">
+                  <td className="p-4 break-words">
                     <Link
                       href={`/clients/${client.id}`}
                       className="text-blue-600 hover:underline dark:text-blue-400"
@@ -378,7 +389,7 @@ export default function DashboardPage() {
         </p>
       </div>
 
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard title="Active Clients" value={String(data.activeClients)} />
 
         <StatCard title="Open Quotes" value={String(data.openQuotes)} />
@@ -399,7 +410,7 @@ export default function DashboardPage() {
           Recent Activity
         </h2>
 
-        <ul className="space-y-3 text-gray-900 dark:text-gray-100">
+        <ul className="space-y-3 break-words text-gray-900 dark:text-gray-100">
           {data.activity.map((item) => (
             <li key={item}>{item}</li>
           ))}
@@ -424,7 +435,7 @@ export default function DocumentsPage() {
 
   return (
     <div className="space-y-8">
-      <div className="flex items-start justify-between">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className="text-3xl font-bold text-gray-950 dark:text-gray-100">
             Documents
@@ -437,14 +448,14 @@ export default function DocumentsPage() {
 
         <button
           onClick={() => setIsUploadOpen(true)}
-          className="rounded-lg bg-blue-600 px-6 py-3 text-white shadow hover:bg-blue-700"
+          className="w-full rounded-lg bg-blue-600 px-6 py-3 text-center text-white shadow hover:bg-blue-700 sm:w-auto"
         >
           + Upload Document
         </button>
       </div>
 
-      <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
-        <table className="w-full">
+      <div className="overflow-x-auto rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
+        <table className="min-w-[650px] w-full">
           <thead>
             <tr className="border-b border-gray-200 text-left text-sm uppercase tracking-wide text-gray-500 dark:border-gray-800 dark:text-gray-400">
               <th className="px-6 py-4">Name</th>
@@ -467,8 +478,8 @@ export default function DocumentsPage() {
       </div>
 
       {isUploadOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75">
-          <div className="w-full max-w-2xl rounded-xl bg-white p-8 shadow-xl dark:bg-gray-900">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4">
+          <div className="w-full max-w-2xl rounded-xl bg-white p-4 sm:p-6 lg:p-8 shadow-xl dark:bg-gray-900">
             <div className="mb-6 flex items-center justify-between">
               <h2 className="text-2xl font-bold text-gray-950 dark:text-gray-100">
                 Upload Document
@@ -507,7 +518,7 @@ export default function DocumentsPage() {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-5">
+              <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
                 <div>
                   <label className="mb-2 block text-lg font-medium text-gray-900 dark:text-gray-100">
                     Type
@@ -543,7 +554,7 @@ export default function DocumentsPage() {
 
                 <input
                   type="file"
-                  className="w-full rounded-lg border border-gray-200 bg-white px-4 py-3 text-lg text-gray-900 shadow-sm dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
+                  className="block w-full text-sm text-gray-900 dark:text-gray-100"
                 />
               </div>
 
@@ -558,18 +569,18 @@ export default function DocumentsPage() {
                 />
               </div>
 
-              <div className="flex justify-end gap-3">
+              <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
                 <button
                   type="button"
                   onClick={() => setIsUploadOpen(false)}
-                  className="rounded-lg border border-gray-200 px-6 py-3 text-lg text-gray-900 shadow-sm hover:bg-gray-50 dark:border-gray-700 dark:text-gray-100 dark:hover:bg-gray-800"
+                  className="w-full rounded-lg border border-gray-200 px-6 py-3 text-lg text-gray-900 shadow-sm hover:bg-gray-50 dark:border-gray-700 dark:text-gray-100 dark:hover:bg-gray-800 sm:w-auto"
                 >
                   Cancel
                 </button>
 
                 <button
                   type="submit"
-                  className="rounded-lg bg-blue-500 px-6 py-3 text-lg font-semibold text-white hover:bg-blue-600"
+                  className="w-full rounded-lg bg-blue-500 px-6 py-3 text-lg font-semibold text-white hover:bg-blue-600 sm:w-auto"
                 >
                   Upload
                 </button>
@@ -693,7 +704,7 @@ function SummaryCard({
   note?: string;
 }) {
   return (
-    <div className="flex min-h-36 items-start justify-between rounded-2xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+    <div className="flex min-h-36 flex-col gap-4 sm:flex-row sm:items-start sm:justify-between rounded-2xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
       <div>
         <p className="text-lg text-gray-500 dark:text-gray-400">{title}</p>
 
@@ -749,7 +760,7 @@ export default function FinancialsPage() {
         </p>
       </div>
 
-      <div className="grid grid-cols-4 gap-5">
+      <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
         <SummaryCard
           title="Revenue"
           value={formatMoney(revenue)}
@@ -780,15 +791,15 @@ export default function FinancialsPage() {
         />
       </div>
 
-      <div className="grid grid-cols-2 gap-8">
-        <div className="rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
+      <div className="grid grid-cols-1 gap-8 xl:grid-cols-2">
+        <div className="overflow-x-auto rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
           <div className="border-b border-gray-200 p-6 dark:border-gray-800">
             <h2 className="text-2xl font-bold text-gray-950 dark:text-gray-100">
               Recent Invoices
             </h2>
           </div>
 
-          <table className="w-full">
+          <table className="min-w-[650px] w-full">
             <thead>
               <tr className="border-b border-gray-200 text-left text-sm uppercase tracking-wide text-gray-500 dark:border-gray-800 dark:text-gray-400">
                 <th className="px-6 py-4">Invoice</th>
@@ -802,7 +813,7 @@ export default function FinancialsPage() {
                 workspaceInvoices.map((invoice) => (
                   <tr
                     key={invoice.id}
-                    className="border-b border-gray-200 text-lg last:border-b-0 dark:border-gray-800"
+                    className="border-b border-gray-200 text-base lg:text-lg last:border-b-0 dark:border-gray-800"
                   >
                     <td className="px-6 py-5 font-medium text-gray-950 dark:text-gray-100">
                       {invoice.id}
@@ -831,14 +842,14 @@ export default function FinancialsPage() {
           </table>
         </div>
 
-        <div className="rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
+        <div className="overflow-x-auto rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
           <div className="border-b border-gray-200 p-6 dark:border-gray-800">
             <h2 className="text-2xl font-bold text-gray-950 dark:text-gray-100">
               Recent Expenses
             </h2>
           </div>
 
-          <table className="w-full">
+          <table className="min-w-[650px] w-full">
             <thead>
               <tr className="border-b border-gray-200 text-left text-sm uppercase tracking-wide text-gray-500 dark:border-gray-800 dark:text-gray-400">
                 <th className="px-6 py-4">Description</th>
@@ -852,7 +863,7 @@ export default function FinancialsPage() {
                 workspaceExpenses.map((expense) => (
                   <tr
                     key={expense.description}
-                    className="border-b border-gray-200 text-lg last:border-b-0 dark:border-gray-800"
+                    className="border-b border-gray-200 text-base lg:text-lg last:border-b-0 dark:border-gray-800"
                   >
                     <td className="px-6 py-5 font-medium text-gray-950 dark:text-gray-100">
                       {expense.description}
@@ -1015,7 +1026,7 @@ export default function InventoryPage() {
 
   return (
     <div className="space-y-8">
-      <div className="flex items-start justify-between">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className="text-3xl font-bold text-gray-950 dark:text-gray-100">
             Inventory
@@ -1026,13 +1037,13 @@ export default function InventoryPage() {
           </p>
         </div>
 
-        <button className="rounded-lg bg-blue-600 px-6 py-3 text-white shadow hover:bg-blue-700">
+        <button className="w-full rounded-lg bg-blue-600 px-6 py-3 text-center text-white shadow hover:bg-blue-700 sm:w-auto">
           + Add Item
         </button>
       </div>
 
-      <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
-        <table className="w-full">
+      <div className="overflow-x-auto rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
+        <table className="min-w-[700px] w-full">
           <thead>
             <tr className="border-b border-gray-200 bg-white text-sm uppercase tracking-wide text-gray-500 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-400">
               <th className="px-6 py-4 text-left">Item Name</th>
@@ -1050,7 +1061,7 @@ export default function InventoryPage() {
                 return (
                   <tr
                     key={item.name}
-                    className="border-b border-gray-200 text-lg last:border-b-0 dark:border-gray-800"
+                    className="border-b border-gray-200 text-base lg:text-lg last:border-b-0 dark:border-gray-800"
                   >
                     <td className="px-6 py-5 font-medium text-gray-950 dark:text-gray-100">
                       <div className="flex items-center gap-3">
@@ -1335,7 +1346,7 @@ function JobColumn({
   jobs: Job[];
 }) {
   return (
-    <div className="rounded-lg bg-white p-4 shadow dark:bg-gray-900">
+    <div className="rounded-xl bg-white p-4 shadow dark:bg-gray-900">
       <h2 className="mb-4 text-lg font-bold text-gray-900 dark:text-gray-100">
         {title}
       </h2>
@@ -1349,7 +1360,7 @@ function JobColumn({
           jobs.map((job) => (
             <div
               key={job.id}
-              className="rounded-lg bg-gray-100 p-3 text-gray-900 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
+              className="rounded-lg bg-gray-100 p-3 text-gray-900 transition hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
             >
               <Link
                 href={`/jobs/${job.id}`}
@@ -1380,7 +1391,7 @@ export default function JobsPage() {
 
   return (
     <div className="space-y-6 text-gray-950 dark:text-gray-100">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-3xl font-bold">
             Jobs
@@ -1393,13 +1404,13 @@ export default function JobsPage() {
 
         <Link
           href="/jobs/new"
-          className="rounded-lg bg-blue-600 px-4 py-2 text-white hover:bg-blue-700"
+          className="w-full rounded-lg bg-blue-600 px-4 py-3 text-center text-white hover:bg-blue-700 sm:w-auto"
         >
           + Add Job
         </Link>
       </div>
 
-      <div className="grid grid-cols-5 gap-4">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 2xl:grid-cols-5">
         <JobColumn title="Lead" jobs={lead} />
         <JobColumn title="Quoted" jobs={quoted} />
         <JobColumn title="Scheduled" jobs={scheduled} />
@@ -1520,7 +1531,7 @@ export default function LogisticsPage() {
 
   return (
     <div className="space-y-8">
-      <div className="flex items-start justify-between">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <h1 className="text-3xl font-bold text-gray-950 dark:text-gray-100">
             Logistics
@@ -1537,7 +1548,7 @@ export default function LogisticsPage() {
             setSelectedType(event.target.value);
             setSelectedJobIds([]);
           }}
-          className="rounded-lg border border-gray-200 bg-white px-4 py-3 text-gray-900 shadow-sm dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+          className="w-full rounded-lg border border-gray-200 bg-white px-4 py-3 text-gray-900 shadow-sm lg:w-auto dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
         >
           {jobTypes.map((type) => (
             <option key={type}>{type}</option>
@@ -1545,7 +1556,7 @@ export default function LogisticsPage() {
         </select>
       </div>
 
-      <div className="grid grid-cols-[1fr_420px] gap-6">
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1fr_420px]">
         <div className="relative min-h-[620px] overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
           <div className="absolute inset-0 bg-[linear-gradient(to_right,#d1d5db_1px,transparent_1px),linear-gradient(to_bottom,#d1d5db_1px,transparent_1px)] bg-[size:70px_70px] opacity-50 dark:opacity-10" />
 
@@ -1558,7 +1569,7 @@ export default function LogisticsPage() {
           </div>
 
           <div className="relative h-full p-6">
-            <div className="mb-6 flex items-start justify-between">
+            <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
                 <h2 className="text-xl font-bold text-gray-950 dark:text-gray-100">
                   Client Location Map
@@ -1639,11 +1650,11 @@ export default function LogisticsPage() {
               Add or remove jobs from the route
             </p>
 
-            <div className="mt-5 flex gap-3">
+            <div className="mt-5 flex flex-col gap-3 sm:flex-row">
               <button
                 type="button"
                 onClick={selectAllVisibleJobs}
-                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+                className="w-full rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 sm:w-auto"
               >
                 + Add All
               </button>
@@ -1651,7 +1662,7 @@ export default function LogisticsPage() {
               <button
                 type="button"
                 onClick={clearRoute}
-                className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
+                className="w-full rounded-lg border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800 sm:w-auto"
               >
                 Clear Route
               </button>
@@ -1838,7 +1849,7 @@ export default function SettingsPage() {
         </p>
       </div>
 
-      <div className="inline-flex rounded-xl bg-gray-100 p-1 dark:bg-gray-800">
+      <div className="flex w-full flex-col gap-2 rounded-xl bg-gray-100 p-1 sm:inline-flex sm:w-auto sm:flex-row dark:bg-gray-800">
         <button
           onClick={() => setTab("general")}
           className={`rounded-lg px-4 py-2 text-lg ${
@@ -1863,7 +1874,7 @@ export default function SettingsPage() {
       </div>
 
       {tab === "general" && (
-        <div className="max-w-3xl rounded-2xl border border-gray-200 bg-white p-8 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+        <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-6 lg:p-8 shadow-sm dark:border-gray-800 dark:bg-gray-900">
           <div className="space-y-6">
             <div>
               <label className="mb-3 block text-lg font-medium text-gray-900 dark:text-gray-100">
@@ -1896,7 +1907,9 @@ export default function SettingsPage() {
               </select>
             </div>
 
-            <button className="rounded-lg bg-blue-600 px-6 py-3 text-lg font-semibold text-white shadow hover:bg-blue-700">
+            <button 
+              className="w-full rounded-lg bg-blue-600 px-6 py-3 text-lg font-semibold text-white shadow hover:bg-blue-700 sm:w-auto"
+            >  
               Save Changes
             </button>
           </div>
@@ -1905,8 +1918,8 @@ export default function SettingsPage() {
 
       {tab === "permissions" && (
         <div className="space-y-6">
-          <div className="rounded-2xl border border-gray-200 bg-white p-8 shadow-sm dark:border-gray-800 dark:bg-gray-900">
-            <div className="flex items-start justify-between">
+          <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-6 lg:p-8 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
               <div>
                 <h2 className="text-2xl font-bold text-gray-950 dark:text-gray-100">
                   Team Members
@@ -1923,14 +1936,14 @@ export default function SettingsPage() {
 
               <button
                 onClick={() => setInviteOpen(true)}
-                className="rounded-lg bg-blue-600 px-5 py-3 text-lg font-semibold text-white shadow hover:bg-blue-700"
+                className="w-full rounded-lg bg-blue-600 px-5 py-3 text-lg font-semibold text-white shadow hover:bg-blue-700 sm:w-auto"
               >
                 Invite
               </button>
             </div>
           </div>
 
-          <div className="rounded-2xl border border-gray-200 bg-white p-8 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+          <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-6 lg:p-8 shadow-sm dark:border-gray-800 dark:bg-gray-900">
             <h2 className="mb-6 text-2xl font-bold text-gray-950 dark:text-gray-100">
               Role Permissions
             </h2>
@@ -1956,8 +1969,8 @@ export default function SettingsPage() {
       )}
 
       {inviteOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75">
-          <div className="w-full max-w-xl rounded-xl bg-white p-8 shadow-xl dark:bg-gray-900">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4">
+          <div className="w-full max-w-xl rounded-xl bg-white p-4 sm:p-6 lg:p-8 shadow-xl dark:bg-gray-900">
             <div className="mb-6 flex items-center justify-between">
               <h2 className="text-2xl font-bold text-gray-950 dark:text-gray-100">
                 Invite Team Member
@@ -1988,21 +2001,21 @@ export default function SettingsPage() {
                 />
               </div>
 
-              <div className="flex justify-end gap-3 pt-2">
+              <div className="flex flex-col-reverse gap-3 pt-2 sm:flex-row sm:justify-end">
                 <button
                   type="button"
                   onClick={() => {
                     setInviteEmail("");
                     setInviteOpen(false);
                   }}
-                  className="rounded-lg border border-gray-200 px-6 py-3 text-lg text-gray-900 shadow-sm hover:bg-gray-50 dark:border-gray-700 dark:text-gray-100 dark:hover:bg-gray-800"
+                  className="w-full rounded-lg border border-gray-200 px-6 py-3 text-lg text-gray-900 shadow-sm hover:bg-gray-50 dark:border-gray-700 dark:text-gray-100 dark:hover:bg-gray-800 sm:w-auto"
                 >
                   Cancel
                 </button>
 
                 <button
                   type="submit"
-                  className="rounded-lg bg-blue-600 px-6 py-3 text-lg font-semibold text-white hover:bg-blue-700"
+                  className="w-full rounded-lg bg-blue-600 px-6 py-3 text-lg font-semibold text-white shadow hover:bg-blue-700 sm:w-auto"
                 >
                   Send Invite
                 </button>
@@ -2073,7 +2086,7 @@ export default function AppShell({
       <Sidebar />
 
       <div className="flex flex-1 flex-col">
-        <header className="flex h-20 items-center justify-between border-b border-gray-200 bg-white px-8 dark:border-gray-800 dark:bg-gray-900">
+        <header className="flex h-20 items-center justify-between border-b border-gray-200 bg-white px-3 sm:px-6 lg:px-8 dark:border-gray-800 dark:bg-gray-900">
           <div className="relative">
             <button
               onClick={() => {
@@ -2096,7 +2109,7 @@ export default function AppShell({
             </button>
 
             {workspaceOpen && (
-              <div className="absolute left-0 top-14 z-50 w-80 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-900">
+              <div className="absolute left-0 top-14 z-50 w-72 max-w-[90vw] overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-900">
                 <div className="px-4 py-3 text-sm font-semibold text-gray-500 dark:text-gray-400">
                   Workspaces
                 </div>
@@ -2146,7 +2159,7 @@ export default function AppShell({
             )}
           </div>
 
-          <div className="flex items-center gap-8">
+          <div className="flex items-center gap-2 sm:gap-4 lg:gap-8">
             <button
               onClick={toggleDarkMode}
               className="rounded-full px-3 py-2 text-xl hover:bg-gray-100 dark:hover:bg-gray-800"
@@ -2167,7 +2180,7 @@ export default function AppShell({
                   ♙
                 </span>
 
-                <span className="font-semibold">
+                <span className="hidden font-semibold md:block">
                   Nicholas Thompson
                 </span>
 
@@ -2177,7 +2190,7 @@ export default function AppShell({
               </button>
 
               {userOpen && (
-                <div className="absolute right-0 top-14 z-50 w-72 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-900">
+                <div className="absolute right-0 top-14 z-50 w-72 max-w-[90vw] overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-900">
                   <div className="border-b border-gray-200 px-4 py-4 font-semibold dark:border-gray-700">
                     thomp3ns@gmail.com
                   </div>
@@ -2197,7 +2210,7 @@ export default function AppShell({
           </div>
         </header>
 
-        <main className="flex-1 p-6">
+        <main className="flex-1 p-3 sm:p-4 lg:p-6">
           {children}
         </main>
       </div>
@@ -2292,17 +2305,17 @@ export default function Sidebar() {
           )}
         </div>
 
-        <nav className="flex flex-col gap-2 p-3">
+        <nav className="flex flex-col gap-1 p-2">
           {navItems.map((item) => (
             <Link
               key={item.href}
               href={item.href}
               title={collapsed ? item.label : undefined}
-              className={`group relative flex items-center rounded-xl px-3 py-3 text-gray-300 hover:bg-blue-600 hover:text-white ${
+              className={`group relative flex items-center rounded-xl px-3 py-2.5 text-gray-300 hover:bg-blue-600 hover:text-white ${
                 collapsed ? "justify-center" : "gap-3"
               }`}
             >
-              <span className="text-2xl leading-none">{item.icon}</span>
+              <span className="w-8 text-center text-2xl leading-none">{item.icon}</span>
 
               {!collapsed && (
                 <span className="text-base font-medium">{item.label}</span>
@@ -2317,7 +2330,7 @@ export default function Sidebar() {
           ))}
         </nav>
 
-        <div className="mt-auto mb-24 p-3">
+        <div className="mt-auto mb-4 p-3">
           <button
             onClick={() => setCollapsed(!collapsed)}
             className={`flex w-full items-center rounded-xl px-3 py-3 text-gray-300 hover:bg-gray-800 hover:text-white ${
@@ -2597,7 +2610,7 @@ export const jobs = [
 ```typescript
 /// <reference types="next" />
 /// <reference types="next/image-types/global" />
-import "./.next/dev/types/routes.d.ts";
+import "./.next/types/routes.d.ts";
 
 // NOTE: This file should not be edited
 // see https://nextjs.org/docs/app/api-reference/config/typescript for more information.
