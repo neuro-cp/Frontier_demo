@@ -46,7 +46,7 @@ export default function AppShell({
       <Sidebar />
 
       <div className="flex flex-1 flex-col">
-        <header className="flex h-20 items-center justify-between border-b border-gray-200 bg-white px-8 dark:border-gray-800 dark:bg-gray-900">
+        <header className="flex h-20 items-center justify-between border-b border-gray-200 bg-white px-3 sm:px-6 lg:px-8 dark:border-gray-800 dark:bg-gray-900">
           <div className="relative">
             <button
               onClick={() => {
@@ -69,7 +69,7 @@ export default function AppShell({
             </button>
 
             {workspaceOpen && (
-              <div className="absolute left-0 top-14 z-50 w-80 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-900">
+              <div className="absolute left-0 top-14 z-50 w-72 max-w-[90vw] overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-900">
                 <div className="px-4 py-3 text-sm font-semibold text-gray-500 dark:text-gray-400">
                   Workspaces
                 </div>
@@ -119,7 +119,7 @@ export default function AppShell({
             )}
           </div>
 
-          <div className="flex items-center gap-8">
+          <div className="flex items-center gap-2 sm:gap-4 lg:gap-8">
             <button
               onClick={toggleDarkMode}
               className="rounded-full px-3 py-2 text-xl hover:bg-gray-100 dark:hover:bg-gray-800"
@@ -140,7 +140,7 @@ export default function AppShell({
                   ♙
                 </span>
 
-                <span className="font-semibold">
+                <span className="hidden font-semibold md:block">
                   Nicholas Thompson
                 </span>
 
@@ -150,7 +150,7 @@ export default function AppShell({
               </button>
 
               {userOpen && (
-                <div className="absolute right-0 top-14 z-50 w-72 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-900">
+                <div className="absolute right-0 top-14 z-50 w-72 max-w-[90vw] overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-900">
                   <div className="border-b border-gray-200 px-4 py-4 font-semibold dark:border-gray-700">
                     thomp3ns@gmail.com
                   </div>
@@ -170,7 +170,7 @@ export default function AppShell({
           </div>
         </header>
 
-        <main className="flex-1 p-6">
+        <main className="flex-1 p-3 sm:p-4 lg:p-6">
           {children}
         </main>
       </div>

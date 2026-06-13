@@ -81,17 +81,17 @@ export default function Sidebar() {
           )}
         </div>
 
-        <nav className="flex flex-col gap-2 p-3">
+        <nav className="flex flex-col gap-1 p-2">
           {navItems.map((item) => (
             <Link
               key={item.href}
               href={item.href}
               title={collapsed ? item.label : undefined}
-              className={`group relative flex items-center rounded-xl px-3 py-3 text-gray-300 hover:bg-blue-600 hover:text-white ${
+              className={`group relative flex items-center rounded-xl px-3 py-2.5 text-gray-300 hover:bg-blue-600 hover:text-white ${
                 collapsed ? "justify-center" : "gap-3"
               }`}
             >
-              <span className="text-2xl leading-none">{item.icon}</span>
+              <span className="w-8 text-center text-2xl leading-none">{item.icon}</span>
 
               {!collapsed && (
                 <span className="text-base font-medium">{item.label}</span>
@@ -106,7 +106,7 @@ export default function Sidebar() {
           ))}
         </nav>
 
-        <div className="mt-auto mb-24 p-3">
+        <div className="mt-auto mb-4 p-3">
           <button
             onClick={() => setCollapsed(!collapsed)}
             className={`flex w-full items-center rounded-xl px-3 py-3 text-gray-300 hover:bg-gray-800 hover:text-white ${

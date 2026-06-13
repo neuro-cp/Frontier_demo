@@ -58,7 +58,7 @@ export default function LogisticsPage() {
 
   return (
     <div className="space-y-8">
-      <div className="flex items-start justify-between">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <h1 className="text-3xl font-bold text-gray-950 dark:text-gray-100">
             Logistics
@@ -75,7 +75,7 @@ export default function LogisticsPage() {
             setSelectedType(event.target.value);
             setSelectedJobIds([]);
           }}
-          className="rounded-lg border border-gray-200 bg-white px-4 py-3 text-gray-900 shadow-sm dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+          className="w-full rounded-lg border border-gray-200 bg-white px-4 py-3 text-gray-900 shadow-sm lg:w-auto dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
         >
           {jobTypes.map((type) => (
             <option key={type}>{type}</option>
@@ -83,7 +83,7 @@ export default function LogisticsPage() {
         </select>
       </div>
 
-      <div className="grid grid-cols-[1fr_420px] gap-6">
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1fr_420px]">
         <div className="relative min-h-[620px] overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
           <div className="absolute inset-0 bg-[linear-gradient(to_right,#d1d5db_1px,transparent_1px),linear-gradient(to_bottom,#d1d5db_1px,transparent_1px)] bg-[size:70px_70px] opacity-50 dark:opacity-10" />
 
@@ -96,7 +96,7 @@ export default function LogisticsPage() {
           </div>
 
           <div className="relative h-full p-6">
-            <div className="mb-6 flex items-start justify-between">
+            <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
                 <h2 className="text-xl font-bold text-gray-950 dark:text-gray-100">
                   Client Location Map
@@ -177,11 +177,11 @@ export default function LogisticsPage() {
               Add or remove jobs from the route
             </p>
 
-            <div className="mt-5 flex gap-3">
+            <div className="mt-5 flex flex-col gap-3 sm:flex-row">
               <button
                 type="button"
                 onClick={selectAllVisibleJobs}
-                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+                className="w-full rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 sm:w-auto"
               >
                 + Add All
               </button>
@@ -189,7 +189,7 @@ export default function LogisticsPage() {
               <button
                 type="button"
                 onClick={clearRoute}
-                className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
+                className="w-full rounded-lg border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800 sm:w-auto"
               >
                 Clear Route
               </button>

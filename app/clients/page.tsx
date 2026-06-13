@@ -43,7 +43,7 @@ export default function ClientsPage() {
 
   return (
     <div className="space-y-6 text-gray-950 dark:text-gray-100">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-3xl font-bold">Clients</h1>
 
@@ -52,13 +52,13 @@ export default function ClientsPage() {
           </p>
         </div>
 
-        <button className="rounded-lg bg-blue-600 px-4 py-2 text-white hover:bg-blue-700">
+        <button className="w-full rounded-lg bg-blue-600 px-4 py-2 text-center text-white hover:bg-blue-700 sm:w-auto">
           + Add Client
         </button>
       </div>
 
-      <div className="overflow-hidden rounded-lg bg-white shadow dark:bg-gray-900">
-        <table className="w-full">
+      <div className="overflow-x-auto rounded-lg bg-white shadow dark:bg-gray-900">
+        <table className="min-w-[600px] w-full">
           <thead className="bg-gray-100 dark:bg-gray-800">
             <tr className="text-gray-700 dark:text-gray-300">
               <th className="p-4 text-left">Name</th>
@@ -74,7 +74,7 @@ export default function ClientsPage() {
                   key={client.id}
                   className="border-t border-gray-200 text-gray-900 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-100 dark:hover:bg-gray-800"
                 >
-                  <td className="p-4">
+                  <td className="p-4 break-words">
                     <Link
                       href={`/clients/${client.id}`}
                       className="text-blue-600 hover:underline dark:text-blue-400"

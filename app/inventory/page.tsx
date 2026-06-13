@@ -70,7 +70,7 @@ export default function InventoryPage() {
 
   return (
     <div className="space-y-8">
-      <div className="flex items-start justify-between">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className="text-3xl font-bold text-gray-950 dark:text-gray-100">
             Inventory
@@ -81,13 +81,13 @@ export default function InventoryPage() {
           </p>
         </div>
 
-        <button className="rounded-lg bg-blue-600 px-6 py-3 text-white shadow hover:bg-blue-700">
+        <button className="w-full rounded-lg bg-blue-600 px-6 py-3 text-center text-white shadow hover:bg-blue-700 sm:w-auto">
           + Add Item
         </button>
       </div>
 
-      <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
-        <table className="w-full">
+      <div className="overflow-x-auto rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
+        <table className="min-w-[700px] w-full">
           <thead>
             <tr className="border-b border-gray-200 bg-white text-sm uppercase tracking-wide text-gray-500 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-400">
               <th className="px-6 py-4 text-left">Item Name</th>
@@ -105,7 +105,7 @@ export default function InventoryPage() {
                 return (
                   <tr
                     key={item.name}
-                    className="border-b border-gray-200 text-lg last:border-b-0 dark:border-gray-800"
+                    className="border-b border-gray-200 text-base lg:text-lg last:border-b-0 dark:border-gray-800"
                   >
                     <td className="px-6 py-5 font-medium text-gray-950 dark:text-gray-100">
                       <div className="flex items-center gap-3">

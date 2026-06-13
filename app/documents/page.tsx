@@ -9,7 +9,7 @@ export default function DocumentsPage() {
 
   return (
     <div className="space-y-8">
-      <div className="flex items-start justify-between">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className="text-3xl font-bold text-gray-950 dark:text-gray-100">
             Documents
@@ -22,14 +22,14 @@ export default function DocumentsPage() {
 
         <button
           onClick={() => setIsUploadOpen(true)}
-          className="rounded-lg bg-blue-600 px-6 py-3 text-white shadow hover:bg-blue-700"
+          className="w-full rounded-lg bg-blue-600 px-6 py-3 text-center text-white shadow hover:bg-blue-700 sm:w-auto"
         >
           + Upload Document
         </button>
       </div>
 
-      <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
-        <table className="w-full">
+      <div className="overflow-x-auto rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
+        <table className="min-w-[650px] w-full">
           <thead>
             <tr className="border-b border-gray-200 text-left text-sm uppercase tracking-wide text-gray-500 dark:border-gray-800 dark:text-gray-400">
               <th className="px-6 py-4">Name</th>
@@ -52,8 +52,8 @@ export default function DocumentsPage() {
       </div>
 
       {isUploadOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75">
-          <div className="w-full max-w-2xl rounded-xl bg-white p-8 shadow-xl dark:bg-gray-900">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4">
+          <div className="w-full max-w-2xl rounded-xl bg-white p-4 sm:p-6 lg:p-8 shadow-xl dark:bg-gray-900">
             <div className="mb-6 flex items-center justify-between">
               <h2 className="text-2xl font-bold text-gray-950 dark:text-gray-100">
                 Upload Document
@@ -92,7 +92,7 @@ export default function DocumentsPage() {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-5">
+              <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
                 <div>
                   <label className="mb-2 block text-lg font-medium text-gray-900 dark:text-gray-100">
                     Type
@@ -128,7 +128,7 @@ export default function DocumentsPage() {
 
                 <input
                   type="file"
-                  className="w-full rounded-lg border border-gray-200 bg-white px-4 py-3 text-lg text-gray-900 shadow-sm dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
+                  className="block w-full text-sm text-gray-900 dark:text-gray-100"
                 />
               </div>
 
@@ -143,18 +143,18 @@ export default function DocumentsPage() {
                 />
               </div>
 
-              <div className="flex justify-end gap-3">
+              <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
                 <button
                   type="button"
                   onClick={() => setIsUploadOpen(false)}
-                  className="rounded-lg border border-gray-200 px-6 py-3 text-lg text-gray-900 shadow-sm hover:bg-gray-50 dark:border-gray-700 dark:text-gray-100 dark:hover:bg-gray-800"
+                  className="w-full rounded-lg border border-gray-200 px-6 py-3 text-lg text-gray-900 shadow-sm hover:bg-gray-50 dark:border-gray-700 dark:text-gray-100 dark:hover:bg-gray-800 sm:w-auto"
                 >
                   Cancel
                 </button>
 
                 <button
                   type="submit"
-                  className="rounded-lg bg-blue-500 px-6 py-3 text-lg font-semibold text-white hover:bg-blue-600"
+                  className="w-full rounded-lg bg-blue-500 px-6 py-3 text-lg font-semibold text-white hover:bg-blue-600 sm:w-auto"
                 >
                   Upload
                 </button>

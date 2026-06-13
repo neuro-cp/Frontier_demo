@@ -363,9 +363,8 @@ export default function DashboardPage() {
   const { activeWorkspace } = useWorkspace();
 
   const data =
-    dashboardData[
-      activeWorkspace.id as keyof typeof dashboardData
-    ];
+    dashboardData[activeWorkspace.id as keyof typeof dashboardData] ??
+    dashboardData.landscaping;
 
   return (
     <div>
@@ -380,15 +379,9 @@ export default function DashboardPage() {
       </div>
 
       <div className="grid grid-cols-4 gap-4">
-        <StatCard
-          title="Active Clients"
-          value={String(data.activeClients)}
-        />
+        <StatCard title="Active Clients" value={String(data.activeClients)} />
 
-        <StatCard
-          title="Open Quotes"
-          value={String(data.openQuotes)}
-        />
+        <StatCard title="Open Quotes" value={String(data.openQuotes)} />
 
         <StatCard
           title="Outstanding Invoices"

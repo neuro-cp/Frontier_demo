@@ -63,7 +63,7 @@ export default function DashboardPage() {
         </p>
       </div>
 
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard title="Active Clients" value={String(data.activeClients)} />
 
         <StatCard title="Open Quotes" value={String(data.openQuotes)} />
@@ -84,7 +84,7 @@ export default function DashboardPage() {
           Recent Activity
         </h2>
 
-        <ul className="space-y-3 text-gray-900 dark:text-gray-100">
+        <ul className="space-y-3 break-words text-gray-900 dark:text-gray-100">
           {data.activity.map((item) => (
             <li key={item}>{item}</li>
           ))}

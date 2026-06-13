@@ -53,7 +53,7 @@ export default function SettingsPage() {
         </p>
       </div>
 
-      <div className="inline-flex rounded-xl bg-gray-100 p-1 dark:bg-gray-800">
+      <div className="flex w-full flex-col gap-2 rounded-xl bg-gray-100 p-1 sm:inline-flex sm:w-auto sm:flex-row dark:bg-gray-800">
         <button
           onClick={() => setTab("general")}
           className={`rounded-lg px-4 py-2 text-lg ${
@@ -78,7 +78,7 @@ export default function SettingsPage() {
       </div>
 
       {tab === "general" && (
-        <div className="max-w-3xl rounded-2xl border border-gray-200 bg-white p-8 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+        <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-6 lg:p-8 shadow-sm dark:border-gray-800 dark:bg-gray-900">
           <div className="space-y-6">
             <div>
               <label className="mb-3 block text-lg font-medium text-gray-900 dark:text-gray-100">
@@ -111,7 +111,9 @@ export default function SettingsPage() {
               </select>
             </div>
 
-            <button className="rounded-lg bg-blue-600 px-6 py-3 text-lg font-semibold text-white shadow hover:bg-blue-700">
+            <button 
+              className="w-full rounded-lg bg-blue-600 px-6 py-3 text-lg font-semibold text-white shadow hover:bg-blue-700 sm:w-auto"
+            >  
               Save Changes
             </button>
           </div>
@@ -120,8 +122,8 @@ export default function SettingsPage() {
 
       {tab === "permissions" && (
         <div className="space-y-6">
-          <div className="rounded-2xl border border-gray-200 bg-white p-8 shadow-sm dark:border-gray-800 dark:bg-gray-900">
-            <div className="flex items-start justify-between">
+          <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-6 lg:p-8 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
               <div>
                 <h2 className="text-2xl font-bold text-gray-950 dark:text-gray-100">
                   Team Members
@@ -138,14 +140,14 @@ export default function SettingsPage() {
 
               <button
                 onClick={() => setInviteOpen(true)}
-                className="rounded-lg bg-blue-600 px-5 py-3 text-lg font-semibold text-white shadow hover:bg-blue-700"
+                className="w-full rounded-lg bg-blue-600 px-5 py-3 text-lg font-semibold text-white shadow hover:bg-blue-700 sm:w-auto"
               >
                 Invite
               </button>
             </div>
           </div>
 
-          <div className="rounded-2xl border border-gray-200 bg-white p-8 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+          <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-6 lg:p-8 shadow-sm dark:border-gray-800 dark:bg-gray-900">
             <h2 className="mb-6 text-2xl font-bold text-gray-950 dark:text-gray-100">
               Role Permissions
             </h2>
@@ -171,8 +173,8 @@ export default function SettingsPage() {
       )}
 
       {inviteOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75">
-          <div className="w-full max-w-xl rounded-xl bg-white p-8 shadow-xl dark:bg-gray-900">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4">
+          <div className="w-full max-w-xl rounded-xl bg-white p-4 sm:p-6 lg:p-8 shadow-xl dark:bg-gray-900">
             <div className="mb-6 flex items-center justify-between">
               <h2 className="text-2xl font-bold text-gray-950 dark:text-gray-100">
                 Invite Team Member
@@ -203,21 +205,21 @@ export default function SettingsPage() {
                 />
               </div>
 
-              <div className="flex justify-end gap-3 pt-2">
+              <div className="flex flex-col-reverse gap-3 pt-2 sm:flex-row sm:justify-end">
                 <button
                   type="button"
                   onClick={() => {
                     setInviteEmail("");
                     setInviteOpen(false);
                   }}
-                  className="rounded-lg border border-gray-200 px-6 py-3 text-lg text-gray-900 shadow-sm hover:bg-gray-50 dark:border-gray-700 dark:text-gray-100 dark:hover:bg-gray-800"
+                  className="w-full rounded-lg border border-gray-200 px-6 py-3 text-lg text-gray-900 shadow-sm hover:bg-gray-50 dark:border-gray-700 dark:text-gray-100 dark:hover:bg-gray-800 sm:w-auto"
                 >
                   Cancel
                 </button>
 
                 <button
                   type="submit"
-                  className="rounded-lg bg-blue-600 px-6 py-3 text-lg font-semibold text-white hover:bg-blue-700"
+                  className="w-full rounded-lg bg-blue-600 px-6 py-3 text-lg font-semibold text-white shadow hover:bg-blue-700 sm:w-auto"
                 >
                   Send Invite
                 </button>

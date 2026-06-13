@@ -105,7 +105,7 @@ function SummaryCard({
   note?: string;
 }) {
   return (
-    <div className="flex min-h-36 items-start justify-between rounded-2xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+    <div className="flex min-h-36 flex-col gap-4 sm:flex-row sm:items-start sm:justify-between rounded-2xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
       <div>
         <p className="text-lg text-gray-500 dark:text-gray-400">{title}</p>
 
@@ -161,7 +161,7 @@ export default function FinancialsPage() {
         </p>
       </div>
 
-      <div className="grid grid-cols-4 gap-5">
+      <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
         <SummaryCard
           title="Revenue"
           value={formatMoney(revenue)}
@@ -192,15 +192,15 @@ export default function FinancialsPage() {
         />
       </div>
 
-      <div className="grid grid-cols-2 gap-8">
-        <div className="rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
+      <div className="grid grid-cols-1 gap-8 xl:grid-cols-2">
+        <div className="overflow-x-auto rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
           <div className="border-b border-gray-200 p-6 dark:border-gray-800">
             <h2 className="text-2xl font-bold text-gray-950 dark:text-gray-100">
               Recent Invoices
             </h2>
           </div>
 
-          <table className="w-full">
+          <table className="min-w-[650px] w-full">
             <thead>
               <tr className="border-b border-gray-200 text-left text-sm uppercase tracking-wide text-gray-500 dark:border-gray-800 dark:text-gray-400">
                 <th className="px-6 py-4">Invoice</th>
@@ -214,7 +214,7 @@ export default function FinancialsPage() {
                 workspaceInvoices.map((invoice) => (
                   <tr
                     key={invoice.id}
-                    className="border-b border-gray-200 text-lg last:border-b-0 dark:border-gray-800"
+                    className="border-b border-gray-200 text-base lg:text-lg last:border-b-0 dark:border-gray-800"
                   >
                     <td className="px-6 py-5 font-medium text-gray-950 dark:text-gray-100">
                       {invoice.id}
@@ -243,14 +243,14 @@ export default function FinancialsPage() {
           </table>
         </div>
 
-        <div className="rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
+        <div className="overflow-x-auto rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
           <div className="border-b border-gray-200 p-6 dark:border-gray-800">
             <h2 className="text-2xl font-bold text-gray-950 dark:text-gray-100">
               Recent Expenses
             </h2>
           </div>
 
-          <table className="w-full">
+          <table className="min-w-[650px] w-full">
             <thead>
               <tr className="border-b border-gray-200 text-left text-sm uppercase tracking-wide text-gray-500 dark:border-gray-800 dark:text-gray-400">
                 <th className="px-6 py-4">Description</th>
@@ -264,7 +264,7 @@ export default function FinancialsPage() {
                 workspaceExpenses.map((expense) => (
                   <tr
                     key={expense.description}
-                    className="border-b border-gray-200 text-lg last:border-b-0 dark:border-gray-800"
+                    className="border-b border-gray-200 text-base lg:text-lg last:border-b-0 dark:border-gray-800"
                   >
                     <td className="px-6 py-5 font-medium text-gray-950 dark:text-gray-100">
                       {expense.description}
