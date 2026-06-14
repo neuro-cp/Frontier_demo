@@ -1,72 +1,14 @@
 "use client";
 
+import { useState } from "react";
 import { useWorkspace } from "@/components/WorkspaceContext";
+import { invoices as defaultInvoices } from "@/lib/invoices";
+import { expenses as defaultExpenses } from "@/lib/expenses";
+import { clients } from "@/lib/clients";
 
-const invoices = [
-  {
-    id: "INV-001",
-    status: "Paid",
-    amount: "$850",
-    workspaceId: "landscaping",
-  },
-  {
-    id: "INV-005",
-    status: "Sent",
-    amount: "$450",
-    workspaceId: "landscaping",
-  },
-  {
-    id: "INV-002",
-    status: "Overdue",
-    amount: "$2,400",
-    workspaceId: "snow-removal",
-  },
-  {
-    id: "INV-003",
-    status: "Paid",
-    amount: "$3,200",
-    workspaceId: "properties",
-  },
-  {
-    id: "INV-004",
-    status: "Sent",
-    amount: "$1,200",
-    workspaceId: "properties",
-  },
-];
+const invoiceStatuses = ["Draft", "Sent", "Overdue", "Paid"] as const;
 
-const expenses = [
-  {
-    description: "Mulch bulk order",
-    category: "Materials",
-    amount: "$1,750",
-    workspaceId: "landscaping",
-  },
-  {
-    description: "Fuel for fleet",
-    category: "Fuel",
-    amount: "$420",
-    workspaceId: "landscaping",
-  },
-  {
-    description: "Salt bulk order",
-    category: "Materials",
-    amount: "$900",
-    workspaceId: "snow-removal",
-  },
-  {
-    description: "Snow plow maintenance",
-    category: "Equipment",
-    amount: "$380",
-    workspaceId: "snow-removal",
-  },
-  {
-    description: "Monthly property insurance",
-    category: "Insurance",
-    amount: "$650",
-    workspaceId: "properties",
-  },
-];
+type InvoiceStatus = (typeof invoiceStatuses)[number];
 
 function moneyToNumber(value: string) {
   return Number(value.replace(/[$,]/g, ""));
@@ -74,21 +16,6 @@ function moneyToNumber(value: string) {
 
 function formatMoney(value: number) {
   return `$${value.toLocaleString()}`;
-}
-
-function StatusBadge({ status }: { status: string }) {
-  const classes =
-    status === "Paid"
-      ? "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300"
-      : status === "Sent"
-      ? "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300"
-      : "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300";
-
-  return (
-    <span className={`rounded-full px-3 py-1 text-sm ${classes}`}>
-      {status}
-    </span>
-  );
 }
 
 function SummaryCard({
@@ -105,14 +32,12 @@ function SummaryCard({
   note?: string;
 }) {
   return (
-    <div className="flex min-h-36 flex-col gap-4 sm:flex-row sm:items-start sm:justify-between rounded-2xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+    <div className="flex min-h-36 flex-col gap-4 rounded-2xl border border-gray-200 bg-white p-6 shadow-sm sm:flex-row sm:items-start sm:justify-between dark:border-gray-800 dark:bg-gray-900">
       <div>
         <p className="text-lg text-gray-500 dark:text-gray-400">{title}</p>
-
         <p className="mt-2 text-4xl font-bold text-gray-950 dark:text-gray-100">
           {value}
         </p>
-
         {note && <p className="mt-3 text-green-600">{note}</p>}
       </div>
 
@@ -128,13 +53,140 @@ function SummaryCard({
 export default function FinancialsPage() {
   const { activeWorkspace } = useWorkspace();
 
-  const workspaceInvoices = invoices.filter(
+  const [invoiceItems, setInvoiceItems] = useState(defaultInvoices);
+  const [expenseItems, setExpenseItems] = useState(defaultExpenses);
+
+  const [selectedInvoices, setSelectedInvoices] = useState<string[]>([]);
+  const [selectedExpenses, setSelectedExpenses] = useState<string[]>([]);
+
+  const [newInvoiceOpen, setNewInvoiceOpen] = useState(false);
+  const [newExpenseOpen, setNewExpenseOpen] = useState(false);
+
+  const [invoiceClient, setInvoiceClient] = useState("");
+  const [invoiceStatus, setInvoiceStatus] = useState<InvoiceStatus>("Draft");
+  const [invoiceAmount, setInvoiceAmount] = useState("");
+  const [invoiceFileName, setInvoiceFileName] = useState("");
+
+  const [expenseDescription, setExpenseDescription] = useState("");
+  const [expenseCategory, setExpenseCategory] = useState("Materials");
+  const [expenseAmount, setExpenseAmount] = useState("");
+
+  const workspaceInvoices = invoiceItems.filter(
     (invoice) => invoice.workspaceId === activeWorkspace.id
   );
 
-  const workspaceExpenses = expenses.filter(
+  const workspaceExpenses = expenseItems.filter(
     (expense) => expense.workspaceId === activeWorkspace.id
   );
+
+  const workspaceClients = clients.filter(
+    (client) => client.workspaceId === activeWorkspace.id
+  );
+
+  function toggleInvoice(id: string) {
+    setSelectedInvoices((current) =>
+      current.includes(id)
+        ? current.filter((invoiceId) => invoiceId !== id)
+        : [...current, id]
+    );
+  }
+
+  function toggleExpense(id: string) {
+    setSelectedExpenses((current) =>
+      current.includes(id)
+        ? current.filter((expenseId) => expenseId !== id)
+        : [...current, id]
+    );
+  }
+
+  function removeSelectedInvoices() {
+    setInvoiceItems((current) =>
+      current.filter((invoice) => !selectedInvoices.includes(invoice.id))
+    );
+
+    setSelectedInvoices([]);
+  }
+
+  function removeSelectedExpenses() {
+    setExpenseItems((current) =>
+      current.filter(
+        (expense) =>
+          !selectedExpenses.includes(
+            `${expense.workspaceId}-${expense.description}`
+          )
+      )
+    );
+
+    setSelectedExpenses([]);
+  }
+
+  function updateInvoiceStatus(id: string, status: InvoiceStatus) {
+    setInvoiceItems((current) =>
+      current.map((invoice) =>
+        invoice.id === id ? { ...invoice, status } : invoice
+      )
+    );
+  }
+
+  function closeInvoiceModal() {
+    setNewInvoiceOpen(false);
+    setInvoiceClient("");
+    setInvoiceStatus("Draft");
+    setInvoiceAmount("");
+    setInvoiceFileName("");
+  }
+
+  function closeExpenseModal() {
+    setNewExpenseOpen(false);
+    setExpenseDescription("");
+    setExpenseCategory("Materials");
+    setExpenseAmount("");
+  }
+
+  function addInvoice() {
+    if (!invoiceClient.trim()) return;
+
+    const amount = Number(invoiceAmount);
+
+    if (Number.isNaN(amount) || amount <= 0) return;
+
+    const nextInvoiceNumber = invoiceItems.length + 1;
+    const nextInvoiceId = `INV-${String(nextInvoiceNumber).padStart(3, "0")}`;
+
+    setInvoiceItems((current) => [
+      ...current,
+      {
+        id: nextInvoiceId,
+        client: invoiceClient,
+        status: invoiceStatus,
+        amount: formatMoney(amount),
+        workspaceId: activeWorkspace.id,
+        supportingFile: invoiceFileName,
+      },
+    ]);
+
+    closeInvoiceModal();
+  }
+
+  function addExpense() {
+    if (!expenseDescription.trim()) return;
+
+    const amount = Number(expenseAmount);
+
+    if (Number.isNaN(amount) || amount <= 0) return;
+
+    setExpenseItems((current) => [
+      ...current,
+      {
+        description: expenseDescription.trim(),
+        category: expenseCategory,
+        amount: formatMoney(amount),
+        workspaceId: activeWorkspace.id,
+      },
+    ]);
+
+    closeExpenseModal();
+  }
 
   const revenue = workspaceInvoices
     .filter((invoice) => invoice.status === "Paid")
@@ -148,6 +200,8 @@ export default function FinancialsPage() {
     (total, expense) => total + moneyToNumber(expense.amount),
     0
   );
+
+  const profit = revenue - totalExpenses;
 
   return (
     <div className="space-y-8">
@@ -167,7 +221,7 @@ export default function FinancialsPage() {
           value={formatMoney(revenue)}
           icon="$"
           iconClass="bg-green-100 text-green-600 dark:bg-green-900/40 dark:text-green-300"
-          note="Workspace total"
+          note="Paid invoices"
         />
 
         <SummaryCard
@@ -178,15 +232,15 @@ export default function FinancialsPage() {
         />
 
         <SummaryCard
-          title="Outstanding Invoices"
+          title="Outstanding"
           value={formatMoney(outstanding)}
           icon="◷"
           iconClass="bg-orange-100 text-orange-600 dark:bg-orange-900/40 dark:text-orange-300"
         />
 
         <SummaryCard
-          title="Accounts Receivable"
-          value={formatMoney(outstanding)}
+          title="Profit"
+          value={formatMoney(profit)}
           icon="↗"
           iconClass="bg-blue-100 text-blue-600 dark:bg-blue-900/40 dark:text-blue-300"
         />
@@ -194,16 +248,35 @@ export default function FinancialsPage() {
 
       <div className="grid grid-cols-1 gap-8 xl:grid-cols-2">
         <div className="overflow-x-auto rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
-          <div className="border-b border-gray-200 p-6 dark:border-gray-800">
+          <div className="flex items-center justify-between border-b border-gray-200 p-6 dark:border-gray-800">
             <h2 className="text-2xl font-bold text-gray-950 dark:text-gray-100">
               Recent Invoices
             </h2>
+
+            <div className="flex gap-2">
+              <button
+                onClick={() => setNewInvoiceOpen(true)}
+                className="rounded-lg bg-blue-600 px-3 py-2 text-sm text-white hover:bg-blue-700"
+              >
+                + Add Invoice
+              </button>
+
+              <button
+                onClick={removeSelectedInvoices}
+                disabled={selectedInvoices.length === 0}
+                className="rounded-lg bg-red-600 px-3 py-2 text-sm text-white disabled:opacity-50"
+              >
+                Remove
+              </button>
+            </div>
           </div>
 
-          <table className="min-w-[650px] w-full">
+          <table className="min-w-[720px] w-full">
             <thead>
               <tr className="border-b border-gray-200 text-left text-sm uppercase tracking-wide text-gray-500 dark:border-gray-800 dark:text-gray-400">
+                <th className="w-12 px-4 py-4"></th>
                 <th className="px-6 py-4">Invoice</th>
+                <th className="px-6 py-4">Client</th>
                 <th className="px-6 py-4">Status</th>
                 <th className="px-6 py-4 text-right">Amount</th>
               </tr>
@@ -214,14 +287,40 @@ export default function FinancialsPage() {
                 workspaceInvoices.map((invoice) => (
                   <tr
                     key={invoice.id}
-                    className="border-b border-gray-200 text-base lg:text-lg last:border-b-0 dark:border-gray-800"
+                    className="border-b border-gray-200 text-base last:border-b-0 dark:border-gray-800 lg:text-lg"
                   >
+                    <td className="px-4 py-5 text-center">
+                      <input
+                        type="checkbox"
+                        checked={selectedInvoices.includes(invoice.id)}
+                        onChange={() => toggleInvoice(invoice.id)}
+                        className="h-4 w-4"
+                      />
+                    </td>
+
                     <td className="px-6 py-5 font-medium text-gray-950 dark:text-gray-100">
                       {invoice.id}
                     </td>
 
+                    <td className="px-6 py-5 text-gray-500 dark:text-gray-400">
+                      {invoice.client}
+                    </td>
+
                     <td className="px-6 py-5">
-                      <StatusBadge status={invoice.status} />
+                      <select
+                        value={invoice.status}
+                        onChange={(event) =>
+                          updateInvoiceStatus(
+                            invoice.id,
+                            event.target.value as InvoiceStatus
+                          )
+                        }
+                        className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
+                      >
+                        {invoiceStatuses.map((status) => (
+                          <option key={status}>{status}</option>
+                        ))}
+                      </select>
                     </td>
 
                     <td className="px-6 py-5 text-right font-medium text-gray-950 dark:text-gray-100">
@@ -232,7 +331,7 @@ export default function FinancialsPage() {
               ) : (
                 <tr>
                   <td
-                    colSpan={3}
+                    colSpan={5}
                     className="px-6 py-12 text-center text-lg text-gray-500 dark:text-gray-400"
                   >
                     No invoices for {activeWorkspace.name}
@@ -244,15 +343,33 @@ export default function FinancialsPage() {
         </div>
 
         <div className="overflow-x-auto rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
-          <div className="border-b border-gray-200 p-6 dark:border-gray-800">
+          <div className="flex items-center justify-between border-b border-gray-200 p-6 dark:border-gray-800">
             <h2 className="text-2xl font-bold text-gray-950 dark:text-gray-100">
               Recent Expenses
             </h2>
+
+            <div className="flex gap-2">
+              <button
+                onClick={() => setNewExpenseOpen(true)}
+                className="rounded-lg bg-blue-600 px-3 py-2 text-sm text-white hover:bg-blue-700"
+              >
+                + Add Expense
+              </button>
+
+              <button
+                onClick={removeSelectedExpenses}
+                disabled={selectedExpenses.length === 0}
+                className="rounded-lg bg-red-600 px-3 py-2 text-sm text-white disabled:opacity-50"
+              >
+                Remove
+              </button>
+            </div>
           </div>
 
-          <table className="min-w-[650px] w-full">
+          <table className="min-w-[700px] w-full">
             <thead>
               <tr className="border-b border-gray-200 text-left text-sm uppercase tracking-wide text-gray-500 dark:border-gray-800 dark:text-gray-400">
+                <th className="w-12 px-4 py-4"></th>
                 <th className="px-6 py-4">Description</th>
                 <th className="px-6 py-4">Category</th>
                 <th className="px-6 py-4 text-right">Amount</th>
@@ -261,28 +378,41 @@ export default function FinancialsPage() {
 
             <tbody>
               {workspaceExpenses.length > 0 ? (
-                workspaceExpenses.map((expense) => (
-                  <tr
-                    key={expense.description}
-                    className="border-b border-gray-200 text-base lg:text-lg last:border-b-0 dark:border-gray-800"
-                  >
-                    <td className="px-6 py-5 font-medium text-gray-950 dark:text-gray-100">
-                      {expense.description}
-                    </td>
+                workspaceExpenses.map((expense) => {
+                  const expenseId = `${expense.workspaceId}-${expense.description}`;
 
-                    <td className="px-6 py-5 text-gray-500 dark:text-gray-400">
-                      {expense.category}
-                    </td>
+                  return (
+                    <tr
+                      key={expenseId}
+                      className="border-b border-gray-200 text-base last:border-b-0 dark:border-gray-800 lg:text-lg"
+                    >
+                      <td className="px-4 py-5 text-center">
+                        <input
+                          type="checkbox"
+                          checked={selectedExpenses.includes(expenseId)}
+                          onChange={() => toggleExpense(expenseId)}
+                          className="h-4 w-4"
+                        />
+                      </td>
 
-                    <td className="px-6 py-5 text-right font-medium text-red-600 dark:text-red-400">
-                      {expense.amount}
-                    </td>
-                  </tr>
-                ))
+                      <td className="px-6 py-5 font-medium text-gray-950 dark:text-gray-100">
+                        {expense.description}
+                      </td>
+
+                      <td className="px-6 py-5 text-gray-500 dark:text-gray-400">
+                        {expense.category}
+                      </td>
+
+                      <td className="px-6 py-5 text-right font-medium text-red-600 dark:text-red-400">
+                        {expense.amount}
+                      </td>
+                    </tr>
+                  );
+                })
               ) : (
                 <tr>
                   <td
-                    colSpan={3}
+                    colSpan={4}
                     className="px-6 py-12 text-center text-lg text-gray-500 dark:text-gray-400"
                   >
                     No expenses for {activeWorkspace.name}
@@ -293,6 +423,139 @@ export default function FinancialsPage() {
           </table>
         </div>
       </div>
+
+      {newInvoiceOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4">
+          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl dark:bg-gray-900">
+            <div className="mb-6 flex items-center justify-between">
+              <h2 className="text-xl font-bold text-gray-950 dark:text-gray-100">
+                Add Invoice
+              </h2>
+
+              <button
+                onClick={closeInvoiceModal}
+                className="text-2xl text-gray-500"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <select
+                value={invoiceClient}
+                onChange={(event) => setInvoiceClient(event.target.value)}
+                className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800"
+              >
+                <option value="">Select Client</option>
+                {workspaceClients.map((client) => (
+                  <option key={client.id} value={client.name}>
+                    {client.name}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                value={invoiceStatus}
+                onChange={(event) =>
+                  setInvoiceStatus(event.target.value as InvoiceStatus)
+                }
+                className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800"
+              >
+                {invoiceStatuses.map((status) => (
+                  <option key={status}>{status}</option>
+                ))}
+              </select>
+
+              <input
+                type="number"
+                value={invoiceAmount}
+                onChange={(event) => setInvoiceAmount(event.target.value)}
+                placeholder="Amount"
+                className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800"
+              />
+
+              <input
+                type="file"
+                onChange={(event) =>
+                  setInvoiceFileName(event.target.files?.[0]?.name ?? "")
+                }
+                className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800"
+              />
+
+              {invoiceFileName && (
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  Attached: {invoiceFileName}
+                </p>
+              )}
+
+              <button
+                onClick={addInvoice}
+                className="w-full rounded-lg bg-blue-600 py-3 text-white hover:bg-blue-700"
+              >
+                Add Invoice
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {newExpenseOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4">
+          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl dark:bg-gray-900">
+            <div className="mb-6 flex items-center justify-between">
+              <h2 className="text-xl font-bold text-gray-950 dark:text-gray-100">
+                Add Expense
+              </h2>
+
+              <button
+                onClick={closeExpenseModal}
+                className="text-2xl text-gray-500"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <input
+                type="text"
+                value={expenseDescription}
+                onChange={(event) => setExpenseDescription(event.target.value)}
+                placeholder="Description"
+                className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800"
+              />
+
+              <select
+                value={expenseCategory}
+                onChange={(event) => setExpenseCategory(event.target.value)}
+                className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800"
+              >
+                <option>Materials</option>
+                <option>Fuel</option>
+                <option>Equipment</option>
+                <option>Insurance</option>
+                <option>Maintenance</option>
+                <option>Labor</option>
+                <option>Other</option>
+              </select>
+
+              <input
+                type="number"
+                value={expenseAmount}
+                onChange={(event) => setExpenseAmount(event.target.value)}
+                placeholder="Amount"
+                className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800"
+              />
+
+              <button
+                onClick={addExpense}
+                className="w-full rounded-lg bg-blue-600 py-3 text-white hover:bg-blue-700"
+              >
+                Add Expense
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

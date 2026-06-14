@@ -2,10 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Sidebar from "./Sidebar";
-import {
-  useWorkspace,
-  workspaces,
-} from "@/components/WorkspaceContext";
+import { useWorkspace } from "@/components/WorkspaceContext";
 
 export default function AppShell({
   children,
@@ -15,8 +12,17 @@ export default function AppShell({
   const [darkMode, setDarkMode] = useState(false);
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const [userOpen, setUserOpen] = useState(false);
+  const [newWorkspaceOpen, setNewWorkspaceOpen] = useState(false);
+  const [workspaceName, setWorkspaceName] = useState("");
+  const [workspaceType, setWorkspaceType] = useState("Landscaping");
+  const [customWorkspaceType, setCustomWorkspaceType] = useState("");
 
-  const { activeWorkspace, setActiveWorkspace } = useWorkspace();
+  const {
+    workspaces,
+    activeWorkspace,
+    setActiveWorkspace,
+    addWorkspace,
+  } = useWorkspace();
 
   useEffect(() => {
     const savedTheme = localStorage.getItem("frontier-theme");
@@ -104,7 +110,10 @@ export default function AppShell({
                 ))}
 
                 <button
-                  onClick={() => setWorkspaceOpen(false)}
+                  onClick={() => {
+                    setWorkspaceOpen(false);
+                    setNewWorkspaceOpen(true);
+                  }}
                   className="flex w-full items-center gap-4 border-t border-gray-200 px-4 py-4 text-left hover:bg-gray-100 dark:border-gray-700 dark:hover:bg-gray-800"
                 >
                   <span className="text-xl">
@@ -173,6 +182,102 @@ export default function AppShell({
         <main className="flex-1 min-w-max min-h-screen p-3 sm:p-4 lg:p-6">
           {children}
         </main>
+        
+        {newWorkspaceOpen && (
+  <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4">
+    <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl dark:bg-gray-900">
+      <div className="mb-6 flex items-center justify-between">
+        <h2 className="text-xl font-bold">
+          New Workspace
+        </h2>
+
+        <button
+          onClick={() => {
+            setNewWorkspaceOpen(false);
+            setWorkspaceOpen(false);
+            setUserOpen(false);
+            setWorkspaceName("");
+            setWorkspaceType("Landscaping");
+            setCustomWorkspaceType("");
+          }}
+
+          className="text-2xl text-gray-500"
+        >
+          ×
+        </button>
+      </div>
+
+      <div className="space-y-4">
+        <input
+          type="text"
+          value={workspaceName}
+          onChange={(e) => setWorkspaceName(e.target.value)}
+          placeholder="Workspace Name"
+          className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800"
+        />
+
+        <select
+          value={workspaceType}
+          onChange={(e) => setWorkspaceType(e.target.value)}
+          className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800"
+        >
+          <option>Landscaping</option>
+          <option>Tree Service</option>
+          <option>Lawn Care</option>
+          <option>Snow Removal</option>
+          <option>Property Management</option>
+          <option>Construction</option>
+          <option>Auto Repair</option>
+          <option>IT Services</option>
+          <option>Plumbing</option>
+          <option>Electrical</option>
+          <option>Cleaning</option>
+          <option>Restaurant</option>
+          <option>Other</option>
+        </select>
+
+        {workspaceType === "Other" && (
+          <input
+            type="text"
+            value={customWorkspaceType}
+            onChange={(e) =>
+              setCustomWorkspaceType(e.target.value)
+            }
+            placeholder="Specify Business Type"
+            className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800"
+          />
+        )}
+
+        <button
+          onClick={() => {
+            if (!workspaceName.trim()) return;
+
+            const type =
+              workspaceType === "Other"
+                ? customWorkspaceType.trim()
+                : workspaceType;
+            if (!type) return;
+
+            addWorkspace({
+              id: crypto.randomUUID(),
+              name: workspaceName,
+              type,
+            });
+
+            setWorkspaceName("");
+            setWorkspaceType("Landscaping");
+            setCustomWorkspaceType("");
+            setNewWorkspaceOpen(false);
+          }}
+          className="w-full rounded-lg bg-blue-600 py-3 text-white hover:bg-blue-700"
+        >
+          Create Workspace
+        </button>
+      </div>
+    </div>
+  </div>
+)}
+
       </div>
     </div>
   );

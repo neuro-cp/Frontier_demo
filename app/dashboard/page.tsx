@@ -2,94 +2,106 @@
 
 import StatCard from "../../components/Statcard";
 import { useWorkspace } from "@/components/WorkspaceContext";
+import { jobs } from "@/lib/jobs";
+import { clients } from "@/lib/clients";
+import { invoices } from "@/lib/invoices";
+import { inventory } from "@/lib/inventory";
 
-const dashboardData = {
-  landscaping: {
-    activeClients: 24,
-    openQuotes: 8,
-    outstandingInvoices: "$4,200",
-    inventoryAlerts: 3,
-    activity: [
-      "✓ Quote sent to Smith Landscaping",
-      "✓ Invoice paid by Green Valley HOA",
-      "✓ Inventory order submitted",
-      "✓ Job scheduled for Friday",
-    ],
-  },
+function moneyToNumber(value: string) {
+return Number(value.replace(/[$,]/g, ""));
+}
 
-  "snow-removal": {
-    activeClients: 12,
-    openQuotes: 4,
-    outstandingInvoices: "$2,850",
-    inventoryAlerts: 5,
-    activity: [
-      "✓ Salt delivery received",
-      "✓ Snow route assigned",
-      "✓ Invoice paid by City Contract",
-      "✓ Equipment maintenance completed",
-    ],
-  },
-
-  properties: {
-    activeClients: 18,
-    openQuotes: 2,
-    outstandingInvoices: "$7,100",
-    inventoryAlerts: 1,
-    activity: [
-      "✓ New tenant work order created",
-      "✓ Property inspection completed",
-      "✓ HOA invoice generated",
-      "✓ Maintenance request closed",
-    ],
-  },
-};
+function formatMoney(value: number) {
+return `$${value.toLocaleString()}`;
+}
 
 export default function DashboardPage() {
-  const { activeWorkspace } = useWorkspace();
+const { activeWorkspace } = useWorkspace();
 
-  const data =
-    dashboardData[activeWorkspace.id as keyof typeof dashboardData] ??
-    dashboardData.landscaping;
+const workspaceClients = clients.filter(
+(client) => client.workspaceId === activeWorkspace.id
+);
 
-  return (
-    <div>
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold text-gray-950 dark:text-gray-100">
-          Dashboard
-        </h1>
+const workspaceJobs = jobs.filter(
+(job) => job.workspaceId === activeWorkspace.id
+);
 
-        <p className="mt-2 text-gray-500 dark:text-gray-400">
-          {activeWorkspace.name}
-        </p>
-      </div>
+const workspaceInvoices = invoices.filter(
+(invoice) => invoice.workspaceId === activeWorkspace.id
+);
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard title="Active Clients" value={String(data.activeClients)} />
+const workspaceInventory = inventory.filter(
+(item) => item.workspaceId === activeWorkspace.id
+);
 
-        <StatCard title="Open Quotes" value={String(data.openQuotes)} />
+const activeClients = workspaceClients.length;
 
-        <StatCard
-          title="Outstanding Invoices"
-          value={data.outstandingInvoices}
-        />
+const openQuotes = workspaceJobs.filter(
+(job) => job.status === "Quoted"
+).length;
 
-        <StatCard
-          title="Inventory Alerts"
-          value={String(data.inventoryAlerts)}
-        />
-      </div>
+const outstandingInvoices = workspaceInvoices
+.filter((invoice) => invoice.status !== "Paid")
+.reduce(
+(total, invoice) => total + moneyToNumber(invoice.amount),
+0
+);
 
-      <div className="mt-8 rounded-lg bg-white p-6 shadow dark:bg-gray-900">
-        <h2 className="mb-4 text-xl font-semibold text-gray-950 dark:text-gray-100">
-          Recent Activity
-        </h2>
+const inventoryAlerts = workspaceInventory.filter(
+(item) => item.warning
+).length;
 
-        <ul className="space-y-3 break-words text-gray-900 dark:text-gray-100">
-          {data.activity.map((item) => (
-            <li key={item}>{item}</li>
-          ))}
-        </ul>
-      </div>
-    </div>
-  );
+const recentActivity = [
+`✓ ${activeClients} active client(s)`,
+`✓ ${openQuotes} open quote(s)`,
+`✓ ${inventoryAlerts} inventory alert(s)`,
+`✓ ${workspaceInvoices.length} invoice(s) in system`,
+];
+
+return ( <div> <div className="mb-6"> <h1 className="text-3xl font-bold text-gray-950 dark:text-gray-100">
+Dashboard </h1>
+
+```
+    <p className="mt-2 text-gray-500 dark:text-gray-400">
+      {activeWorkspace.name}
+    </p>
+  </div>
+
+  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+    <StatCard
+      title="Active Clients"
+      value={String(activeClients)}
+    />
+
+    <StatCard
+      title="Open Quotes"
+      value={String(openQuotes)}
+    />
+
+    <StatCard
+      title="Outstanding Invoices"
+      value={formatMoney(outstandingInvoices)}
+    />
+
+    <StatCard
+      title="Inventory Alerts"
+      value={String(inventoryAlerts)}
+    />
+  </div>
+
+  <div className="mt-8 rounded-lg bg-white p-6 shadow dark:bg-gray-900">
+    <h2 className="mb-4 text-xl font-semibold text-gray-950 dark:text-gray-100">
+      Recent Activity
+    </h2>
+
+    <ul className="space-y-3 break-words text-gray-900 dark:text-gray-100">
+      {recentActivity.map((item) => (
+        <li key={item}>{item}</li>
+      ))}
+    </ul>
+  </div>
+</div>
+
+
+);
 }
