@@ -68,12 +68,12 @@ export default function Sidebar() {
         >
           {collapsed ? (
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-3xl font-light">
-              ∞
+              ⌖
             </div>
           ) : (
             <div className="flex items-center gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-3xl font-light">
-                ∞
+                ⌖
               </div>
 
               <h1 className="text-2xl font-bold">Frontier</h1>

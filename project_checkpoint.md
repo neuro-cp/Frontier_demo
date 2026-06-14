@@ -47,6 +47,7 @@
   📄 inventory.ts
   📄 invoices.ts
   📄 jobs.ts
+  📄 jobStorage.ts
 📄 next-env.d.ts
 📄 next.config.ts
 📄 package-lock.json
@@ -80,8 +81,10 @@ This version has breaking changes — APIs, conventions, and file structure may 
 ```tsx
 "use client";
 
-import { useState } from "react";
-import { jobs } from "@/lib/jobs";
+import { useEffect, useState } from "react";
+import Link from "next/link";
+
+import { jobs as defaultJobs } from "@/lib/jobs";
 import { useWorkspace } from "@/components/WorkspaceContext";
 
 function getJobColor(status: string) {
@@ -105,9 +108,23 @@ export default function CalendarPage() {
   const { activeWorkspace } = useWorkspace();
 
   const [view, setView] = useState("month");
+  const [jobItems, setJobItems] = useState(defaultJobs);
 
-  const workspaceJobs = jobs
+  useEffect(() => {
+    const savedJobs = localStorage.getItem("frontier-jobs");
+
+    if (savedJobs) {
+      try {
+        setJobItems(JSON.parse(savedJobs));
+      } catch {
+        setJobItems(defaultJobs);
+      }
+    }
+  }, []);
+
+  const workspaceJobs = jobItems
     .filter((job) => job.workspaceId === activeWorkspace.id)
+    .filter((job) => job.date)
     .sort((a, b) => a.date.localeCompare(b.date));
 
   const days = Array.from({ length: 35 }, (_, index) => index + 1);
@@ -127,7 +144,7 @@ export default function CalendarPage() {
 
         <select
           value={view}
-          onChange={(e) => setView(e.target.value)}
+          onChange={(event) => setView(event.target.value)}
           className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
         >
           <option value="month">Month View</option>
@@ -162,18 +179,56 @@ export default function CalendarPage() {
                       </div>
 
                       {dayJobs.map((job) => (
-                        <div
+                        <Link
                           key={job.id}
-                          className={`mt-1 rounded px-2 py-1 text-xs font-medium text-white ${getJobColor(
+                          href={`/jobs/${job.id}`}
+                          className={`mt-1 block rounded px-2 py-1 text-xs font-medium text-white hover:opacity-90 ${getJobColor(
                             job.status
                           )}`}
                         >
                           {job.name}
-                        </div>
+                        </Link>
                       ))}
                     </div>
                   );
                 })}
+              </div>
+            </div>
+
+            <div className="mt-6 flex flex-wrap items-center justify-center gap-6 border-t border-gray-200 pt-4 dark:border-gray-800">
+              <div className="flex items-center gap-2">
+                <div className="h-4 w-4 rounded bg-gray-500" />
+                <span className="text-sm text-gray-700 dark:text-gray-300">
+                  Lead
+                </span>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <div className="h-4 w-4 rounded bg-yellow-500" />
+                <span className="text-sm text-gray-700 dark:text-gray-300">
+                  Quoted
+                </span>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <div className="h-4 w-4 rounded bg-blue-500" />
+                <span className="text-sm text-gray-700 dark:text-gray-300">
+                  Scheduled
+                </span>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <div className="h-4 w-4 rounded bg-green-500" />
+                <span className="text-sm text-gray-700 dark:text-gray-300">
+                  Completed
+                </span>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <div className="h-4 w-4 rounded bg-purple-500" />
+                <span className="text-sm text-gray-700 dark:text-gray-300">
+                  Paid
+                </span>
               </div>
             </div>
           </>
@@ -187,13 +242,14 @@ export default function CalendarPage() {
 
             <div className="space-y-3">
               {workspaceJobs.slice(0, 7).map((job) => (
-                <div
+                <Link
                   key={job.id}
-                  className="rounded-xl border border-gray-200 p-4 dark:border-gray-800"
+                  href={`/jobs/${job.id}`}
+                  className="block rounded-xl border border-gray-200 p-4 hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-800"
                 >
                   <div className="flex items-center justify-between">
                     <div>
-                      <div className="font-semibold text-gray-950 dark:text-gray-100">
+                      <div className="font-semibold text-blue-600 hover:underline dark:text-blue-400">
                         {job.name}
                       </div>
 
@@ -210,7 +266,7 @@ export default function CalendarPage() {
                       {job.status}
                     </span>
                   </div>
-                </div>
+                </Link>
               ))}
             </div>
           </>
@@ -224,13 +280,14 @@ export default function CalendarPage() {
 
             <div className="space-y-3">
               {workspaceJobs.map((job) => (
-                <div
+                <Link
                   key={job.id}
-                  className="rounded-xl border border-gray-200 p-4 dark:border-gray-800"
+                  href={`/jobs/${job.id}`}
+                  className="block rounded-xl border border-gray-200 p-4 hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-800"
                 >
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <div>
-                      <div className="font-semibold text-gray-950 dark:text-gray-100">
+                      <div className="font-semibold text-blue-600 hover:underline dark:text-blue-400">
                         {job.name}
                       </div>
 
@@ -247,7 +304,7 @@ export default function CalendarPage() {
                       {job.status}
                     </span>
                   </div>
-                </div>
+                </Link>
               ))}
             </div>
           </>
@@ -318,76 +375,164 @@ import { useWorkspace } from "@/components/WorkspaceContext";
 import { clients as defaultClients } from "@/lib/clients";
 
 export default function ClientsPage() {
-  const { activeWorkspace } = useWorkspace();
+const { activeWorkspace } = useWorkspace();
 
-  const [clientItems, setClientItems] = useState(defaultClients);
+const [clientItems, setClientItems] = useState(defaultClients);
+const [selectedClients, setSelectedClients] = useState<string[]>([]);
+const [showDeleteModal, setShowDeleteModal] = useState(false);
 
-  const workspaceClients = clientItems.filter(
-    (client) => client.workspaceId === activeWorkspace.id
-  );
+const workspaceClients = clientItems.filter(
+(client) => client.workspaceId === activeWorkspace.id
+);
 
-  return (
-    <div className="space-y-6 text-gray-950 dark:text-gray-100">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-3xl font-bold">Clients</h1>
+function toggleClient(clientId: string) {
+setSelectedClients((current) =>
+current.includes(clientId)
+? current.filter((id) => id !== clientId)
+: [...current, clientId]
+);
+}
 
-          <p className="mt-2 text-gray-500 dark:text-gray-400">
-            {activeWorkspace.name} clients
-          </p>
-        </div>
+function removeSelectedClients() {
+setClientItems(
+clientItems.filter(
+(client) => !selectedClients.includes(client.id)
+)
+);
 
-        <button className="w-full rounded-lg bg-blue-600 px-4 py-2 text-center text-white hover:bg-blue-700 sm:w-auto">
-          + Add Client
-        </button>
-      </div>
 
-      <div className="overflow-x-auto rounded-lg bg-white shadow dark:bg-gray-900">
-        <table className="min-w-[600px] w-full">
-          <thead className="bg-gray-100 dark:bg-gray-800">
-            <tr className="text-gray-700 dark:text-gray-300">
-              <th className="p-4 text-left">Name</th>
-              <th className="p-4 text-left">Status</th>
-              <th className="p-4 text-left">Balance</th>
+setSelectedClients([]);
+setShowDeleteModal(false);
+
+
+}
+
+return ( <div className="space-y-6 text-gray-950 dark:text-gray-100"> <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"> <div> <h1 className="text-3xl font-bold">Clients</h1>
+
+```
+      <p className="mt-2 text-gray-500 dark:text-gray-400">
+        {activeWorkspace.name} clients
+      </p>
+    </div>
+
+    <div className="flex flex-col gap-2 sm:flex-row">
+      <button className="w-full rounded-lg bg-blue-600 px-4 py-2 text-center text-white hover:bg-blue-700 sm:w-auto">
+        + Add Client
+      </button>
+
+      <button
+        onClick={() => setShowDeleteModal(true)}
+        disabled={selectedClients.length === 0}
+        className="w-full rounded-lg bg-red-600 px-4 py-2 text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-gray-400 sm:w-auto"
+      >
+        Remove Selected
+      </button>
+    </div>
+  </div>
+
+  <div className="overflow-x-auto rounded-lg bg-white shadow dark:bg-gray-900">
+    <table className="min-w-[650px] w-full">
+      <thead className="bg-gray-100 dark:bg-gray-800">
+        <tr className="text-gray-700 dark:text-gray-300">
+          <th className="p-4 w-12">
+            <input
+              type="checkbox"
+              checked={
+                workspaceClients.length > 0 &&
+                selectedClients.length === workspaceClients.length
+              }
+              onChange={(e) =>
+                setSelectedClients(
+                  e.target.checked
+                    ? workspaceClients.map((client) => client.id)
+                    : []
+                )
+              }
+            />
+          </th>
+
+          <th className="p-4 text-left">Name</th>
+          <th className="p-4 text-left">Status</th>
+          <th className="p-4 text-left">Balance</th>
+        </tr>
+      </thead>
+
+      <tbody>
+        {workspaceClients.length > 0 ? (
+          workspaceClients.map((client) => (
+            <tr
+              key={client.id}
+              className="border-t border-gray-200 text-gray-900 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-100 dark:hover:bg-gray-800"
+            >
+              <td className="p-4">
+                <input
+                  type="checkbox"
+                  checked={selectedClients.includes(client.id)}
+                  onChange={() => toggleClient(client.id)}
+                />
+              </td>
+
+              <td className="p-4 break-words">
+                <Link
+                  href={`/clients/${client.id}`}
+                  className="text-blue-600 hover:underline dark:text-blue-400"
+                >
+                  {client.name}
+                </Link>
+              </td>
+
+              <td className="p-4">{client.status}</td>
+
+              <td className="p-4">{client.balance}</td>
             </tr>
-          </thead>
+          ))
+        ) : (
+          <tr>
+            <td
+              colSpan={4}
+              className="p-10 text-center text-lg text-gray-500 dark:text-gray-400"
+            >
+              No clients found for {activeWorkspace.name}
+            </td>
+          </tr>
+        )}
+      </tbody>
+    </table>
+  </div>
 
-          <tbody>
-            {workspaceClients.length > 0 ? (
-              workspaceClients.map((client) => (
-                <tr
-                  key={client.id}
-                  className="border-t border-gray-200 text-gray-900 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-100 dark:hover:bg-gray-800"
-                >
-                  <td className="p-4 break-words">
-                    <Link
-                      href={`/clients/${client.id}`}
-                      className="text-blue-600 hover:underline dark:text-blue-400"
-                    >
-                      {client.name}
-                    </Link>
-                  </td>
+  {showDeleteModal && (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+      <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl dark:bg-gray-900">
+        <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">
+          Remove Clients
+        </h2>
 
-                  <td className="p-4">{client.status}</td>
+        <p className="mt-4 text-gray-600 dark:text-gray-400">
+          Are you sure you want to remove the selected client(s)?
+        </p>
 
-                  <td className="p-4">{client.balance}</td>
-                </tr>
-              ))
-            ) : (
-              <tr>
-                <td
-                  colSpan={3}
-                  className="p-10 text-center text-lg text-gray-500 dark:text-gray-400"
-                >
-                  No clients found for {activeWorkspace.name}
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+        <div className="mt-6 flex justify-end gap-3">
+          <button
+            onClick={() => setShowDeleteModal(false)}
+            className="rounded-lg border border-gray-300 px-4 py-2 hover:bg-gray-100 dark:border-gray-700 dark:hover:bg-gray-800"
+          >
+            Cancel
+          </button>
+
+          <button
+            onClick={removeSelectedClients}
+            className="rounded-lg bg-red-600 px-4 py-2 text-white hover:bg-red-700"
+          >
+            Remove
+          </button>
+        </div>
       </div>
     </div>
-  );
+  )}
+</div>
+
+
+);
 }
 ```
 
@@ -396,56 +541,82 @@ export default function ClientsPage() {
 ```tsx
 "use client";
 
+import { useEffect, useState } from "react";
+
 import StatCard from "../../components/Statcard";
 import { useWorkspace } from "@/components/WorkspaceContext";
+import { jobs as defaultJobs } from "@/lib/jobs";
+import { clients } from "@/lib/clients";
+import { invoices } from "@/lib/invoices";
+import { inventory } from "@/lib/inventory";
 
-const dashboardData = {
-  landscaping: {
-    activeClients: 24,
-    openQuotes: 8,
-    outstandingInvoices: "$4,200",
-    inventoryAlerts: 3,
-    activity: [
-      "✓ Quote sent to Smith Landscaping",
-      "✓ Invoice paid by Green Valley HOA",
-      "✓ Inventory order submitted",
-      "✓ Job scheduled for Friday",
-    ],
-  },
+function moneyToNumber(value: string) {
+  return Number(value.replace(/[$,]/g, ""));
+}
 
-  "snow-removal": {
-    activeClients: 12,
-    openQuotes: 4,
-    outstandingInvoices: "$2,850",
-    inventoryAlerts: 5,
-    activity: [
-      "✓ Salt delivery received",
-      "✓ Snow route assigned",
-      "✓ Invoice paid by City Contract",
-      "✓ Equipment maintenance completed",
-    ],
-  },
-
-  properties: {
-    activeClients: 18,
-    openQuotes: 2,
-    outstandingInvoices: "$7,100",
-    inventoryAlerts: 1,
-    activity: [
-      "✓ New tenant work order created",
-      "✓ Property inspection completed",
-      "✓ HOA invoice generated",
-      "✓ Maintenance request closed",
-    ],
-  },
-};
+function formatMoney(value: number) {
+  return `$${value.toLocaleString()}`;
+}
 
 export default function DashboardPage() {
   const { activeWorkspace } = useWorkspace();
 
-  const data =
-    dashboardData[activeWorkspace.id as keyof typeof dashboardData] ??
-    dashboardData.landscaping;
+  const [jobItems, setJobItems] = useState(defaultJobs);
+
+  useEffect(() => {
+    const savedJobs = localStorage.getItem("frontier-jobs");
+
+    if (savedJobs) {
+      try {
+        setJobItems(JSON.parse(savedJobs));
+      } catch {
+        setJobItems(defaultJobs);
+      }
+    }
+  }, []);
+
+  const workspaceClients = clients.filter(
+    (client) => client.workspaceId === activeWorkspace.id
+  );
+
+  const workspaceJobs = jobItems.filter(
+    (job) => job.workspaceId === activeWorkspace.id
+  );
+
+  const workspaceInvoices = invoices.filter(
+    (invoice) => invoice.workspaceId === activeWorkspace.id
+  );
+
+  const workspaceInventory = inventory.filter(
+    (item) => item.workspaceId === activeWorkspace.id
+  );
+
+  const activeClients = workspaceClients.length;
+
+  const openQuotes = workspaceJobs.filter(
+    (job) => job.status === "Quoted"
+  ).length;
+
+  const scheduledJobs = workspaceJobs.filter(
+    (job) => job.status === "Scheduled"
+  ).length;
+
+  const outstandingInvoices = workspaceInvoices
+    .filter((invoice) => invoice.status !== "Paid")
+    .reduce((total, invoice) => total + moneyToNumber(invoice.amount), 0);
+
+  const inventoryAlerts = workspaceInventory.filter(
+    (item) => item.warning
+  ).length;
+
+  const recentActivity = [
+    `✓ ${activeClients} active client(s)`,
+    `✓ ${workspaceJobs.length} total job(s)`,
+    `✓ ${openQuotes} open quote(s)`,
+    `✓ ${scheduledJobs} scheduled job(s)`,
+    `✓ ${inventoryAlerts} inventory alert(s)`,
+    `✓ ${workspaceInvoices.length} invoice(s) in system`,
+  ];
 
   return (
     <div>
@@ -460,19 +631,16 @@ export default function DashboardPage() {
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard title="Active Clients" value={String(data.activeClients)} />
+        <StatCard title="Active Clients" value={String(activeClients)} />
 
-        <StatCard title="Open Quotes" value={String(data.openQuotes)} />
+        <StatCard title="Open Quotes" value={String(openQuotes)} />
 
         <StatCard
           title="Outstanding Invoices"
-          value={data.outstandingInvoices}
+          value={formatMoney(outstandingInvoices)}
         />
 
-        <StatCard
-          title="Inventory Alerts"
-          value={String(data.inventoryAlerts)}
-        />
+        <StatCard title="Inventory Alerts" value={String(inventoryAlerts)} />
       </div>
 
       <div className="mt-8 rounded-lg bg-white p-6 shadow dark:bg-gray-900">
@@ -481,7 +649,7 @@ export default function DashboardPage() {
         </h2>
 
         <ul className="space-y-3 break-words text-gray-900 dark:text-gray-100">
-          {data.activity.map((item) => (
+          {recentActivity.map((item) => (
             <li key={item}>{item}</li>
           ))}
         </ul>
@@ -1299,27 +1467,105 @@ html.dark body {
 ```tsx
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+
 import { useWorkspace } from "@/components/WorkspaceContext";
 import { inventory as defaultInventory } from "@/lib/inventory";
+import { jobs as defaultJobs } from "@/lib/jobs";
+
+type InventoryRow = {
+  name: string;
+  currentQty: number | null;
+  targetQty: number | null;
+  warning: boolean;
+  workspaceId: string;
+  autoGenerated?: boolean;
+};
 
 export default function InventoryPage() {
   const { activeWorkspace } = useWorkspace();
 
-  const [inventoryItems, setInventoryItems] =
-    useState(defaultInventory);
-
-  const [selectedItems, setSelectedItems] =
-    useState<string[]>([]);
+  const [inventoryItems, setInventoryItems] = useState<InventoryRow[]>(
+    defaultInventory
+  );
+  const [jobItems, setJobItems] = useState(defaultJobs);
+  const [selectedItems, setSelectedItems] = useState<string[]>([]);
 
   const [newItemOpen, setNewItemOpen] = useState(false);
   const [itemName, setItemName] = useState("");
   const [currentQty, setCurrentQty] = useState("");
   const [targetQty, setTargetQty] = useState("");
 
+  useEffect(() => {
+    const savedJobs = localStorage.getItem("frontier-jobs");
+
+    if (savedJobs) {
+      try {
+        setJobItems(JSON.parse(savedJobs));
+      } catch {
+        setJobItems(defaultJobs);
+      }
+    }
+  }, []);
+
   const workspaceInventory = inventoryItems.filter(
     (item) => item.workspaceId === activeWorkspace.id
   );
+
+  const activeMaterialJobs = jobItems.filter(
+    (job) =>
+      job.workspaceId === activeWorkspace.id &&
+      (job.status === "Scheduled" || job.status === "Completed")
+  );
+
+  const autoMaterialRows: InventoryRow[] = activeMaterialJobs
+    .flatMap((job) =>
+      job.materials.map((material) => ({
+        name: material.name.trim(),
+        currentQty: null,
+        targetQty: null,
+        warning: true,
+        workspaceId: activeWorkspace.id,
+        autoGenerated: true,
+      }))
+    )
+    .filter((material, index, materials) => {
+      const normalizedName = material.name.toLowerCase();
+
+      return (
+        material.name.length > 0 &&
+        materials.findIndex(
+          (candidate) => candidate.name.toLowerCase() === normalizedName
+        ) === index
+      );
+    });
+
+  const mergedInventory = [
+    ...workspaceInventory,
+    ...autoMaterialRows.filter(
+      (material) =>
+        !workspaceInventory.some(
+          (item) =>
+            item.name.trim().toLowerCase() === material.name.trim().toLowerCase()
+        )
+    ),
+  ];
+
+  function getReservedForItem(itemName: string) {
+    return activeMaterialJobs.flatMap((job) =>
+      job.materials
+        .filter(
+          (material) =>
+            material.name.trim().toLowerCase() === itemName.trim().toLowerCase()
+        )
+        .map((material) => ({
+          jobId: job.id,
+          jobName: job.name,
+          jobStatus: job.status,
+          quantity: material.quantity,
+        }))
+    );
+  }
 
   function toggleItem(itemName: string) {
     setSelectedItems((current) =>
@@ -1331,9 +1577,7 @@ export default function InventoryPage() {
 
   function removeSelectedItems() {
     setInventoryItems((current) =>
-      current.filter(
-        (item) => !selectedItems.includes(item.name)
-      )
+      current.filter((item) => !selectedItems.includes(item.name))
     );
 
     setSelectedItems([]);
@@ -1356,9 +1600,7 @@ export default function InventoryPage() {
     const current = Number(currentQty);
     const target = Number(targetQty);
 
-    if (Number.isNaN(current) || Number.isNaN(target)) {
-      return;
-    }
+    if (Number.isNaN(current) || Number.isNaN(target)) return;
 
     setInventoryItems((existing) => [
       ...existing,
@@ -1383,12 +1625,14 @@ export default function InventoryPage() {
           </h1>
 
           <p className="mt-2 text-gray-500 dark:text-gray-400">
-            Track supplies and materials for {activeWorkspace.name}
+            Scheduled and completed job material needs for{" "}
+            {activeWorkspace.name}
           </p>
         </div>
 
         <div className="flex flex-wrap gap-2">
           <button
+            type="button"
             onClick={() => setNewItemOpen(true)}
             className="rounded-lg bg-blue-600 px-6 py-3 text-white shadow hover:bg-blue-700"
           >
@@ -1396,6 +1640,7 @@ export default function InventoryPage() {
           </button>
 
           <button
+            type="button"
             onClick={removeSelectedItems}
             disabled={selectedItems.length === 0}
             className="rounded-lg bg-red-600 px-6 py-3 text-white shadow hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
@@ -1403,6 +1648,13 @@ export default function InventoryPage() {
             Remove Item
           </button>
         </div>
+      </div>
+
+      <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-200">
+        Inventory demand is calculated only from{" "}
+        <strong>Scheduled</strong> and <strong>Completed</strong> jobs. Lead,
+        Quoted, and Paid jobs do not reserve inventory. Materials from jobs will
+        auto-appear even if no inventory item exists yet.
       </div>
 
       {selectedItems.length > 0 && (
@@ -1421,8 +1673,9 @@ export default function InventoryPage() {
               </h2>
 
               <button
+                type="button"
                 onClick={closeNewItemModal}
-                className="text-2xl text-gray-500"
+                className="text-2xl text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
               >
                 ×
               </button>
@@ -1432,9 +1685,7 @@ export default function InventoryPage() {
               <input
                 type="text"
                 value={itemName}
-                onChange={(event) =>
-                  setItemName(event.target.value)
-                }
+                onChange={(event) => setItemName(event.target.value)}
                 placeholder="Item Name"
                 className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800"
               />
@@ -1442,9 +1693,7 @@ export default function InventoryPage() {
               <input
                 type="number"
                 value={currentQty}
-                onChange={(event) =>
-                  setCurrentQty(event.target.value)
-                }
+                onChange={(event) => setCurrentQty(event.target.value)}
                 placeholder="Current Quantity"
                 className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800"
               />
@@ -1452,14 +1701,13 @@ export default function InventoryPage() {
               <input
                 type="number"
                 value={targetQty}
-                onChange={(event) =>
-                  setTargetQty(event.target.value)
-                }
+                onChange={(event) => setTargetQty(event.target.value)}
                 placeholder="Target Quantity"
                 className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800"
               />
 
               <button
+                type="button"
                 onClick={addInventoryItem}
                 className="w-full rounded-lg bg-blue-600 py-3 text-white hover:bg-blue-700"
               >
@@ -1471,71 +1719,125 @@ export default function InventoryPage() {
       )}
 
       <div className="overflow-x-auto rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
-        <table className="min-w-[700px] w-full">
+        <table className="min-w-[1100px] w-full">
           <thead>
             <tr className="border-b border-gray-200 bg-white text-sm uppercase tracking-wide text-gray-500 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-400">
               <th className="w-12 px-4 py-4"></th>
               <th className="px-6 py-4 text-left">Item Name</th>
               <th className="px-6 py-4 text-center">Current Qty</th>
+              <th className="px-6 py-4 text-center">Reserved</th>
+              <th className="px-6 py-4 text-center">Available</th>
               <th className="px-6 py-4 text-center">Target Qty</th>
+              <th className="px-6 py-4 text-left">Tied Jobs</th>
               <th className="px-6 py-4 text-right">Suggested Order</th>
             </tr>
           </thead>
 
           <tbody>
-            {workspaceInventory.length > 0 ? (
-              workspaceInventory.map((item) => {
+            {mergedInventory.length > 0 ? (
+              mergedInventory.map((item) => {
+                const reservedJobs = getReservedForItem(item.name);
+
+                const reservedQty = reservedJobs.reduce(
+                  (total, reserved) => total + reserved.quantity,
+                  0
+                );
+
+                const availableAfterJobs =
+                  item.currentQty === null ? null : item.currentQty - reservedQty;
+
                 const suggestedOrder =
-                  item.targetQty - item.currentQty;
+                  item.targetQty === null || availableAfterJobs === null
+                    ? null
+                    : Math.max(item.targetQty - availableAfterJobs, 0);
+
+                const warning =
+                  item.currentQty === null ||
+                  item.targetQty === null ||
+                  (availableAfterJobs !== null &&
+                    availableAfterJobs < item.targetQty);
 
                 return (
                   <tr
                     key={`${item.workspaceId}-${item.name}`}
-                    className="border-b border-gray-200 text-base lg:text-lg last:border-b-0 dark:border-gray-800"
+                    className="border-b border-gray-200 text-base last:border-b-0 dark:border-gray-800 lg:text-lg"
                   >
                     <td className="px-4 py-5 text-center">
                       <input
                         type="checkbox"
                         checked={selectedItems.includes(item.name)}
                         onChange={() => toggleItem(item.name)}
-                        className="h-4 w-4"
+                        disabled={item.autoGenerated}
+                        className="h-4 w-4 disabled:cursor-not-allowed disabled:opacity-40"
+                        title={
+                          item.autoGenerated
+                            ? "Auto-generated from job materials"
+                            : undefined
+                        }
                       />
                     </td>
 
                     <td className="px-6 py-5 font-medium text-gray-950 dark:text-gray-100">
                       <div className="flex items-center gap-3">
-                        {item.warning && (
-                          <span className="text-orange-500">
-                            ⚠
-                          </span>
+                        {warning && (
+                          <span className="text-orange-500">⚠</span>
                         )}
 
                         <span>{item.name}</span>
+
+                        {item.autoGenerated && (
+                          <span className="rounded-full bg-blue-100 px-2 py-1 text-xs font-medium text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
+                            Job material
+                          </span>
+                        )}
                       </div>
+                    </td>
+
+                    <td className="px-6 py-5 text-center text-gray-900 dark:text-gray-100">
+                      {item.currentQty ?? "—"}
+                    </td>
+
+                    <td className="px-6 py-5 text-center text-blue-600 dark:text-blue-400">
+                      {reservedQty}
                     </td>
 
                     <td
                       className={`px-6 py-5 text-center ${
-                        item.warning
+                        warning
                           ? "text-red-600 dark:text-red-400"
-                          : "text-gray-900 dark:text-gray-100"
+                          : "text-green-600 dark:text-green-400"
                       }`}
                     >
-                      {item.currentQty}
+                      {availableAfterJobs ?? "—"}
                     </td>
 
                     <td className="px-6 py-5 text-center text-gray-500 dark:text-gray-400">
-                      {item.targetQty}
+                      {item.targetQty ?? "—"}
+                    </td>
+
+                    <td className="px-6 py-5 text-sm text-gray-600 dark:text-gray-400">
+                      {reservedJobs.length > 0 ? (
+                        <div className="space-y-1">
+                          {reservedJobs.map((reserved) => (
+                            <div key={`${reserved.jobId}-${reserved.quantity}`}>
+                              {reserved.quantity} → {reserved.jobName} (
+                              {reserved.jobStatus})
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        "—"
+                      )}
                     </td>
 
                     <td
                       className={`px-6 py-5 text-right ${
-                        item.warning
+                        warning
                           ? "text-orange-600 dark:text-orange-400"
                           : "text-green-600 dark:text-green-400"
                       }`}
                     >
-                      {item.warning ? suggestedOrder : "—"}
+                      {suggestedOrder ?? "—"}
                     </td>
                   </tr>
                 );
@@ -1543,10 +1845,11 @@ export default function InventoryPage() {
             ) : (
               <tr>
                 <td
-                  colSpan={5}
+                  colSpan={8}
                   className="px-6 py-16 text-center text-xl text-gray-500 dark:text-gray-400"
                 >
-                  No inventory items for {activeWorkspace.name}
+                  No inventory items or scheduled job materials for{" "}
+                  {activeWorkspace.name}
                 </td>
               </tr>
             )}
@@ -1561,41 +1864,79 @@ export default function InventoryPage() {
 ## app\jobs\[id]\page.tsx
 
 ```tsx
-import { jobs } from "@/lib/jobs";
+"use client";
 
-export default async function JobPage({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}) {
-  const { id } = await params;
+import { useEffect, useState } from "react";
+import { useParams } from "next/navigation";
 
-  const job = jobs.find((j) => j.id === id);
+import { jobs as defaultJobs } from "@/lib/jobs";
+
+function getStatusClasses(status: string) {
+  switch (status) {
+    case "Lead":
+      return "bg-gray-400 text-gray-900";
+    case "Quoted":
+      return "bg-yellow-100 text-yellow-700";
+    case "Scheduled":
+      return "bg-blue-100 text-blue-700";
+    case "Completed":
+      return "bg-green-100 text-green-700";
+    case "Paid":
+      return "bg-purple-100 text-purple-700";
+    default:
+      return "bg-gray-100 text-gray-700";
+  }
+}
+
+export default function JobPage() {
+  const params = useParams();
+  const id = String(params.id);
+
+  const [jobItems, setJobItems] = useState(defaultJobs);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    const savedJobs = localStorage.getItem("frontier-jobs");
+
+    if (savedJobs) {
+      try {
+        setJobItems(JSON.parse(savedJobs));
+      } catch {
+        setJobItems(defaultJobs);
+      }
+    }
+
+    setLoaded(true);
+  }, []);
+
+  const job = jobItems.find((job) => job.id === id);
+
+  if (!loaded) {
+    return null;
+  }
 
   if (!job) {
     return (
-      <div className="p-6">
-        <h1>Job not found</h1>
+      <div className="space-y-4 p-6 text-gray-950 dark:text-gray-100">
+        <h1 className="text-3xl font-bold">Job not found</h1>
+
+        <p className="text-gray-500 dark:text-gray-400">
+          This job does not exist in the current saved job list.
+        </p>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 text-gray-950 dark:text-gray-100">
       <div>
-        <h1 className="text-3xl font-bold">
-          {job.name}
-        </h1>
+        <h1 className="text-3xl font-bold">{job.name}</h1>
 
-        <p className="text-gray-500">
-          {job.client}
-        </p>
+        <p className="mt-2 text-gray-500 dark:text-gray-400">{job.client}</p>
       </div>
 
-      <div className="bg-white rounded-lg shadow p-6">
-        <h2 className="text-xl font-semibold mb-4">
-          Job Information
-        </h2>
+      <div className="rounded-lg bg-white p-6 shadow dark:bg-gray-900">
+        <h2 className="mb-4 text-xl font-semibold">Job Information</h2>
 
         <div className="space-y-3">
           <p>
@@ -1606,24 +1947,16 @@ export default async function JobPage({
             <strong>Status:</strong>
 
             <span
-              className={`px-3 py-1 rounded-full text-sm font-semibold ${
-                job.status === "Lead"
-                  ? "bg-gray-400 text-gray-700"
-                  : job.status === "Quoted"
-                  ? "bg-yellow-100 text-yellow-700"
-                  : job.status === "Scheduled"
-                  ? "bg-blue-100 text-blue-700"
-                  : job.status === "Completed"
-                  ? "bg-green-100 text-green-700"
-                  : "bg-purple-100 text-purple-700"
-              }`}
+              className={`rounded-full px-3 py-1 text-sm font-semibold ${getStatusClasses(
+                job.status
+              )}`}
             >
               {job.status}
             </span>
           </div>
 
           <p>
-            <strong>Scheduled Date:</strong> {job.date}
+            <strong>Scheduled Date:</strong> {job.date || "—"}
           </p>
 
           <p>
@@ -1632,32 +1965,34 @@ export default async function JobPage({
         </div>
       </div>
 
-      <div className="bg-white rounded-lg shadow p-6">
-        <h2 className="text-xl font-semibold mb-4">
-          Materials
-        </h2>
+      <div className="rounded-lg bg-white p-6 shadow dark:bg-gray-900">
+        <h2 className="mb-4 text-xl font-semibold">Materials</h2>
 
-        <ul className="list-disc ml-6">
-          <li>5 bags mulch</li>
-          <li>Fertilizer</li>
-          <li>Trimmer line</li>
-        </ul>
+        {job.materials && job.materials.length > 0 ? (
+          <ul className="ml-6 list-disc">
+            {job.materials.map((material, index) => (
+              <li key={`${material.name}-${index}`}>
+                {material.quantity} × {material.name}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-gray-500 dark:text-gray-400">
+            No materials added.
+          </p>
+        )}
       </div>
 
-      <div className="bg-white rounded-lg shadow p-6">
-        <h2 className="text-xl font-semibold mb-4">
-          Notes
-        </h2>
+      <div className="rounded-lg bg-white p-6 shadow dark:bg-gray-900">
+        <h2 className="mb-4 text-xl font-semibold">Notes</h2>
 
-        <p>
-          Customer requested cleanup around front flower beds.
+        <p className="whitespace-pre-wrap text-gray-700 dark:text-gray-300">
+          {job.notes || "No notes added."}
         </p>
       </div>
 
-      <div className="bg-white rounded-lg shadow p-6">
-        <h2 className="text-xl font-semibold mb-4">
-          Invoice
-        </h2>
+      <div className="rounded-lg bg-white p-6 shadow dark:bg-gray-900">
+        <h2 className="mb-4 text-xl font-semibold">Invoice</h2>
 
         <p>Total: {job.value}</p>
         <p>Status: Unpaid</p>
@@ -1770,181 +2105,480 @@ export default function NewJobPage() {
 ```tsx
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
-import { jobs } from "@/lib/jobs";
+
 import { useWorkspace } from "@/components/WorkspaceContext";
+import { jobs as defaultJobs, JobMaterial, JobStatus } from "@/lib/jobs";
+import { clients } from "@/lib/clients";
 
-type Job = {
-  id: string;
-  name: string;
-};
-
-function JobColumn({
-  title,
-  jobs,
-  selectedJobs,
-  toggleJob,
-}: {
-  title: string;
-  jobs: Job[];
-  selectedJobs: string[];
-  toggleJob: (id: string) => void;
-}) {
-  return (
-    <div className="rounded-xl bg-white p-4 shadow dark:bg-gray-900">
-      <h2 className="mb-4 text-lg font-bold text-gray-900 dark:text-gray-100">
-        {title}
-      </h2>
-
-      <div className="space-y-3">
-        {jobs.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-gray-300 p-3 text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
-            No jobs
-          </div>
-        ) : (
-          jobs.map((job) => (
-            <div
-              key={job.id}
-              className="rounded-lg bg-gray-100 p-3 text-gray-900 transition hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
-            >
-              <div className="flex items-center gap-3">
-                <input
-                  type="checkbox"
-                  checked={selectedJobs.includes(job.id)}
-                  onChange={() => toggleJob(job.id)}
-                  className="h-4 w-4"
-                />
-
-                <Link
-                  href={`/jobs/${job.id}`}
-                  className="block flex-1"
-                >
-                  {job.name}
-                </Link>
-              </div>
-            </div>
-          ))
-        )}
-      </div>
-    </div>
-  );
+function getStatusColor(status: JobStatus) {
+  switch (status) {
+    case "Lead":
+      return "bg-gray-500";
+    case "Quoted":
+      return "bg-yellow-500";
+    case "Scheduled":
+      return "bg-blue-500";
+    case "Completed":
+      return "bg-green-500";
+    case "Paid":
+      return "bg-purple-500";
+    default:
+      return "bg-gray-500";
+  }
 }
 
 export default function JobsPage() {
   const { activeWorkspace } = useWorkspace();
 
+  const [jobItems, setJobItems] = useState(defaultJobs);
   const [selectedJobs, setSelectedJobs] = useState<string[]>([]);
+  const [newJobOpen, setNewJobOpen] = useState(false);
 
-  const toggleJob = (id: string) => {
-    setSelectedJobs((prev) =>
-      prev.includes(id)
-        ? prev.filter((jobId) => jobId !== id)
-        : [...prev, id]
-    );
-  };
+  const [client, setClient] = useState("");
+  const [jobName, setJobName] = useState("");
+  const [status, setStatus] = useState<JobStatus>("Lead");
+  const [value, setValue] = useState("");
+  const [date, setDate] = useState("");
+  const [notes, setNotes] = useState("");
 
-  const workspaceJobs = jobs.filter(
+  const [materialName, setMaterialName] = useState("");
+  const [materialQuantity, setMaterialQuantity] = useState("");
+  const [materials, setMaterials] = useState<JobMaterial[]>([]);
+
+  useEffect(() => {
+    const savedJobs = localStorage.getItem("frontier-jobs");
+
+    if (savedJobs) {
+      try {
+        setJobItems(JSON.parse(savedJobs));
+      } catch {
+        setJobItems(defaultJobs);
+      }
+    }
+  }, []);
+
+  const workspaceClients = clients.filter(
+    (client) => client.workspaceId === activeWorkspace.id
+  );
+
+  const workspaceJobs = jobItems.filter(
     (job) => job.workspaceId === activeWorkspace.id
   );
 
-  const lead = workspaceJobs.filter((job) => job.status === "Lead");
-  const quoted = workspaceJobs.filter((job) => job.status === "Quoted");
-  const scheduled = workspaceJobs.filter((job) => job.status === "Scheduled");
-  const completed = workspaceJobs.filter((job) => job.status === "Completed");
-  const paid = workspaceJobs.filter((job) => job.status === "Paid");
+  const allWorkspaceJobsSelected =
+    workspaceJobs.length > 0 &&
+    workspaceJobs.every((job) => selectedJobs.includes(job.id));
+
+  function saveJobs(updatedJobs: typeof defaultJobs) {
+    setJobItems(updatedJobs);
+    localStorage.setItem("frontier-jobs", JSON.stringify(updatedJobs));
+  }
+
+  function resetForm() {
+    setClient("");
+    setJobName("");
+    setStatus("Lead");
+    setValue("");
+    setDate("");
+    setNotes("");
+    setMaterialName("");
+    setMaterialQuantity("");
+    setMaterials([]);
+  }
+
+  function closeNewJobBox() {
+    setNewJobOpen(false);
+    resetForm();
+  }
+
+  function toggleJob(jobId: string) {
+    setSelectedJobs((current) =>
+      current.includes(jobId)
+        ? current.filter((id) => id !== jobId)
+        : [...current, jobId]
+    );
+  }
+
+  function toggleAllWorkspaceJobs() {
+    if (allWorkspaceJobsSelected) {
+      setSelectedJobs((current) =>
+        current.filter(
+          (jobId) => !workspaceJobs.some((job) => job.id === jobId)
+        )
+      );
+
+      return;
+    }
+
+    setSelectedJobs((current) => {
+      const workspaceJobIds = workspaceJobs.map((job) => job.id);
+      const preservedOtherWorkspaceSelections = current.filter(
+        (jobId) => !workspaceJobIds.includes(jobId)
+      );
+
+      return [...preservedOtherWorkspaceSelections, ...workspaceJobIds];
+    });
+  }
+
+  function deleteSelectedJobs() {
+    const updatedJobs = jobItems.filter(
+      (job) => !selectedJobs.includes(job.id)
+    );
+
+    saveJobs(updatedJobs);
+    setSelectedJobs([]);
+  }
+
+  function addMaterial() {
+    if (!materialName.trim()) return;
+
+    const quantity = Number(materialQuantity);
+    if (Number.isNaN(quantity) || quantity <= 0) return;
+
+    setMaterials((current) => [
+      ...current,
+      {
+        name: materialName.trim(),
+        quantity,
+      },
+    ]);
+
+    setMaterialName("");
+    setMaterialQuantity("");
+  }
+
+  function removeMaterial(indexToRemove: number) {
+    setMaterials((current) =>
+      current.filter((_, index) => index !== indexToRemove)
+    );
+  }
+
+  function createJob(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!client.trim() || !jobName.trim()) return;
+
+    const formattedValue = value.trim()
+      ? value.trim().startsWith("$")
+        ? value.trim()
+        : `$${value.trim()}`
+      : "$0";
+
+    const newJob = {
+      id: crypto.randomUUID(),
+      workspaceId: activeWorkspace.id,
+      name: jobName.trim(),
+      client,
+      status,
+      value: formattedValue,
+      date,
+      materials,
+      notes,
+    };
+
+    saveJobs([...jobItems, newJob]);
+    closeNewJobBox();
+  }
 
   return (
     <div className="space-y-6 text-gray-950 dark:text-gray-100">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-3xl font-bold">
-            Jobs
-          </h1>
+          <h1 className="text-3xl font-bold">Jobs</h1>
 
           <p className="mt-2 text-gray-500 dark:text-gray-400">
-            {activeWorkspace.name}
+            Jobs for {activeWorkspace.name}
           </p>
         </div>
 
-        <div className="flex flex-wrap gap-2">
-          <Link
-            href="/jobs/new"
-            className="rounded-lg bg-blue-600 px-4 py-3 text-center text-white hover:bg-blue-700"
-          >
-            + Add Job
-          </Link>
-
+        <div className="flex flex-col gap-2 sm:flex-row">
           <button
-            disabled={selectedJobs.length === 0}
-            className="rounded-lg bg-green-600 px-4 py-3 text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
+            type="button"
+            onClick={() => setNewJobOpen(true)}
+            className="rounded-lg bg-blue-600 px-6 py-3 text-white hover:bg-blue-700"
           >
-            ✓ Complete
+            + Add New Job
           </button>
 
           <button
+            type="button"
+            onClick={deleteSelectedJobs}
             disabled={selectedJobs.length === 0}
-            className="rounded-lg bg-red-600 px-4 py-3 text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-lg bg-red-600 px-6 py-3 text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            Remove
+            Delete Job
           </button>
         </div>
       </div>
 
       {selectedJobs.length > 0 && (
-        <div className="rounded-xl bg-gray-900 p-4 text-white">
-          <div className="flex flex-wrap items-center gap-3">
-            <span className="font-medium">
-              {selectedJobs.length} job
-              {selectedJobs.length !== 1 ? "s" : ""} selected
-            </span>
-
-            <button className="rounded bg-green-600 px-3 py-2 text-sm hover:bg-green-700">
-              Mark Complete
-            </button>
-
-            <button className="rounded bg-red-600 px-3 py-2 text-sm hover:bg-red-700">
-              Delete
-            </button>
-          </div>
+        <div className="rounded-lg bg-gray-900 p-4 text-white">
+          {selectedJobs.length} job{selectedJobs.length === 1 ? "" : "s"} selected
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 2xl:grid-cols-5">
-        <JobColumn
-          title="Lead"
-          jobs={lead}
-          selectedJobs={selectedJobs}
-          toggleJob={toggleJob}
-        />
+      {newJobOpen && (
+        <div className="rounded-lg bg-white p-6 shadow dark:bg-gray-900">
+          <div className="mb-6 flex items-center justify-between">
+            <h2 className="text-xl font-bold">Add New Job</h2>
 
-        <JobColumn
-          title="Quoted"
-          jobs={quoted}
-          selectedJobs={selectedJobs}
-          toggleJob={toggleJob}
-        />
+            <button
+              type="button"
+              onClick={closeNewJobBox}
+              className="text-2xl text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+            >
+              ×
+            </button>
+          </div>
 
-        <JobColumn
-          title="Scheduled"
-          jobs={scheduled}
-          selectedJobs={selectedJobs}
-          toggleJob={toggleJob}
-        />
+          <form onSubmit={createJob} className="space-y-6">
+            <div>
+              <label className="mb-2 block text-sm font-medium">Client</label>
 
-        <JobColumn
-          title="Completed"
-          jobs={completed}
-          selectedJobs={selectedJobs}
-          toggleJob={toggleJob}
-        />
+              <select
+                value={client}
+                onChange={(event) => setClient(event.target.value)}
+                required
+                className="w-full rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800"
+              >
+                <option value="">Select Client</option>
 
-        <JobColumn
-          title="Paid"
-          jobs={paid}
-          selectedJobs={selectedJobs}
-          toggleJob={toggleJob}
-        />
+                {workspaceClients.map((client) => (
+                  <option key={client.id} value={client.name}>
+                    {client.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="mb-2 block text-sm font-medium">
+                Job Name
+              </label>
+
+              <input
+                type="text"
+                value={jobName}
+                onChange={(event) => setJobName(event.target.value)}
+                placeholder="Spring Cleanup"
+                required
+                className="w-full rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800"
+              />
+            </div>
+
+            <div>
+              <label className="mb-2 block text-sm font-medium">Status</label>
+
+              <select
+                value={status}
+                onChange={(event) =>
+                  setStatus(event.target.value as JobStatus)
+                }
+                className="w-full rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800"
+              >
+                <option>Lead</option>
+                <option>Quoted</option>
+                <option>Scheduled</option>
+                <option>Completed</option>
+                <option>Paid</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="mb-2 block text-sm font-medium">
+                Scheduled Date
+              </label>
+
+              <input
+                type="date"
+                value={date}
+                onChange={(event) => setDate(event.target.value)}
+                className="w-full rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800"
+              />
+            </div>
+
+            <div>
+              <label className="mb-2 block text-sm font-medium">
+                Estimated Value
+              </label>
+
+              <input
+                type="number"
+                value={value}
+                onChange={(event) => setValue(event.target.value)}
+                placeholder="450"
+                className="w-full rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800"
+              />
+            </div>
+
+            <div className="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
+              <h3 className="text-xl font-semibold">Materials</h3>
+
+              <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-[1fr_160px_auto]">
+                <input
+                  type="text"
+                  value={materialName}
+                  onChange={(event) => setMaterialName(event.target.value)}
+                  placeholder="Material name"
+                  className="rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800"
+                />
+
+                <input
+                  type="number"
+                  value={materialQuantity}
+                  onChange={(event) =>
+                    setMaterialQuantity(event.target.value)
+                  }
+                  placeholder="Quantity"
+                  className="rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800"
+                />
+
+                <button
+                  type="button"
+                  onClick={addMaterial}
+                  className="rounded-lg bg-blue-600 px-5 py-3 text-white hover:bg-blue-700"
+                >
+                  Add Material
+                </button>
+              </div>
+
+              <div className="mt-4 space-y-2">
+                {materials.length > 0 ? (
+                  materials.map((material, index) => (
+                    <div
+                      key={`${material.name}-${index}`}
+                      className="flex items-center justify-between rounded-lg bg-gray-100 p-3 dark:bg-gray-800"
+                    >
+                      <span>
+                        {material.quantity} × {material.name}
+                      </span>
+
+                      <button
+                        type="button"
+                        onClick={() => removeMaterial(index)}
+                        className="text-sm text-red-600 hover:underline dark:text-red-400"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                    No materials added yet.
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div>
+              <label className="mb-2 block text-sm font-medium">Notes</label>
+
+              <textarea
+                rows={5}
+                value={notes}
+                onChange={(event) => setNotes(event.target.value)}
+                placeholder="Job details..."
+                className="w-full rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800"
+              />
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                type="submit"
+                className="rounded-lg bg-blue-600 px-6 py-3 text-white hover:bg-blue-700"
+              >
+                Create Job
+              </button>
+
+              <button
+                type="button"
+                onClick={closeNewJobBox}
+                className="rounded-lg bg-red-600 px-6 py-3 text-white hover:bg-red-700"
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      <div className="overflow-x-auto rounded-lg bg-white shadow dark:bg-gray-900">
+        <table className="min-w-[820px] w-full">
+          <thead className="bg-gray-100 dark:bg-gray-800">
+            <tr className="text-left text-gray-700 dark:text-gray-300">
+              <th className="w-12 p-4">
+                <input
+                  type="checkbox"
+                  checked={allWorkspaceJobsSelected}
+                  onChange={toggleAllWorkspaceJobs}
+                  disabled={workspaceJobs.length === 0}
+                  className="h-4 w-4"
+                />
+              </th>
+              <th className="p-4">Job</th>
+              <th className="p-4">Client</th>
+              <th className="p-4">Status</th>
+              <th className="p-4">Date</th>
+              <th className="p-4 text-right">Value</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            {workspaceJobs.length > 0 ? (
+              workspaceJobs.map((job) => (
+                <tr
+                  key={job.id}
+                  className="border-t border-gray-200 dark:border-gray-700"
+                >
+                  <td className="p-4">
+                    <input
+                      type="checkbox"
+                      checked={selectedJobs.includes(job.id)}
+                      onChange={() => toggleJob(job.id)}
+                      className="h-4 w-4"
+                    />
+                  </td>
+
+                  <td className="p-4 font-medium">
+                    <Link
+                      href={`/jobs/${job.id}`}
+                      className="text-blue-600 hover:underline dark:text-blue-400"
+                    >
+                      {job.name}
+                    </Link>
+                  </td>
+
+                  <td className="p-4">{job.client}</td>
+
+                  <td className="p-4">
+                    <span
+                      className={`rounded px-3 py-1 text-xs font-medium text-white ${getStatusColor(
+                        job.status
+                      )}`}
+                    >
+                      {job.status}
+                    </span>
+                  </td>
+
+                  <td className="p-4">{job.date || "—"}</td>
+
+                  <td className="p-4 text-right font-medium">{job.value}</td>
+                </tr>
+              ))
+            ) : (
+              <tr>
+                <td
+                  colSpan={6}
+                  className="p-10 text-center text-lg text-gray-500 dark:text-gray-400"
+                >
+                  No jobs found for {activeWorkspace.name}
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
       </div>
     </div>
   );
@@ -2307,14 +2941,46 @@ export default function LogisticsPage() {
 ```tsx
 export default function Home() {
   return (
-    <main className="min-h-screen p-10">
-      <h1 className="text-5xl font-bold">
-        Frontier
-      </h1>
+    <main className="flex min-h-screen items-center justify-center px-6">
+      <div className="text-center">
+        <div className="mt-6 text-8xl font-black text-blue-500">
+          ⌖
+        </div>
 
-      <p className="mt-4 text-gray-500">
-        Business Operations Platform
-      </p>
+        <h1 className="mt-4 text-6xl font-black tracking-[0.25em] text-gray-950 dark:text-gray-100">
+          FRONTIER
+        </h1>
+
+        <p className="mt-4 text-lg text-gray-500 dark:text-gray-400">
+          Business Operations Platform
+        </p>
+
+        <div className="mt-8 inline-flex rounded-full border border-green-500 px-5 py-2">
+          <span className="animate-pulse font-mono text-sm text-green-400">
+            SYSTEM ONLINE _
+          </span>
+        </div>
+
+        <div className="mt-10 text-sm tracking-widest text-gray-500 dark:text-gray-400">
+          Built for the New Frontier.
+        </div>
+
+        <p className="mt-16 text-center text-xs tracking-wide text-gray-500 dark:text-gray-400">
+          © 2026 Thompson Ventures MI. All Rights Reserved.
+        </p>
+
+        <p className="mt-3 text-center">
+          <a
+            href="https://mail.google.com/mail/?view=cm&fs=1&to=thompsonrelay@proton.me"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-sm font-medium text-blue-500 hover:text-blue-400 hover:underline"
+          >
+            Contact Us
+          </a>
+        </p>
+
+      </div>
     </main>
   );
 }
@@ -2791,9 +3457,15 @@ export default function AppShell({
           className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800"
         >
           <option>Landscaping</option>
+          <option>Tree Service</option>
+          <option>Lawn Care</option>
           <option>Snow Removal</option>
           <option>Property Management</option>
           <option>Construction</option>
+          <option>Auto Repair</option>
+          <option>IT Services</option>
+          <option>Plumbing</option>
+          <option>Electrical</option>
           <option>Cleaning</option>
           <option>Restaurant</option>
           <option>Other</option>
@@ -3621,9 +4293,32 @@ export const invoices: Invoice[] = [
 ## lib\jobs.ts
 
 ```typescript
-export const jobs = [
-  // LANDSCAPING
+export type JobStatus =
+  | "Lead"
+  | "Quoted"
+  | "Scheduled"
+  | "Completed"
+  | "Paid";
 
+export type JobMaterial = {
+  name: string;
+  quantity: number;
+};
+
+export type Job = {
+  id: string;
+  workspaceId: string;
+  name: string;
+  client: string;
+  status: JobStatus;
+  value: string;
+  date: string;
+  materials: JobMaterial[];
+  notes?: string;
+};
+
+export const jobs: Job[] = [
+  // LANDSCAPING
   {
     id: "1",
     workspaceId: "landscaping",
@@ -3632,6 +4327,11 @@ export const jobs = [
     status: "Lead",
     value: "$200",
     date: "2026-06-10",
+    materials: [
+      { name: "Mulch (cubic yards)", quantity: 2 },
+      { name: "Fertilizer (50lb bags)", quantity: 1 },
+    ],
+    notes: "Initial lead for residential landscaping work.",
   },
   {
     id: "2",
@@ -3641,6 +4341,11 @@ export const jobs = [
     status: "Lead",
     value: "$350",
     date: "2026-06-12",
+    materials: [
+      { name: "Gasoline (gallons)", quantity: 4 },
+      { name: "Trimmer Line", quantity: 1 },
+    ],
+    notes: "Needs follow-up before quote is finalized.",
   },
   {
     id: "3",
@@ -3650,6 +4355,12 @@ export const jobs = [
     status: "Quoted",
     value: "$1,500",
     date: "2026-06-14",
+    materials: [
+      { name: "Mulch (cubic yards)", quantity: 10 },
+      { name: "Topsoil (cubic yards)", quantity: 5 },
+      { name: "Fertilizer (50lb bags)", quantity: 4 },
+    ],
+    notes: "HOA cleanup quote submitted.",
   },
   {
     id: "4",
@@ -3659,6 +4370,12 @@ export const jobs = [
     status: "Scheduled",
     value: "$450",
     date: "2026-06-15",
+    materials: [
+      { name: "Mulch (cubic yards)", quantity: 5 },
+      { name: "Fertilizer (50lb bags)", quantity: 1 },
+      { name: "Trimmer Line", quantity: 1 },
+    ],
+    notes: "Customer requested cleanup around front flower beds.",
   },
   {
     id: "5",
@@ -3668,6 +4385,11 @@ export const jobs = [
     status: "Completed",
     value: "$120",
     date: "2026-06-18",
+    materials: [
+      { name: "Gasoline (gallons)", quantity: 3 },
+      { name: "Trimmer Line", quantity: 1 },
+    ],
+    notes: "Weekly service completed.",
   },
   {
     id: "6",
@@ -3677,10 +4399,14 @@ export const jobs = [
     status: "Paid",
     value: "$800",
     date: "2026-06-17",
+    materials: [
+      { name: "Mulch (cubic yards)", quantity: 8 },
+      { name: "Topsoil (cubic yards)", quantity: 2 },
+    ],
+    notes: "Paid mulch installation job.",
   },
 
   // SNOW REMOVAL
-
   {
     id: "7",
     workspaceId: "snow-removal",
@@ -3689,6 +4415,11 @@ export const jobs = [
     status: "Lead",
     value: "$3,500",
     date: "2026-11-01",
+    materials: [
+      { name: "Salt Bags", quantity: 20 },
+      { name: "Ice Melt Buckets", quantity: 4 },
+    ],
+    notes: "Seasonal snow removal lead.",
   },
   {
     id: "8",
@@ -3698,6 +4429,11 @@ export const jobs = [
     status: "Quoted",
     value: "$6,800",
     date: "2026-11-05",
+    materials: [
+      { name: "Salt Bags", quantity: 40 },
+      { name: "Fuel (gallons)", quantity: 10 },
+    ],
+    notes: "Commercial lot bid submitted.",
   },
   {
     id: "9",
@@ -3707,6 +4443,12 @@ export const jobs = [
     status: "Scheduled",
     value: "$9,200",
     date: "2026-11-10",
+    materials: [
+      { name: "Salt Bags", quantity: 50 },
+      { name: "Ice Melt Buckets", quantity: 8 },
+      { name: "Fuel (gallons)", quantity: 12 },
+    ],
+    notes: "Scheduled snow removal contract.",
   },
   {
     id: "10",
@@ -3716,6 +4458,12 @@ export const jobs = [
     status: "Completed",
     value: "$650",
     date: "2026-11-12",
+    materials: [
+      { name: "Salt Bags", quantity: 12 },
+      { name: "Fuel (gallons)", quantity: 5 },
+      { name: "Hydraulic Fluid", quantity: 1 },
+    ],
+    notes: "Emergency salt run completed.",
   },
   {
     id: "11",
@@ -3725,10 +4473,14 @@ export const jobs = [
     status: "Paid",
     value: "$2,400",
     date: "2026-11-15",
+    materials: [
+      { name: "Salt Bags", quantity: 25 },
+      { name: "Fuel (gallons)", quantity: 8 },
+    ],
+    notes: "Paid snow clearing job.",
   },
 
   // PROPERTIES
-
   {
     id: "12",
     workspaceId: "properties",
@@ -3737,6 +4489,11 @@ export const jobs = [
     status: "Lead",
     value: "$1,200",
     date: "2026-07-01",
+    materials: [
+      { name: "Paint (gallons)", quantity: 3 },
+      { name: "Light Bulbs", quantity: 4 },
+    ],
+    notes: "Potential apartment turnover job.",
   },
   {
     id: "13",
@@ -3746,6 +4503,11 @@ export const jobs = [
     status: "Quoted",
     value: "$950",
     date: "2026-07-03",
+    materials: [
+      { name: "HVAC Filters", quantity: 6 },
+      { name: "Smoke Detectors", quantity: 2 },
+    ],
+    notes: "Inspection quote submitted.",
   },
   {
     id: "14",
@@ -3755,6 +4517,11 @@ export const jobs = [
     status: "Scheduled",
     value: "$8,500",
     date: "2026-07-10",
+    materials: [
+      { name: "Paint (gallons)", quantity: 8 },
+      { name: "Light Bulbs", quantity: 10 },
+    ],
+    notes: "Scheduled parking lot maintenance.",
   },
   {
     id: "15",
@@ -3764,6 +4531,11 @@ export const jobs = [
     status: "Completed",
     value: "$2,100",
     date: "2026-07-12",
+    materials: [
+      { name: "Smoke Detectors", quantity: 3 },
+      { name: "Air Fresheners", quantity: 5 },
+    ],
+    notes: "Repair completed.",
   },
   {
     id: "16",
@@ -3773,8 +4545,42 @@ export const jobs = [
     status: "Paid",
     value: "$4,750",
     date: "2026-07-15",
+    materials: [
+      { name: "HVAC Filters", quantity: 8 },
+      { name: "Light Bulbs", quantity: 12 },
+      { name: "Air Fresheners", quantity: 6 },
+    ],
+    notes: "Paid quarterly maintenance job.",
   },
 ];
+```
+
+## lib\jobStorage.ts
+
+```typescript
+import { jobs as defaultJobs } from "@/lib/jobs";
+
+export function getStoredJobs() {
+  if (typeof window === "undefined") {
+    return defaultJobs;
+  }
+
+  const savedJobs = localStorage.getItem("frontier-jobs");
+
+  if (!savedJobs) {
+    return defaultJobs;
+  }
+
+  try {
+    return JSON.parse(savedJobs);
+  } catch {
+    return defaultJobs;
+  }
+}
+
+export function saveStoredJobs(jobs: typeof defaultJobs) {
+  localStorage.setItem("frontier-jobs", JSON.stringify(jobs));
+}
 ```
 
 ## next-env.d.ts
