@@ -22,6 +22,10 @@
   📄 globals.css
   📁 inventory
     📄 page.tsx
+  📁 invoices
+    📁 new
+      📄 page.tsx
+    📄 page.tsx
   📁 jobs
     📁 [id]
       📄 page.tsx
@@ -104,11 +108,27 @@ function getJobColor(status: string) {
   }
 }
 
+function formatMonthLabel(date: Date) {
+  return date.toLocaleDateString("en-US", {
+    month: "long",
+    year: "numeric",
+  });
+}
+
+function formatDateString(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+}
+
 export default function CalendarPage() {
   const { activeWorkspace } = useWorkspace();
 
   const [view, setView] = useState("month");
   const [jobItems, setJobItems] = useState(defaultJobs);
+  const [currentMonth, setCurrentMonth] = useState(new Date(2026, 5, 1));
 
   useEffect(() => {
     const savedJobs = localStorage.getItem("frontier-jobs");
@@ -127,43 +147,119 @@ export default function CalendarPage() {
     .filter((job) => job.date)
     .sort((a, b) => a.date.localeCompare(b.date));
 
-  const days = Array.from({ length: 35 }, (_, index) => index + 1);
+  const monthYear = currentMonth.getFullYear();
+  const monthIndex = currentMonth.getMonth();
+
+  const firstDayOfMonth = new Date(monthYear, monthIndex, 1);
+  const firstWeekdayIndex = firstDayOfMonth.getDay();
+  const daysInMonth = new Date(monthYear, monthIndex + 1, 0).getDate();
+
+  const calendarDays = Array.from({ length: 42 }, (_, index) => {
+    const dayNumber = index - firstWeekdayIndex + 1;
+
+    if (dayNumber < 1 || dayNumber > daysInMonth) {
+      return null;
+    }
+
+    return new Date(monthYear, monthIndex, dayNumber);
+  });
+
+  function goToPreviousMonth() {
+    setCurrentMonth(new Date(monthYear, monthIndex - 1, 1));
+  }
+
+  function goToNextMonth() {
+    setCurrentMonth(new Date(monthYear, monthIndex + 1, 1));
+  }
+
+  function goToToday() {
+    const today = new Date();
+
+    setCurrentMonth(new Date(today.getFullYear(), today.getMonth(), 1));
+  }
+
+  const currentMonthJobs = workspaceJobs.filter((job) => {
+    const jobDate = new Date(`${job.date}T00:00:00`);
+
+    return (
+      jobDate.getFullYear() === monthYear &&
+      jobDate.getMonth() === monthIndex
+    );
+  });
+
+  const weekJobs = workspaceJobs.slice(0, 7);
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-950 dark:text-gray-100">
-            Calendar
-          </h1>
 
-          <p className="mt-2 text-gray-500 dark:text-gray-400">
-            Schedule for {activeWorkspace.name}
-          </p>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={goToPreviousMonth}
+            className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-800"
+          >
+            Prev
+          </button>
+
+          <button
+            type="button"
+            onClick={goToToday}
+            className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-800"
+          >
+            Today
+          </button>
+
+          <button
+            type="button"
+            onClick={goToNextMonth}
+            className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-800"
+          >
+            Next
+          </button>
+
+          <select
+            value={view}
+            onChange={(event) => setView(event.target.value)}
+            className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+          >
+            <option value="month">Month View</option>
+            <option value="week">Week View</option>
+            <option value="agenda">Agenda View</option>
+          </select>
         </div>
-
-        <select
-          value={view}
-          onChange={(event) => setView(event.target.value)}
-          className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
-        >
-          <option value="month">Month View</option>
-          <option value="week">Week View</option>
-          <option value="agenda">Agenda View</option>
-        </select>
       </div>
 
       <div className="rounded-2xl bg-white p-4 shadow dark:bg-gray-900 sm:p-6">
         {view === "month" && (
           <>
-            <h2 className="mb-4 text-xl font-semibold text-gray-950 dark:text-gray-100">
-              June 2026
-            </h2>
+            <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <h2 className="text-xl font-semibold text-gray-950 dark:text-gray-100">
+                {formatMonthLabel(currentMonth)}
+              </h2>
+
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                {currentMonthJobs.length} job
+                {currentMonthJobs.length === 1 ? "" : "s"} this month
+              </p>
+            </div>
 
             <div className="overflow-x-auto">
               <div className="grid min-w-[900px] grid-cols-7 gap-1 lg:gap-2">
-                {days.map((day) => {
-                  const dayString = `2026-06-${String(day).padStart(2, "0")}`;
+                {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(
+                  (dayName) => (
+                    <div
+                      key={dayName}
+                      className="p-2 text-sm font-semibold text-gray-500 dark:text-gray-400"
+                    >
+                      {dayName}
+                    </div>
+                  )
+                )}
+
+                {calendarDays.map((day, index) => {
+                  const dayString = day ? formatDateString(day) : "";
 
                   const dayJobs = workspaceJobs.filter(
                     (job) => job.date === dayString
@@ -171,11 +267,11 @@ export default function CalendarPage() {
 
                   return (
                     <div
-                      key={day}
+                      key={index}
                       className="min-h-24 rounded-lg border border-gray-200 p-2 dark:border-gray-800 lg:min-h-28"
                     >
                       <div className="font-semibold text-gray-950 dark:text-gray-100">
-                        {day <= 30 ? day : ""}
+                        {day ? day.getDate() : ""}
                       </div>
 
                       {dayJobs.map((job) => (
@@ -241,33 +337,39 @@ export default function CalendarPage() {
             </h2>
 
             <div className="space-y-3">
-              {workspaceJobs.slice(0, 7).map((job) => (
-                <Link
-                  key={job.id}
-                  href={`/jobs/${job.id}`}
-                  className="block rounded-xl border border-gray-200 p-4 hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-800"
-                >
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <div className="font-semibold text-blue-600 hover:underline dark:text-blue-400">
-                        {job.name}
+              {weekJobs.length > 0 ? (
+                weekJobs.map((job) => (
+                  <Link
+                    key={job.id}
+                    href={`/jobs/${job.id}`}
+                    className="block rounded-xl border border-gray-200 p-4 hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-800"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="font-semibold text-blue-600 hover:underline dark:text-blue-400">
+                          {job.name}
+                        </div>
+
+                        <div className="text-sm text-gray-500 dark:text-gray-400">
+                          {job.date}
+                        </div>
                       </div>
 
-                      <div className="text-sm text-gray-500 dark:text-gray-400">
-                        {job.date}
-                      </div>
+                      <span
+                        className={`rounded px-3 py-1 text-xs font-medium text-white ${getJobColor(
+                          job.status
+                        )}`}
+                      >
+                        {job.status}
+                      </span>
                     </div>
-
-                    <span
-                      className={`rounded px-3 py-1 text-xs font-medium text-white ${getJobColor(
-                        job.status
-                      )}`}
-                    >
-                      {job.status}
-                    </span>
-                  </div>
-                </Link>
-              ))}
+                  </Link>
+                ))
+              ) : (
+                <div className="text-center text-lg text-gray-500 dark:text-gray-400">
+                  No upcoming jobs for {activeWorkspace.name}
+                </div>
+              )}
             </div>
           </>
         )}
@@ -279,41 +381,41 @@ export default function CalendarPage() {
             </h2>
 
             <div className="space-y-3">
-              {workspaceJobs.map((job) => (
-                <Link
-                  key={job.id}
-                  href={`/jobs/${job.id}`}
-                  className="block rounded-xl border border-gray-200 p-4 hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-800"
-                >
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                      <div className="font-semibold text-blue-600 hover:underline dark:text-blue-400">
-                        {job.name}
+              {workspaceJobs.length > 0 ? (
+                workspaceJobs.map((job) => (
+                  <Link
+                    key={job.id}
+                    href={`/jobs/${job.id}`}
+                    className="block rounded-xl border border-gray-200 p-4 hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-800"
+                  >
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <div className="font-semibold text-blue-600 hover:underline dark:text-blue-400">
+                          {job.name}
+                        </div>
+
+                        <div className="text-sm text-gray-500 dark:text-gray-400">
+                          {job.date}
+                        </div>
                       </div>
 
-                      <div className="text-sm text-gray-500 dark:text-gray-400">
-                        {job.date}
-                      </div>
+                      <span
+                        className={`w-fit rounded px-3 py-1 text-xs font-medium text-white ${getJobColor(
+                          job.status
+                        )}`}
+                      >
+                        {job.status}
+                      </span>
                     </div>
-
-                    <span
-                      className={`w-fit rounded px-3 py-1 text-xs font-medium text-white ${getJobColor(
-                        job.status
-                      )}`}
-                    >
-                      {job.status}
-                    </span>
-                  </div>
-                </Link>
-              ))}
+                  </Link>
+                ))
+              ) : (
+                <div className="text-center text-lg text-gray-500 dark:text-gray-400">
+                  No scheduled jobs for {activeWorkspace.name}
+                </div>
+              )}
             </div>
           </>
-        )}
-
-        {workspaceJobs.length === 0 && (
-          <div className="mt-8 text-center text-lg text-gray-500 dark:text-gray-400">
-            No scheduled jobs for {activeWorkspace.name}
-          </div>
         )}
       </div>
     </div>
@@ -369,170 +471,582 @@ export default async function ClientPage({
 ```tsx
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
+
 import { useWorkspace } from "@/components/WorkspaceContext";
 import { clients as defaultClients } from "@/lib/clients";
 
+type ClientRow = {
+  id: string;
+  workspaceId: string;
+  name: string;
+  status: string;
+  balance: string;
+  email?: string;
+  phone?: string;
+  address?: string;
+  city?: string;
+  state?: string;
+  zip?: string;
+  notes?: string;
+};
+
+const clientStatuses = ["Lead", "Active", "Inactive"] as const;
+
+function formatMoney(value: string) {
+  const numericValue = Number(value.replace(/[$,]/g, ""));
+
+  if (Number.isNaN(numericValue)) {
+    return "$0";
+  }
+
+  return `$${numericValue.toLocaleString()}`;
+}
+
 export default function ClientsPage() {
-const { activeWorkspace } = useWorkspace();
+  const { activeWorkspace } = useWorkspace();
 
-const [clientItems, setClientItems] = useState(defaultClients);
-const [selectedClients, setSelectedClients] = useState<string[]>([]);
-const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [clientItems, setClientItems] = useState<ClientRow[]>(defaultClients);
+  const [selectedClients, setSelectedClients] = useState<string[]>([]);
 
-const workspaceClients = clientItems.filter(
-(client) => client.workspaceId === activeWorkspace.id
-);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [newClientOpen, setNewClientOpen] = useState(false);
+  const [editClientOpen, setEditClientOpen] = useState(false);
+  const [editingClientId, setEditingClientId] = useState("");
 
-function toggleClient(clientId: string) {
-setSelectedClients((current) =>
-current.includes(clientId)
-? current.filter((id) => id !== clientId)
-: [...current, clientId]
-);
-}
+  const [clientName, setClientName] = useState("");
+  const [clientStatus, setClientStatus] =
+    useState<(typeof clientStatuses)[number]>("Active");
+  const [clientBalance, setClientBalance] = useState("");
+  const [clientEmail, setClientEmail] = useState("");
+  const [clientPhone, setClientPhone] = useState("");
+  const [clientAddress, setClientAddress] = useState("");
+  const [clientCity, setClientCity] = useState("");
+  const [clientState, setClientState] = useState("");
+  const [clientZip, setClientZip] = useState("");
+  const [clientNotes, setClientNotes] = useState("");
 
-function removeSelectedClients() {
-setClientItems(
-clientItems.filter(
-(client) => !selectedClients.includes(client.id)
-)
-);
+  useEffect(() => {
+    const savedClients = localStorage.getItem("frontier-clients");
+
+    if (savedClients) {
+      try {
+        setClientItems(JSON.parse(savedClients));
+      } catch {
+        setClientItems(defaultClients);
+      }
+    }
+  }, []);
+
+  const workspaceClients = clientItems.filter(
+    (client) => client.workspaceId === activeWorkspace.id
+  );
+
+  const allWorkspaceClientsSelected =
+    workspaceClients.length > 0 &&
+    workspaceClients.every((client) => selectedClients.includes(client.id));
+
+  function saveClients(updatedClients: ClientRow[]) {
+    setClientItems(updatedClients);
+    localStorage.setItem("frontier-clients", JSON.stringify(updatedClients));
+  }
+
+  function resetClientForm() {
+    setClientName("");
+    setClientStatus("Active");
+    setClientBalance("");
+    setClientEmail("");
+    setClientPhone("");
+    setClientAddress("");
+    setClientCity("");
+    setClientState("");
+    setClientZip("");
+    setClientNotes("");
+    setEditingClientId("");
+  }
+
+  function closeClientModals() {
+    setNewClientOpen(false);
+    setEditClientOpen(false);
+    resetClientForm();
+  }
+
+  function toggleClient(clientId: string) {
+    setSelectedClients((current) =>
+      current.includes(clientId)
+        ? current.filter((id) => id !== clientId)
+        : [...current, clientId]
+    );
+  }
+
+  function toggleAllWorkspaceClients() {
+    if (allWorkspaceClientsSelected) {
+      setSelectedClients((current) =>
+        current.filter(
+          (clientId) =>
+            !workspaceClients.some((client) => client.id === clientId)
+        )
+      );
+
+      return;
+    }
+
+    setSelectedClients((current) => {
+      const workspaceClientIds = workspaceClients.map((client) => client.id);
+
+      const preservedOtherWorkspaceSelections = current.filter(
+        (clientId) => !workspaceClientIds.includes(clientId)
+      );
+
+      return [...preservedOtherWorkspaceSelections, ...workspaceClientIds];
+    });
+  }
+
+  function clientNameAlreadyExists(name: string, ignoredClientId?: string) {
+    return workspaceClients.some(
+      (client) =>
+        client.id !== ignoredClientId &&
+        client.name.trim().toLowerCase() === name.trim().toLowerCase()
+    );
+  }
+
+  function addClient() {
+    if (!clientName.trim()) return;
+    if (clientNameAlreadyExists(clientName)) return;
+
+    const newClient: ClientRow = {
+      id: crypto.randomUUID(),
+      workspaceId: activeWorkspace.id,
+      name: clientName.trim(),
+      status: clientStatus,
+      balance: formatMoney(clientBalance || "0"),
+      email: clientEmail.trim(),
+      phone: clientPhone.trim(),
+      address: clientAddress.trim(),
+      city: clientCity.trim(),
+      state: clientState.trim(),
+      zip: clientZip.trim(),
+      notes: clientNotes.trim(),
+    };
+
+    saveClients([...clientItems, newClient]);
+    closeClientModals();
+  }
+
+  function openEditClient(client: ClientRow) {
+    setEditingClientId(client.id);
+    setClientName(client.name);
+    setClientStatus(
+      clientStatuses.includes(client.status as (typeof clientStatuses)[number])
+        ? (client.status as (typeof clientStatuses)[number])
+        : "Active"
+    );
+    setClientBalance(client.balance.replace(/[$,]/g, ""));
+    setClientEmail(client.email ?? "");
+    setClientPhone(client.phone ?? "");
+    setClientAddress(client.address ?? "");
+    setClientCity(client.city ?? "");
+    setClientState(client.state ?? "");
+    setClientZip(client.zip ?? "");
+    setClientNotes(client.notes ?? "");
+    setEditClientOpen(true);
+  }
+
+  function saveEditedClient() {
+    if (!editingClientId) return;
+    if (!clientName.trim()) return;
+    if (clientNameAlreadyExists(clientName, editingClientId)) return;
+
+    const updatedClients = clientItems.map((client) =>
+      client.id === editingClientId
+        ? {
+            ...client,
+            name: clientName.trim(),
+            status: clientStatus,
+            balance: formatMoney(clientBalance || "0"),
+            email: clientEmail.trim(),
+            phone: clientPhone.trim(),
+            address: clientAddress.trim(),
+            city: clientCity.trim(),
+            state: clientState.trim(),
+            zip: clientZip.trim(),
+            notes: clientNotes.trim(),
+          }
+        : client
+    );
+
+    saveClients(updatedClients);
+    closeClientModals();
+  }
+
+  function removeSelectedClients() {
+    const updatedClients = clientItems.filter(
+      (client) => !selectedClients.includes(client.id)
+    );
+
+    saveClients(updatedClients);
+    setSelectedClients([]);
+    setShowDeleteModal(false);
+  }
+
+  return (
+    <div className="space-y-6 text-gray-950 dark:text-gray-100">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
 
 
-setSelectedClients([]);
-setShowDeleteModal(false);
-
-
-}
-
-return ( <div className="space-y-6 text-gray-950 dark:text-gray-100"> <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"> <div> <h1 className="text-3xl font-bold">Clients</h1>
-
-```
-      <p className="mt-2 text-gray-500 dark:text-gray-400">
-        {activeWorkspace.name} clients
-      </p>
-    </div>
-
-    <div className="flex flex-col gap-2 sm:flex-row">
-      <button className="w-full rounded-lg bg-blue-600 px-4 py-2 text-center text-white hover:bg-blue-700 sm:w-auto">
-        + Add Client
-      </button>
-
-      <button
-        onClick={() => setShowDeleteModal(true)}
-        disabled={selectedClients.length === 0}
-        className="w-full rounded-lg bg-red-600 px-4 py-2 text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-gray-400 sm:w-auto"
-      >
-        Remove Selected
-      </button>
-    </div>
-  </div>
-
-  <div className="overflow-x-auto rounded-lg bg-white shadow dark:bg-gray-900">
-    <table className="min-w-[650px] w-full">
-      <thead className="bg-gray-100 dark:bg-gray-800">
-        <tr className="text-gray-700 dark:text-gray-300">
-          <th className="p-4 w-12">
-            <input
-              type="checkbox"
-              checked={
-                workspaceClients.length > 0 &&
-                selectedClients.length === workspaceClients.length
-              }
-              onChange={(e) =>
-                setSelectedClients(
-                  e.target.checked
-                    ? workspaceClients.map((client) => client.id)
-                    : []
-                )
-              }
-            />
-          </th>
-
-          <th className="p-4 text-left">Name</th>
-          <th className="p-4 text-left">Status</th>
-          <th className="p-4 text-left">Balance</th>
-        </tr>
-      </thead>
-
-      <tbody>
-        {workspaceClients.length > 0 ? (
-          workspaceClients.map((client) => (
-            <tr
-              key={client.id}
-              className="border-t border-gray-200 text-gray-900 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-100 dark:hover:bg-gray-800"
-            >
-              <td className="p-4">
-                <input
-                  type="checkbox"
-                  checked={selectedClients.includes(client.id)}
-                  onChange={() => toggleClient(client.id)}
-                />
-              </td>
-
-              <td className="p-4 break-words">
-                <Link
-                  href={`/clients/${client.id}`}
-                  className="text-blue-600 hover:underline dark:text-blue-400"
-                >
-                  {client.name}
-                </Link>
-              </td>
-
-              <td className="p-4">{client.status}</td>
-
-              <td className="p-4">{client.balance}</td>
-            </tr>
-          ))
-        ) : (
-          <tr>
-            <td
-              colSpan={4}
-              className="p-10 text-center text-lg text-gray-500 dark:text-gray-400"
-            >
-              No clients found for {activeWorkspace.name}
-            </td>
-          </tr>
-        )}
-      </tbody>
-    </table>
-  </div>
-
-  {showDeleteModal && (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-      <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl dark:bg-gray-900">
-        <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">
-          Remove Clients
-        </h2>
-
-        <p className="mt-4 text-gray-600 dark:text-gray-400">
-          Are you sure you want to remove the selected client(s)?
-        </p>
-
-        <div className="mt-6 flex justify-end gap-3">
+        <div className="flex flex-wrap gap-2">
           <button
-            onClick={() => setShowDeleteModal(false)}
-            className="rounded-lg border border-gray-300 px-4 py-2 hover:bg-gray-100 dark:border-gray-700 dark:hover:bg-gray-800"
+            type="button"
+            onClick={() => setNewClientOpen(true)}
+            className="rounded-lg bg-blue-600 px-6 py-3 text-white shadow hover:bg-blue-700"
           >
-            Cancel
+            + Add Client
           </button>
 
           <button
-            onClick={removeSelectedClients}
-            className="rounded-lg bg-red-600 px-4 py-2 text-white hover:bg-red-700"
+            type="button"
+            onClick={() => setShowDeleteModal(true)}
+            disabled={selectedClients.length === 0}
+            className="rounded-lg bg-red-600 px-6 py-3 text-white shadow hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            Remove
+            Remove Client
           </button>
         </div>
       </div>
+
+      {selectedClients.length > 0 && (
+        <div className="rounded-lg bg-gray-900 p-4 text-white">
+          {selectedClients.length} client
+          {selectedClients.length === 1 ? "" : "s"} selected
+        </div>
+      )}
+
+      <div className="overflow-x-auto rounded-lg bg-white shadow dark:bg-gray-900">
+        <table className="min-w-[1050px] w-full">
+          <thead className="bg-gray-100 dark:bg-gray-800">
+            <tr className="text-gray-700 dark:text-gray-300">
+              <th className="w-12 p-4">
+                <input
+                  type="checkbox"
+                  checked={allWorkspaceClientsSelected}
+                  onChange={toggleAllWorkspaceClients}
+                  disabled={workspaceClients.length === 0}
+                  className="h-4 w-4"
+                />
+              </th>
+
+              <th className="p-4 text-left">Name</th>
+              <th className="p-4 text-left">Status</th>
+              <th className="p-4 text-left">Phone</th>
+              <th className="p-4 text-left">Email</th>
+              <th className="p-4 text-left">Address</th>
+              <th className="p-4 text-right">Balance</th>
+              <th className="p-4 text-right">Actions</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            {workspaceClients.length > 0 ? (
+              workspaceClients.map((client) => {
+                const addressParts = [
+                  client.address,
+                  client.city,
+                  client.state,
+                  client.zip,
+                ].filter(Boolean);
+
+                return (
+                  <tr
+                    key={client.id}
+                    className="border-t border-gray-200 text-gray-900 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-100 dark:hover:bg-gray-800"
+                  >
+                    <td className="p-4">
+                      <input
+                        type="checkbox"
+                        checked={selectedClients.includes(client.id)}
+                        onChange={() => toggleClient(client.id)}
+                        className="h-4 w-4"
+                      />
+                    </td>
+
+                    <td className="p-4 font-medium">
+                      <Link
+                        href={`/clients/${client.id}`}
+                        className="text-blue-600 hover:underline dark:text-blue-400"
+                      >
+                        {client.name}
+                      </Link>
+                    </td>
+
+                    <td className="p-4">{client.status}</td>
+
+                    <td className="p-4">{client.phone || "—"}</td>
+
+                    <td className="p-4">
+                      {client.email ? (
+                        <a
+                          href={`mailto:${client.email}`}
+                          className="text-blue-600 hover:underline dark:text-blue-400"
+                        >
+                          {client.email}
+                        </a>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
+
+                    <td className="p-4">
+                      {addressParts.length > 0 ? addressParts.join(", ") : "—"}
+                    </td>
+
+                    <td className="p-4 text-right font-medium">
+                      {client.balance}
+                    </td>
+
+                    <td className="p-4 text-right">
+                      <button
+                        type="button"
+                        onClick={() => openEditClient(client)}
+                        className="text-blue-600 hover:underline dark:text-blue-400"
+                      >
+                        Edit
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })
+            ) : (
+              <tr>
+                <td
+                  colSpan={8}
+                  className="p-10 text-center text-lg text-gray-500 dark:text-gray-400"
+                >
+                  No clients found for {activeWorkspace.name}
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {(newClientOpen || editClientOpen) && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4">
+          <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-xl bg-white p-6 shadow-xl dark:bg-gray-900">
+            <div className="mb-6 flex items-center justify-between">
+              <h2 className="text-xl font-bold text-gray-950 dark:text-gray-100">
+                {editClientOpen ? "Edit Client" : "Add Client"}
+              </h2>
+
+              <button
+                type="button"
+                onClick={closeClientModals}
+                className="text-2xl text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="space-y-5">
+              <div>
+                <label className="mb-2 block text-sm font-medium">
+                  Client Name *
+                </label>
+
+                <input
+                  type="text"
+                  value={clientName}
+                  onChange={(event) => setClientName(event.target.value)}
+                  placeholder="Jones Family"
+                  className="w-full rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div>
+                  <label className="mb-2 block text-sm font-medium">
+                    Status
+                  </label>
+
+                  <select
+                    value={clientStatus}
+                    onChange={(event) =>
+                      setClientStatus(
+                        event.target.value as (typeof clientStatuses)[number]
+                      )
+                    }
+                    className="w-full rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800"
+                  >
+                    {clientStatuses.map((status) => (
+                      <option key={status}>{status}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="mb-2 block text-sm font-medium">
+                    Starting Balance
+                  </label>
+
+                  <input
+                    type="number"
+                    value={clientBalance}
+                    onChange={(event) => setClientBalance(event.target.value)}
+                    placeholder="0"
+                    className="w-full rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div>
+                  <label className="mb-2 block text-sm font-medium">
+                    Phone Number
+                  </label>
+
+                  <input
+                    type="tel"
+                    value={clientPhone}
+                    onChange={(event) => setClientPhone(event.target.value)}
+                    placeholder="(555) 123-4567"
+                    className="w-full rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800"
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-2 block text-sm font-medium">
+                    Email Address
+                  </label>
+
+                  <input
+                    type="email"
+                    value={clientEmail}
+                    onChange={(event) => setClientEmail(event.target.value)}
+                    placeholder="client@example.com"
+                    className="w-full rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="mb-2 block text-sm font-medium">
+                  Street Address
+                </label>
+
+                <input
+                  type="text"
+                  value={clientAddress}
+                  onChange={(event) => setClientAddress(event.target.value)}
+                  placeholder="123 Main St"
+                  className="w-full rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-[1fr_120px_140px]">
+                <div>
+                  <label className="mb-2 block text-sm font-medium">City</label>
+
+                  <input
+                    type="text"
+                    value={clientCity}
+                    onChange={(event) => setClientCity(event.target.value)}
+                    placeholder="Rochester Hills"
+                    className="w-full rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800"
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-2 block text-sm font-medium">State</label>
+
+                  <input
+                    type="text"
+                    value={clientState}
+                    onChange={(event) => setClientState(event.target.value)}
+                    placeholder="MI"
+                    className="w-full rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800"
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-2 block text-sm font-medium">ZIP</label>
+
+                  <input
+                    type="text"
+                    value={clientZip}
+                    onChange={(event) => setClientZip(event.target.value)}
+                    placeholder="48307"
+                    className="w-full rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="mb-2 block text-sm font-medium">Notes</label>
+
+                <textarea
+                  rows={4}
+                  value={clientNotes}
+                  onChange={(event) => setClientNotes(event.target.value)}
+                  placeholder="Gate code, preferred contact method, billing notes..."
+                  className="w-full rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800"
+                />
+              </div>
+
+              <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                <button
+                  type="button"
+                  onClick={closeClientModals}
+                  className="rounded-lg border border-gray-300 px-5 py-3 hover:bg-gray-100 dark:border-gray-700 dark:hover:bg-gray-800"
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="button"
+                  onClick={editClientOpen ? saveEditedClient : addClient}
+                  className="rounded-lg bg-blue-600 px-5 py-3 font-semibold text-white hover:bg-blue-700"
+                >
+                  {editClientOpen ? "Save Changes" : "Add Client"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showDeleteModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4">
+          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl dark:bg-gray-900">
+            <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">
+              Remove Clients
+            </h2>
+
+            <p className="mt-4 text-gray-600 dark:text-gray-400">
+              Are you sure you want to remove the selected client(s)?
+            </p>
+
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setShowDeleteModal(false)}
+                className="rounded-lg border border-gray-300 px-4 py-2 hover:bg-gray-100 dark:border-gray-700 dark:hover:bg-gray-800"
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                onClick={removeSelectedClients}
+                className="rounded-lg bg-red-600 px-4 py-2 text-white hover:bg-red-700"
+              >
+                Remove
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
-  )}
-</div>
-
-
-);
+  );
 }
 ```
 
@@ -542,6 +1056,7 @@ return ( <div className="space-y-6 text-gray-950 dark:text-gray-100"> <div class
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 
 import StatCard from "../../components/Statcard";
 import { useWorkspace } from "@/components/WorkspaceContext";
@@ -619,18 +1134,61 @@ export default function DashboardPage() {
   ];
 
   return (
-    <div>
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold text-gray-950 dark:text-gray-100">
-          Dashboard
-        </h1>
+    <div className="w-full max-w-full">
 
-        <p className="mt-2 text-gray-500 dark:text-gray-400">
-          {activeWorkspace.name}
-        </p>
+
+      <div className="mb-6 rounded-lg bg-white p-4 shadow dark:bg-gray-900">
+        <h2 className="mb-3 text-lg font-semibold text-gray-950 dark:text-gray-100">
+          Quick Actions
+        </h2>
+
+        <div className="flex flex-wrap gap-2">
+          <Link
+            href="/clients"
+            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+          >
+            + Client
+          </Link>
+
+          <Link
+            href="/jobs"
+            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+          >
+            + Job
+          </Link>
+
+          <Link
+            href="/financials"
+            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+          >
+            + Invoice
+          </Link>
+
+          <button
+            type="button"
+            className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-semibold text-white hover:bg-gray-800 dark:bg-gray-700 dark:hover:bg-gray-600"
+          >
+            🎤 Speech
+          </button>
+          <button
+            type="button"
+            className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-semibold text-white hover:bg-gray-800 dark:bg-gray-700 dark:hover:bg-gray-600"
+          >
+            📷 Image
+          </button>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div
+        className="mb-8"
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+          gap: "8px",
+          width: "100%",
+          maxWidth: "100%",
+        }}
+      >
         <StatCard title="Active Clients" value={String(activeClients)} />
 
         <StatCard title="Open Quotes" value={String(openQuotes)} />
@@ -643,7 +1201,7 @@ export default function DashboardPage() {
         <StatCard title="Inventory Alerts" value={String(inventoryAlerts)} />
       </div>
 
-      <div className="mt-8 rounded-lg bg-white p-6 shadow dark:bg-gray-900">
+      <div className="mt-6 rounded-lg bg-white p-6 shadow dark:bg-gray-900">
         <h2 className="mb-4 text-xl font-semibold text-gray-950 dark:text-gray-100">
           Recent Activity
         </h2>
@@ -1042,15 +1600,6 @@ export default function FinancialsPage() {
 
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="text-3xl font-bold text-gray-950 dark:text-gray-100">
-          Financials
-        </h1>
-
-        <p className="mt-2 text-lg text-gray-500 dark:text-gray-400">
-          Revenue, expenses, and cash flow for {activeWorkspace.name}
-        </p>
-      </div>
 
       <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
         <SummaryCard
@@ -1619,22 +2168,13 @@ export default function InventoryPage() {
   return (
     <div className="space-y-8">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-950 dark:text-gray-100">
-            Inventory
-          </h1>
 
-          <p className="mt-2 text-gray-500 dark:text-gray-400">
-            Scheduled and completed job material needs for{" "}
-            {activeWorkspace.name}
-          </p>
-        </div>
 
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
             onClick={() => setNewItemOpen(true)}
-            className="rounded-lg bg-blue-600 px-6 py-3 text-white shadow hover:bg-blue-700"
+            className="rounded-lg bg-blue-600 px-4 py-2 text-white shadow hover:bg-blue-700"
           >
             + Add Item
           </button>
@@ -1643,7 +2183,7 @@ export default function InventoryPage() {
             type="button"
             onClick={removeSelectedItems}
             disabled={selectedItems.length === 0}
-            className="rounded-lg bg-red-600 px-6 py-3 text-white shadow hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-lg bg-red-600 px-4 py-2 text-white shadow hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
             Remove Item
           </button>
@@ -1861,6 +2401,799 @@ export default function InventoryPage() {
 }
 ```
 
+## app\invoices\new\page.tsx
+
+```tsx
+"use client";
+
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
+
+import { useWorkspace } from "@/components/WorkspaceContext";
+import { clients as defaultClients } from "@/lib/clients";
+
+type InvoiceSetupDraft = {
+  id: string;
+  workspaceId: string;
+  invoiceNumber: string;
+  invoiceDate: string;
+
+  companyName: string;
+  companyAddress: string;
+  companyCity: string;
+  companyState: string;
+  companyZip: string;
+  companyPhone: string;
+  companyEmail: string;
+
+  billToName: string;
+  billToCompany: string;
+  billToAddress: string;
+  billToCity: string;
+  billToState: string;
+  billToZip: string;
+  billToPhone: string;
+  billToEmail: string;
+
+  footerMessage: string;
+  contactMessage: string;
+};
+
+type ClientRow = {
+  id: string;
+  workspaceId: string;
+  name: string;
+  status: string;
+  balance: string;
+  email?: string;
+  phone?: string;
+  address?: string;
+  city?: string;
+  state?: string;
+  zip?: string;
+  notes?: string;
+};
+
+function getTodayDate() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function getNextInvoiceNumber() {
+  const savedInvoices = localStorage.getItem("frontier-invoices");
+
+  if (!savedInvoices) {
+    return "INV-001";
+  }
+
+  try {
+    const parsed = JSON.parse(savedInvoices) as { invoiceNumber?: string }[];
+    const nextNumber = parsed.length + 1;
+
+    return `INV-${String(nextNumber).padStart(3, "0")}`;
+  } catch {
+    return "INV-001";
+  }
+}
+
+function formatPhone(value: string) {
+  const digits = value.replace(/\D/g, "").slice(0, 10);
+
+  if (digits.length <= 3) {
+    return digits;
+  }
+
+  if (digits.length <= 6) {
+    return `(${digits.slice(0, 3)}) ${digits.slice(3)}`;
+  }
+
+  return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
+}
+
+export default function NewInvoicePage() {
+  const router = useRouter();
+  const { activeWorkspace } = useWorkspace();
+
+  const [clientItems, setClientItems] = useState<ClientRow[]>(defaultClients);
+  const [selectedClientId, setSelectedClientId] = useState("new");
+
+  const [invoiceNumber, setInvoiceNumber] = useState("");
+  const [invoiceDate, setInvoiceDate] = useState(getTodayDate());
+
+  const [billToName, setBillToName] = useState("");
+  const [billToCompany, setBillToCompany] = useState("");
+  const [billToAddress, setBillToAddress] = useState("");
+  const [billToCity, setBillToCity] = useState("");
+  const [billToState, setBillToState] = useState("");
+  const [billToZip, setBillToZip] = useState("");
+  const [billToPhone, setBillToPhone] = useState("");
+  const [billToEmail, setBillToEmail] = useState("");
+
+  const [footerMessage, setFooterMessage] = useState(
+    "Thank you for your business!"
+  );
+  const [contactMessage, setContactMessage] = useState(
+    "Please contact us with any questions about this invoice."
+  );
+
+  useEffect(() => {
+    const savedClients = localStorage.getItem("frontier-clients");
+
+    if (savedClients) {
+      try {
+        setClientItems(JSON.parse(savedClients));
+      } catch {
+        setClientItems(defaultClients);
+      }
+    }
+  }, []);
+
+  const workspaceClients = clientItems.filter(
+    (client) => client.workspaceId === activeWorkspace.id
+  );
+
+  const companyPlaceholder = {
+    companyName: `${activeWorkspace.name} Company`,
+    companyAddress: "123 Business Street",
+    companyCity: "Rochester Hills",
+    companyState: "MI",
+    companyZip: "48307",
+    companyPhone: "(555) 123-4567",
+    companyEmail: "billing@example.com",
+  };
+
+  function clearBillToForm() {
+    setSelectedClientId("new");
+    setBillToName("");
+    setBillToCompany("");
+    setBillToAddress("");
+    setBillToCity("");
+    setBillToState("");
+    setBillToZip("");
+    setBillToPhone("");
+    setBillToEmail("");
+  }
+
+  function populateBillToFromClient(clientId: string) {
+    if (clientId === "new") {
+      clearBillToForm();
+      return;
+    }
+
+    const selectedClient = workspaceClients.find(
+      (client) => client.id === clientId
+    );
+
+    if (!selectedClient) return;
+
+    setSelectedClientId(clientId);
+    setBillToName(selectedClient.name ?? "");
+    setBillToCompany("");
+    setBillToAddress(selectedClient.address ?? "");
+    setBillToCity(selectedClient.city ?? "");
+    setBillToState((selectedClient.state ?? "").toUpperCase());
+    setBillToZip(selectedClient.zip ?? "");
+    setBillToPhone(formatPhone(selectedClient.phone ?? ""));
+    setBillToEmail(selectedClient.email ?? "");
+  }
+
+  function continueToBuilder() {
+    const resolvedInvoiceNumber = invoiceNumber.trim() || getNextInvoiceNumber();
+
+    if (!invoiceDate.trim()) return;
+    if (!billToName.trim() && !billToCompany.trim()) return;
+
+    const draft: InvoiceSetupDraft = {
+      id: crypto.randomUUID(),
+      workspaceId: activeWorkspace.id,
+      invoiceNumber: resolvedInvoiceNumber,
+      invoiceDate,
+
+      ...companyPlaceholder,
+
+      billToName: billToName.trim(),
+      billToCompany: billToCompany.trim(),
+      billToAddress: billToAddress.trim(),
+      billToCity: billToCity.trim(),
+      billToState: billToState.trim().toUpperCase(),
+      billToZip: billToZip.trim(),
+      billToPhone: billToPhone.trim(),
+      billToEmail: billToEmail.trim(),
+
+      footerMessage: footerMessage.trim(),
+      contactMessage: contactMessage.trim(),
+    };
+
+    localStorage.setItem("frontier-invoice-draft", JSON.stringify(draft));
+    router.push("/invoices/new/build");
+  }
+
+  const inputClass =
+    "rounded-lg border border-gray-300 p-3 text-sm dark:border-gray-700 dark:bg-gray-800";
+  const labelClass = "mb-2 block text-sm font-medium";
+
+  return (
+    <div className="space-y-6 text-gray-950 dark:text-gray-100">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h1 className="text-3xl font-bold">New Invoice</h1>
+
+          <p className="mt-2 text-gray-500 dark:text-gray-400">
+            Step 1: setup invoice details for {activeWorkspace.name}
+          </p>
+        </div>
+
+        <Link
+          href="/invoices"
+          className="w-fit rounded-lg border border-gray-300 px-4 py-2 hover:bg-gray-100 dark:border-gray-700 dark:hover:bg-gray-800"
+        >
+          Back to Invoices
+        </Link>
+      </div>
+
+      <div className="rounded-xl bg-white p-4 shadow dark:bg-gray-900 sm:p-6">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-[2fr_1fr]">
+          <div>
+            <label className={labelClass}>Invoice #</label>
+            <input
+              value={invoiceNumber}
+              onChange={(event) => setInvoiceNumber(event.target.value)}
+              placeholder="Leave blank for auto-number"
+              className={`${inputClass} w-full`}
+            />
+          </div>
+
+          <div>
+            <label className={labelClass}>Invoice Date</label>
+            <input
+              type="date"
+              value={invoiceDate}
+              onChange={(event) => setInvoiceDate(event.target.value)}
+              className={`${inputClass} w-full`}
+            />
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+        <section className="rounded-xl bg-white p-4 shadow dark:bg-gray-900 sm:p-6">
+          <h2 className="text-xl font-bold">From</h2>
+
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+            Placeholder until company settings are connected.
+          </p>
+
+          <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm dark:border-gray-800 dark:bg-gray-800">
+            <p className="font-semibold">{companyPlaceholder.companyName}</p>
+            <p>{companyPlaceholder.companyAddress}</p>
+            <p>
+              {companyPlaceholder.companyCity},{" "}
+              {companyPlaceholder.companyState} {companyPlaceholder.companyZip}
+            </p>
+            <p className="mt-2">{companyPlaceholder.companyPhone}</p>
+            <p>{companyPlaceholder.companyEmail}</p>
+          </div>
+        </section>
+
+        <section className="rounded-xl bg-white p-4 shadow dark:bg-gray-900 sm:p-6">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <h2 className="text-xl font-bold">Bill To</h2>
+
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <select
+                value={selectedClientId}
+                onChange={(event) => populateBillToFromClient(event.target.value)}
+                className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-800"
+              >
+                <option value="new">New Client</option>
+
+                {workspaceClients.map((client) => (
+                  <option key={client.id} value={client.id}>
+                    {client.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="mt-4 space-y-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <input
+                value={billToName}
+                onChange={(event) => {
+                  setSelectedClientId("new");
+                  setBillToName(event.target.value);
+                }}
+                placeholder="Name"
+                className={inputClass}
+              />
+
+              <input
+                value={billToCompany}
+                onChange={(event) => {
+                  setSelectedClientId("new");
+                  setBillToCompany(event.target.value);
+                }}
+                placeholder="Company Name"
+                className={inputClass}
+              />
+            </div>
+
+            <input
+              value={billToAddress}
+              onChange={(event) => {
+                setSelectedClientId("new");
+                setBillToAddress(event.target.value);
+              }}
+              placeholder="Street Address"
+              className={`${inputClass} w-full`}
+            />
+
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-[1fr_120px_160px]">
+              <input
+                value={billToCity}
+                onChange={(event) => {
+                  setSelectedClientId("new");
+                  setBillToCity(event.target.value);
+                }}
+                placeholder="City"
+                className={inputClass}
+              />
+
+              <input
+                value={billToState}
+                onChange={(event) => {
+                  setSelectedClientId("new");
+                  setBillToState(event.target.value.toUpperCase());
+                }}
+                placeholder="State"
+                maxLength={2}
+                className={inputClass}
+              />
+
+              <input
+                value={billToZip}
+                onChange={(event) => {
+                  setSelectedClientId("new");
+                  setBillToZip(event.target.value);
+                }}
+                placeholder="ZIP"
+                inputMode="numeric"
+                className={inputClass}
+              />
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-[220px_1fr]">
+              <input
+                type="tel"
+                inputMode="tel"
+                value={billToPhone}
+                onChange={(event) => {
+                  setSelectedClientId("new");
+                  setBillToPhone(formatPhone(event.target.value));
+                }}
+                placeholder="Phone"
+                className={inputClass}
+              />
+
+              <input
+                type="email"
+                value={billToEmail}
+                onChange={(event) => {
+                  setSelectedClientId("new");
+                  setBillToEmail(event.target.value);
+                }}
+                placeholder="Email"
+                className={inputClass}
+              />
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <section className="rounded-xl bg-white p-4 shadow dark:bg-gray-900 sm:p-6">
+        <h2 className="text-xl font-bold">Messages</h2>
+
+        <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-2">
+          <div>
+            <label className={labelClass}>Footer Message</label>
+            <input
+              value={footerMessage}
+              onChange={(event) => setFooterMessage(event.target.value)}
+              placeholder="Thank you message"
+              className={`${inputClass} w-full`}
+            />
+          </div>
+
+          <div>
+            <label className={labelClass}>Contact Message</label>
+            <input
+              value={contactMessage}
+              onChange={(event) => setContactMessage(event.target.value)}
+              placeholder="Contact message"
+              className={`${inputClass} w-full`}
+            />
+          </div>
+        </div>
+      </section>
+
+      <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+        <Link
+          href="/invoices"
+          className="rounded-lg border border-gray-300 px-5 py-3 text-center hover:bg-gray-100 dark:border-gray-700 dark:hover:bg-gray-800"
+        >
+          Cancel
+        </Link>
+
+        <button
+          type="button"
+          onClick={continueToBuilder}
+          className="rounded-lg bg-blue-600 px-5 py-3 font-semibold text-white hover:bg-blue-700"
+        >
+          Continue to Itemization
+        </button>
+      </div>
+    </div>
+  );
+}
+```
+
+## app\invoices\page.tsx
+
+```tsx
+"use client";
+
+import { useEffect, useState } from "react";
+import Link from "next/link";
+
+import { useWorkspace } from "@/components/WorkspaceContext";
+
+const invoiceStatuses = ["Draft", "Sent", "Overdue", "Paid"] as const;
+const discountTypes = ["None", "Percent", "Fixed"] as const;
+
+type InvoiceStatus = (typeof invoiceStatuses)[number];
+type DiscountType = (typeof discountTypes)[number];
+
+type InvoiceLineItem = {
+  id: string;
+  description: string;
+  quantity: number;
+  unitPrice: string;
+};
+
+type InvoiceRow = {
+  id: string;
+  workspaceId: string;
+  invoiceNumber: string;
+  invoiceDate: string;
+
+  companyName: string;
+  companyAddress: string;
+  companyCity: string;
+  companyState: string;
+  companyZip: string;
+  companyPhone: string;
+  companyEmail: string;
+
+  billToName: string;
+  billToCompany: string;
+  billToAddress: string;
+  billToCity: string;
+  billToState: string;
+  billToZip: string;
+  billToPhone: string;
+  billToEmail: string;
+
+  lineItems: InvoiceLineItem[];
+
+  discountType: DiscountType;
+  discountValue: string;
+  taxRate: string;
+
+  footerMessage: string;
+  contactMessage: string;
+  status: InvoiceStatus;
+};
+
+function moneyToNumber(value: string) {
+  return Number(value.replace(/[$,]/g, "")) || 0;
+}
+
+function formatMoney(value: number) {
+  return `$${value.toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
+function getLineTotal(item: InvoiceLineItem) {
+  return item.quantity * moneyToNumber(item.unitPrice);
+}
+
+function getSubtotal(lineItems: InvoiceLineItem[]) {
+  return lineItems.reduce((total, item) => total + getLineTotal(item), 0);
+}
+
+function getDiscountAmount(
+  subtotal: number,
+  discountType: DiscountType,
+  discountValue: string
+) {
+  const value = Number(discountValue) || 0;
+
+  if (discountType === "Percent") {
+    return Math.min(subtotal * (value / 100), subtotal);
+  }
+
+  if (discountType === "Fixed") {
+    return Math.min(value, subtotal);
+  }
+
+  return 0;
+}
+
+function getTaxAmount(afterDiscountSubtotal: number, taxRate: string) {
+  const rate = Number(taxRate) || 0;
+
+  return afterDiscountSubtotal * (rate / 100);
+}
+
+function getInvoiceTotal(invoice: InvoiceRow) {
+  const subtotal = getSubtotal(invoice.lineItems);
+  const discount = getDiscountAmount(
+    subtotal,
+    invoice.discountType,
+    invoice.discountValue
+  );
+  const taxableSubtotal = Math.max(subtotal - discount, 0);
+  const tax = getTaxAmount(taxableSubtotal, invoice.taxRate);
+
+  return taxableSubtotal + tax;
+}
+
+export default function InvoicesPage() {
+  const { activeWorkspace } = useWorkspace();
+
+  const [invoices, setInvoices] = useState<InvoiceRow[]>([]);
+  const [selectedInvoices, setSelectedInvoices] = useState<string[]>([]);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+
+  useEffect(() => {
+    const savedInvoices = localStorage.getItem("frontier-invoices");
+
+    if (savedInvoices) {
+      try {
+        setInvoices(JSON.parse(savedInvoices));
+      } catch {
+        setInvoices([]);
+      }
+    }
+  }, []);
+
+  const workspaceInvoices = invoices.filter(
+    (invoice) => invoice.workspaceId === activeWorkspace.id
+  );
+
+  const totalOutstanding = workspaceInvoices
+    .filter((invoice) => invoice.status !== "Paid")
+    .reduce((total, invoice) => total + getInvoiceTotal(invoice), 0);
+
+  function saveInvoices(updatedInvoices: InvoiceRow[]) {
+    setInvoices(updatedInvoices);
+    localStorage.setItem("frontier-invoices", JSON.stringify(updatedInvoices));
+  }
+
+  function toggleInvoice(id: string) {
+    setSelectedInvoices((current) =>
+      current.includes(id)
+        ? current.filter((invoiceId) => invoiceId !== id)
+        : [...current, id]
+    );
+  }
+
+  function openDeleteModal() {
+    if (selectedInvoices.length === 0) return;
+
+    setShowDeleteModal(true);
+  }
+
+  function closeDeleteModal() {
+    setShowDeleteModal(false);
+  }
+
+  function removeSelectedInvoices() {
+    saveInvoices(
+      invoices.filter((invoice) => !selectedInvoices.includes(invoice.id))
+    );
+
+    setSelectedInvoices([]);
+    setShowDeleteModal(false);
+  }
+
+  function updateInvoiceStatus(id: string, nextStatus: InvoiceStatus) {
+    saveInvoices(
+      invoices.map((invoice) =>
+        invoice.id === id ? { ...invoice, status: nextStatus } : invoice
+      )
+    );
+  }
+
+  return (
+    <div className="space-y-6 text-gray-950 dark:text-gray-100">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h1 className="text-3xl font-bold">Invoices</h1>
+
+          <p className="mt-2 text-gray-500 dark:text-gray-400">
+            Create and manage invoices for {activeWorkspace.name}
+          </p>
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          <Link
+            href="/invoices/new"
+            className="rounded-lg bg-blue-600 px-4 py-2 text-white hover:bg-blue-700"
+          >
+            + Add Invoice
+          </Link>
+
+          <button
+            type="button"
+            onClick={openDeleteModal}
+            disabled={selectedInvoices.length === 0}
+            className="rounded-lg bg-red-600 px-4 py-2 text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Remove Invoice
+          </button>
+        </div>
+      </div>
+
+      {selectedInvoices.length > 0 && (
+        <div className="rounded-lg bg-gray-900 p-4 text-white">
+          {selectedInvoices.length} invoice
+          {selectedInvoices.length === 1 ? "" : "s"} selected
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <div className="rounded-xl bg-white p-4 shadow dark:bg-gray-900">
+          <p className="text-sm text-gray-500 dark:text-gray-400">
+            Total Invoices
+          </p>
+          <p className="mt-1 text-2xl font-bold">{workspaceInvoices.length}</p>
+        </div>
+
+        <div className="rounded-xl bg-white p-4 shadow dark:bg-gray-900">
+          <p className="text-sm text-gray-500 dark:text-gray-400">
+            Outstanding
+          </p>
+          <p className="mt-1 text-2xl font-bold">
+            {formatMoney(totalOutstanding)}
+          </p>
+        </div>
+
+        <div className="rounded-xl bg-white p-4 shadow dark:bg-gray-900">
+          <p className="text-sm text-gray-500 dark:text-gray-400">Workspace</p>
+          <p className="mt-1 truncate text-2xl font-bold">
+            {activeWorkspace.name}
+          </p>
+        </div>
+      </div>
+
+      <div className="overflow-x-auto rounded-lg bg-white shadow dark:bg-gray-900">
+        <table className="w-full min-w-[900px]">
+          <thead className="bg-gray-100 dark:bg-gray-800">
+            <tr className="text-left text-gray-700 dark:text-gray-300">
+              <th className="w-12 p-4"></th>
+              <th className="p-4">Invoice #</th>
+              <th className="p-4">Date</th>
+              <th className="p-4">Bill To</th>
+              <th className="p-4">Status</th>
+              <th className="p-4 text-right">Total</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            {workspaceInvoices.length > 0 ? (
+              workspaceInvoices.map((invoice) => (
+                <tr
+                  key={invoice.id}
+                  className="border-t border-gray-200 dark:border-gray-700"
+                >
+                  <td className="p-4">
+                    <input
+                      type="checkbox"
+                      checked={selectedInvoices.includes(invoice.id)}
+                      onChange={() => toggleInvoice(invoice.id)}
+                      className="h-4 w-4"
+                    />
+                  </td>
+
+                  <td className="p-4 font-medium">{invoice.invoiceNumber}</td>
+
+                  <td className="p-4">{invoice.invoiceDate}</td>
+
+                  <td className="p-4">
+                    {invoice.billToCompany || invoice.billToName || "—"}
+                  </td>
+
+                  <td className="p-4">
+                    <select
+                      value={invoice.status}
+                      onChange={(event) =>
+                        updateInvoiceStatus(
+                          invoice.id,
+                          event.target.value as InvoiceStatus
+                        )
+                      }
+                      className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-800"
+                    >
+                      {invoiceStatuses.map((status) => (
+                        <option key={status}>{status}</option>
+                      ))}
+                    </select>
+                  </td>
+
+                  <td className="p-4 text-right font-medium">
+                    {formatMoney(getInvoiceTotal(invoice))}
+                  </td>
+                </tr>
+              ))
+            ) : (
+              <tr>
+                <td
+                  colSpan={6}
+                  className="p-10 text-center text-lg text-gray-500 dark:text-gray-400"
+                >
+                  No invoices found for {activeWorkspace.name}
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {showDeleteModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4">
+          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl dark:bg-gray-900">
+            <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">
+              Remove Invoice(s)
+            </h2>
+
+            <p className="mt-4 text-gray-600 dark:text-gray-400">
+              Are you sure you want to remove the selected invoice(s)?
+            </p>
+
+            <div className="mt-4 rounded-lg bg-gray-100 p-3 text-sm text-gray-700 dark:bg-gray-800 dark:text-gray-300">
+              {selectedInvoices.length} invoice
+              {selectedInvoices.length === 1 ? "" : "s"} selected
+            </div>
+
+            <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={closeDeleteModal}
+                className="rounded-lg border border-gray-300 px-4 py-2 hover:bg-gray-100 dark:border-gray-700 dark:hover:bg-gray-800"
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                onClick={removeSelectedInvoices}
+                className="rounded-lg bg-red-600 px-4 py-2 text-white hover:bg-red-700"
+              >
+                Remove
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+```
+
 ## app\jobs\[id]\page.tsx
 
 ```tsx
@@ -1869,7 +3202,19 @@ export default function InventoryPage() {
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 
-import { jobs as defaultJobs } from "@/lib/jobs";
+import {
+  jobs as defaultJobs,
+  JobMaterial,
+  JobStatus,
+} from "@/lib/jobs";
+
+const jobStatuses: JobStatus[] = [
+  "Lead",
+  "Quoted",
+  "Scheduled",
+  "Completed",
+  "Paid",
+];
 
 function getStatusClasses(status: string) {
   switch (status) {
@@ -1894,6 +3239,18 @@ export default function JobPage() {
 
   const [jobItems, setJobItems] = useState(defaultJobs);
   const [loaded, setLoaded] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+
+  const [editName, setEditName] = useState("");
+  const [editClient, setEditClient] = useState("");
+  const [editStatus, setEditStatus] = useState<JobStatus>("Lead");
+  const [editDate, setEditDate] = useState("");
+  const [editValue, setEditValue] = useState("");
+  const [editNotes, setEditNotes] = useState("");
+
+  const [editMaterials, setEditMaterials] = useState<JobMaterial[]>([]);
+  const [editMaterialName, setEditMaterialName] = useState("");
+  const [editMaterialQuantity, setEditMaterialQuantity] = useState("");
 
   useEffect(() => {
     const savedJobs = localStorage.getItem("frontier-jobs");
@@ -1910,6 +3267,83 @@ export default function JobPage() {
   }, []);
 
   const job = jobItems.find((job) => job.id === id);
+
+  function openEditBox() {
+    if (!job) return;
+
+    setEditName(job.name);
+    setEditClient(job.client);
+    setEditStatus(job.status);
+    setEditDate(job.date);
+    setEditValue(job.value.replace("$", "").replace(",", ""));
+    setEditNotes(job.notes ?? "");
+    setEditMaterials(job.materials ?? []);
+    setEditMaterialName("");
+    setEditMaterialQuantity("");
+
+    setEditOpen(true);
+  }
+
+  function closeEditBox() {
+    setEditOpen(false);
+    setEditMaterialName("");
+    setEditMaterialQuantity("");
+  }
+
+  function addEditMaterial() {
+    if (!editMaterialName.trim()) return;
+
+    const quantity = Number(editMaterialQuantity);
+
+    if (Number.isNaN(quantity) || quantity <= 0) return;
+
+    setEditMaterials((current) => [
+      ...current,
+      {
+        name: editMaterialName.trim(),
+        quantity,
+      },
+    ]);
+
+    setEditMaterialName("");
+    setEditMaterialQuantity("");
+  }
+
+  function removeEditMaterial(indexToRemove: number) {
+    setEditMaterials((current) =>
+      current.filter((_, index) => index !== indexToRemove)
+    );
+  }
+
+  function saveEditedJob() {
+    if (!job) return;
+    if (!editName.trim() || !editClient.trim()) return;
+
+    const formattedValue = editValue.trim()
+      ? editValue.trim().startsWith("$")
+        ? editValue.trim()
+        : `$${editValue.trim()}`
+      : "$0";
+
+    const updatedJobs = jobItems.map((item) =>
+      item.id === job.id
+        ? {
+            ...item,
+            name: editName.trim(),
+            client: editClient.trim(),
+            status: editStatus,
+            date: editDate,
+            value: formattedValue,
+            notes: editNotes,
+            materials: editMaterials,
+          }
+        : item
+    );
+
+    setJobItems(updatedJobs);
+    localStorage.setItem("frontier-jobs", JSON.stringify(updatedJobs));
+    setEditOpen(false);
+  }
 
   if (!loaded) {
     return null;
@@ -1929,10 +3363,22 @@ export default function JobPage() {
 
   return (
     <div className="space-y-6 text-gray-950 dark:text-gray-100">
-      <div>
-        <h1 className="text-3xl font-bold">{job.name}</h1>
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h1 className="text-3xl font-bold">{job.name}</h1>
 
-        <p className="mt-2 text-gray-500 dark:text-gray-400">{job.client}</p>
+          <p className="mt-2 text-gray-500 dark:text-gray-400">
+            {job.client}
+          </p>
+        </div>
+
+        <button
+          type="button"
+          onClick={openEditBox}
+          className="w-full rounded-lg bg-blue-600 px-5 py-3 font-semibold text-white hover:bg-blue-700 sm:w-auto"
+        >
+          Edit Job
+        </button>
       </div>
 
       <div className="rounded-lg bg-white p-6 shadow dark:bg-gray-900">
@@ -1997,6 +3443,160 @@ export default function JobPage() {
         <p>Total: {job.value}</p>
         <p>Status: Unpaid</p>
       </div>
+
+      {editOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4">
+          <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-xl bg-white p-6 shadow-xl dark:bg-gray-900">
+            <div className="mb-6 flex items-center justify-between">
+              <h2 className="text-xl font-bold text-gray-950 dark:text-gray-100">
+                Edit Job
+              </h2>
+
+              <button
+                type="button"
+                onClick={closeEditBox}
+                className="text-2xl text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <input
+                type="text"
+                value={editName}
+                onChange={(event) => setEditName(event.target.value)}
+                placeholder="Job Name"
+                className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800"
+              />
+
+              <input
+                type="text"
+                value={editClient}
+                onChange={(event) => setEditClient(event.target.value)}
+                placeholder="Client"
+                className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800"
+              />
+
+              <select
+                value={editStatus}
+                onChange={(event) =>
+                  setEditStatus(event.target.value as JobStatus)
+                }
+                className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800"
+              >
+                {jobStatuses.map((status) => (
+                  <option key={status}>{status}</option>
+                ))}
+              </select>
+
+              <input
+                type="date"
+                value={editDate}
+                onChange={(event) => setEditDate(event.target.value)}
+                className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800"
+              />
+
+              <input
+                type="number"
+                value={editValue}
+                onChange={(event) => setEditValue(event.target.value)}
+                placeholder="Estimated Value"
+                className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800"
+              />
+
+              <div className="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
+                <h3 className="text-lg font-semibold text-gray-950 dark:text-gray-100">
+                  Materials
+                </h3>
+
+                <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-[1fr_140px_auto]">
+                  <input
+                    type="text"
+                    value={editMaterialName}
+                    onChange={(event) =>
+                      setEditMaterialName(event.target.value)
+                    }
+                    placeholder="Material name"
+                    className="rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800"
+                  />
+
+                  <input
+                    type="number"
+                    value={editMaterialQuantity}
+                    onChange={(event) =>
+                      setEditMaterialQuantity(event.target.value)
+                    }
+                    placeholder="Qty"
+                    className="rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800"
+                  />
+
+                  <button
+                    type="button"
+                    onClick={addEditMaterial}
+                    className="rounded-lg bg-blue-600 px-5 py-3 text-white hover:bg-blue-700"
+                  >
+                    Add
+                  </button>
+                </div>
+
+                <div className="mt-4 space-y-2">
+                  {editMaterials.length > 0 ? (
+                    editMaterials.map((material, index) => (
+                      <div
+                        key={`${material.name}-${index}`}
+                        className="flex items-center justify-between rounded-lg bg-gray-100 p-3 dark:bg-gray-800"
+                      >
+                        <span>
+                          {material.quantity} × {material.name}
+                        </span>
+
+                        <button
+                          type="button"
+                          onClick={() => removeEditMaterial(index)}
+                          className="text-sm text-red-600 hover:underline dark:text-red-400"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                      No materials added.
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              <textarea
+                rows={4}
+                value={editNotes}
+                onChange={(event) => setEditNotes(event.target.value)}
+                placeholder="Notes"
+                className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800"
+              />
+
+              <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                <button
+                  type="button"
+                  onClick={closeEditBox}
+                  className="rounded-lg border border-gray-300 px-5 py-3 hover:bg-gray-100 dark:border-gray-700 dark:hover:bg-gray-800"
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="button"
+                  onClick={saveEditedJob}
+                  className="rounded-lg bg-blue-600 px-5 py-3 font-semibold text-white hover:bg-blue-700"
+                >
+                  Save Changes
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -2110,7 +3710,22 @@ import Link from "next/link";
 
 import { useWorkspace } from "@/components/WorkspaceContext";
 import { jobs as defaultJobs, JobMaterial, JobStatus } from "@/lib/jobs";
-import { clients } from "@/lib/clients";
+import { clients as defaultClients } from "@/lib/clients";
+
+type ClientRow = {
+  id: string;
+  workspaceId: string;
+  name: string;
+  status: string;
+  balance: string;
+  email?: string;
+  phone?: string;
+  address?: string;
+  city?: string;
+  state?: string;
+  zip?: string;
+  notes?: string;
+};
 
 function getStatusColor(status: JobStatus) {
   switch (status) {
@@ -2142,7 +3757,7 @@ export default function JobsPage() {
   const [value, setValue] = useState("");
   const [date, setDate] = useState("");
   const [notes, setNotes] = useState("");
-
+  const [clientItems, setClientItems] = useState<ClientRow[]>(defaultClients);
   const [materialName, setMaterialName] = useState("");
   const [materialQuantity, setMaterialQuantity] = useState("");
   const [materials, setMaterials] = useState<JobMaterial[]>([]);
@@ -2157,9 +3772,18 @@ export default function JobsPage() {
         setJobItems(defaultJobs);
       }
     }
+    const savedClients = localStorage.getItem("frontier-clients");
+
+    if (savedClients) {
+      try {
+        setClientItems(JSON.parse(savedClients));
+      } catch {
+        setClientItems(defaultClients);
+      }
+    }
   }, []);
 
-  const workspaceClients = clients.filter(
+  const workspaceClients = clientItems.filter(
     (client) => client.workspaceId === activeWorkspace.id
   );
 
@@ -2167,6 +3791,14 @@ export default function JobsPage() {
     (job) => job.workspaceId === activeWorkspace.id
   );
 
+  function getClientByName(clientName: string) {
+    return workspaceClients.find(
+      (client) =>
+        client.name.trim().toLowerCase() ===
+        clientName.trim().toLowerCase()
+    );
+  }
+  
   const allWorkspaceJobsSelected =
     workspaceJobs.length > 0 &&
     workspaceJobs.every((job) => selectedJobs.includes(job.id));
@@ -2285,19 +3917,13 @@ export default function JobsPage() {
   return (
     <div className="space-y-6 text-gray-950 dark:text-gray-100">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-3xl font-bold">Jobs</h1>
 
-          <p className="mt-2 text-gray-500 dark:text-gray-400">
-            Jobs for {activeWorkspace.name}
-          </p>
-        </div>
 
-        <div className="flex flex-col gap-2 sm:flex-row">
+        <div className="flex flex-wrap gap-2">
           <button
             type="button"
             onClick={() => setNewJobOpen(true)}
-            className="rounded-lg bg-blue-600 px-6 py-3 text-white hover:bg-blue-700"
+            className="rounded-lg bg-blue-600 px-4 py-2 text-white hover:bg-blue-700"
           >
             + Add New Job
           </button>
@@ -2306,7 +3932,7 @@ export default function JobsPage() {
             type="button"
             onClick={deleteSelectedJobs}
             disabled={selectedJobs.length === 0}
-            className="rounded-lg bg-red-600 px-6 py-3 text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-lg bg-red-600 px-4 py-2 text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
             Delete Job
           </button>
@@ -2527,46 +4153,61 @@ export default function JobsPage() {
 
           <tbody>
             {workspaceJobs.length > 0 ? (
-              workspaceJobs.map((job) => (
-                <tr
-                  key={job.id}
-                  className="border-t border-gray-200 dark:border-gray-700"
-                >
-                  <td className="p-4">
-                    <input
-                      type="checkbox"
-                      checked={selectedJobs.includes(job.id)}
-                      onChange={() => toggleJob(job.id)}
-                      className="h-4 w-4"
-                    />
-                  </td>
+              workspaceJobs.map((job) => {
+                const matchedClient = getClientByName(job.client);
 
-                  <td className="p-4 font-medium">
-                    <Link
-                      href={`/jobs/${job.id}`}
-                      className="text-blue-600 hover:underline dark:text-blue-400"
-                    >
-                      {job.name}
-                    </Link>
-                  </td>
+                return (
+                  <tr
+                    key={job.id}
+                    className="border-t border-gray-200 dark:border-gray-700"
+                  >
+                    <td className="p-4">
+                      <input
+                        type="checkbox"
+                        checked={selectedJobs.includes(job.id)}
+                        onChange={() => toggleJob(job.id)}
+                        className="h-4 w-4"
+                      />
+                    </td>
 
-                  <td className="p-4">{job.client}</td>
+                    <td className="p-4 font-medium">
+                      <Link
+                        href={`/jobs/${job.id}`}
+                        className="text-blue-600 hover:underline dark:text-blue-400"
+                      >
+                        {job.name}
+                      </Link>
+                    </td>
 
-                  <td className="p-4">
-                    <span
-                      className={`rounded px-3 py-1 text-xs font-medium text-white ${getStatusColor(
-                        job.status
-                      )}`}
-                    >
-                      {job.status}
-                    </span>
-                  </td>
+                    <td className="p-4">
+                      {matchedClient ? (
+                        <Link
+                          href={`/clients/${matchedClient.id}`}
+                          className="text-blue-600 hover:underline dark:text-blue-400"
+                        >
+                          {job.client}
+                        </Link>
+                      ) : (
+                        <span>{job.client}</span>
+                      )}
+                    </td>
 
-                  <td className="p-4">{job.date || "—"}</td>
+                    <td className="p-4">
+                      <span
+                        className={`rounded px-3 py-1 text-xs font-medium text-white ${getStatusColor(
+                          job.status
+                        )}`}
+                      >
+                        {job.status}
+                      </span>
+                    </td>
 
-                  <td className="p-4 text-right font-medium">{job.value}</td>
-                </tr>
-              ))
+                    <td className="p-4">{job.date || "—"}</td>
+
+                    <td className="p-4 text-right font-medium">{job.value}</td>
+                  </tr>
+                );
+              })
             ) : (
               <tr>
                 <td
@@ -3283,10 +4924,10 @@ export default function AppShell({
   }
 
   return (
-    <div className="flex min-h-screen min-w-max bg-gray-100 text-gray-950 dark:bg-gray-950 dark:text-gray-100">
+    <div className="flex h-screen w-full overflow-hidden bg-gray-100 text-gray-950 dark:bg-gray-950 dark:text-gray-100">
       <Sidebar />
 
-      <div className="flex flex-1 flex-col bg-gray-100 dark:bg-gray-950">
+      <div className="flex min-w-0 flex-1 flex-col bg-gray-100 dark:bg-gray-950">
         <header className="flex h-20 items-center justify-between border-b border-gray-200 bg-white px-3 sm:px-6 lg:px-8 dark:border-gray-800 dark:bg-gray-900">
           <div className="relative">
             <button
@@ -3414,7 +5055,7 @@ export default function AppShell({
           </div>
         </header>
 
-        <main className="flex-1 min-w-max min-h-screen p-3 sm:p-4 lg:p-6">
+        <main className="min-h-0 min-w-0 flex-1 overflow-y-auto p-3 sm:p-4 lg:p-6">
           {children}
         </main>
         
@@ -3531,47 +5172,53 @@ const navItems = [
   {
     label: "Dashboard",
     href: "/dashboard",
-    icon: "▦",
+    icon: "🏠",
   },
   {
     label: "Jobs",
     href: "/jobs",
-    icon: "⚒",
+    icon: "✅",
   },
   {
     label: "Clients",
     href: "/clients",
-    icon: "👥",
+    icon: "🧑‍💼",
   },
   {
     label: "Calendar",
     href: "/calendar",
-    icon: "▣",
+    icon: "📅",
   },
   {
     label: "Inventory",
     href: "/inventory",
-    icon: "◈",
+    icon: "🧱",
   },
   {
     label: "Financials",
     href: "/financials",
-    icon: "$",
+    icon: "💵",
+    
+  },
+      {
+    label: "Invoices",
+    href: "/invoices",
+    icon: "📄",
   },
   {
     label: "Documents",
     href: "/documents",
-    icon: "▤",
+    icon: "📁",
   },
     {
     label: "Logistics",
     href: "/logistics",
-    icon: "🗺️",
+    icon: "🛣️",
   },
   {
     label: "Settings",
     href: "/settings",
-    icon: "⚙",
+    icon: "⚙️",
   },
 ];
 
@@ -3592,12 +5239,12 @@ export default function Sidebar() {
         >
           {collapsed ? (
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-3xl font-light">
-              ∞
+              ⌖
             </div>
           ) : (
             <div className="flex items-center gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-3xl font-light">
-                ∞
+                ⌖
               </div>
 
               <h1 className="text-2xl font-bold">Frontier</h1>
@@ -3665,12 +5312,12 @@ export default function StatCard({
   value,
 }: StatCardProps) {
   return (
-    <div className="bg-white dark:bg-gray-900 p-4 rounded-lg shadow">
-      <h2 className="text-gray-500 dark:text-gray-400 text-sm">
+    <div className="min-w-0 rounded-lg bg-white p-3 shadow dark:bg-gray-900">
+      <h2 className="truncate text-xs text-gray-500 dark:text-gray-400 sm:text-sm">
         {title}
       </h2>
 
-      <p className="text-3xl font-bold mt-2 text-gray-900 dark:text-white">
+      <p className="mt-1 break-words text-2xl font-bold text-gray-900 dark:text-white sm:text-3xl">
         {value}
       </p>
     </div>

@@ -57,3 +57,30 @@ html.dark body {
   color: #f9fafb;
   border-color: #374151;
 }
+
+@media print {
+  aside,
+  header,
+  .print-hidden {
+    display: none !important;
+  }
+
+  main {
+    padding: 0 !important;
+    overflow: visible !important;
+  }
+
+  body {
+    background: white !important;
+  }
+
+  .invoice-print-page {
+    
+    margin: 0.7in auto 0 auto !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+    border: none !important;
+    width: 100% !important;
+    max-width: none !important;
+  }
+}

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 
 import StatCard from "../../components/Statcard";
 import { useWorkspace } from "@/components/WorkspaceContext";
@@ -78,18 +79,61 @@ export default function DashboardPage() {
   ];
 
   return (
-    <div>
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold text-gray-950 dark:text-gray-100">
-          Dashboard
-        </h1>
+    <div className="w-full max-w-full">
 
-        <p className="mt-2 text-gray-500 dark:text-gray-400">
-          {activeWorkspace.name}
-        </p>
+
+      <div className="mb-6 rounded-lg bg-white p-4 shadow dark:bg-gray-900">
+        <h2 className="mb-3 text-lg font-semibold text-gray-950 dark:text-gray-100">
+          Quick Actions
+        </h2>
+
+        <div className="flex flex-wrap gap-2">
+          <Link
+            href="/clients"
+            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+          >
+            + Client
+          </Link>
+
+          <Link
+            href="/jobs"
+            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+          >
+            + Job
+          </Link>
+
+          <Link
+            href="/financials"
+            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+          >
+            + Invoice
+          </Link>
+
+          <button
+            type="button"
+            className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-semibold text-white hover:bg-gray-800 dark:bg-gray-700 dark:hover:bg-gray-600"
+          >
+            🎤 Speech
+          </button>
+          <button
+            type="button"
+            className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-semibold text-white hover:bg-gray-800 dark:bg-gray-700 dark:hover:bg-gray-600"
+          >
+            📷 Image
+          </button>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div
+        className="mb-8"
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+          gap: "8px",
+          width: "100%",
+          maxWidth: "100%",
+        }}
+      >
         <StatCard title="Active Clients" value={String(activeClients)} />
 
         <StatCard title="Open Quotes" value={String(openQuotes)} />
@@ -102,7 +146,7 @@ export default function DashboardPage() {
         <StatCard title="Inventory Alerts" value={String(inventoryAlerts)} />
       </div>
 
-      <div className="mt-8 rounded-lg bg-white p-6 shadow dark:bg-gray-900">
+      <div className="mt-6 rounded-lg bg-white p-6 shadow dark:bg-gray-900">
         <h2 className="mb-4 text-xl font-semibold text-gray-950 dark:text-gray-100">
           Recent Activity
         </h2>

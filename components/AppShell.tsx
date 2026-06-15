@@ -48,10 +48,10 @@ export default function AppShell({
   }
 
   return (
-    <div className="flex min-h-screen min-w-max bg-gray-100 text-gray-950 dark:bg-gray-950 dark:text-gray-100">
+    <div className="flex h-screen w-full overflow-hidden bg-gray-100 text-gray-950 dark:bg-gray-950 dark:text-gray-100">
       <Sidebar />
 
-      <div className="flex flex-1 flex-col bg-gray-100 dark:bg-gray-950">
+      <div className="flex min-w-0 flex-1 flex-col bg-gray-100 dark:bg-gray-950">
         <header className="flex h-20 items-center justify-between border-b border-gray-200 bg-white px-3 sm:px-6 lg:px-8 dark:border-gray-800 dark:bg-gray-900">
           <div className="relative">
             <button
@@ -179,7 +179,7 @@ export default function AppShell({
           </div>
         </header>
 
-        <main className="flex-1 min-w-max min-h-screen p-3 sm:p-4 lg:p-6">
+        <main className="min-h-0 min-w-0 flex-1 overflow-y-auto p-3 sm:p-4 lg:p-6">
           {children}
         </main>
         

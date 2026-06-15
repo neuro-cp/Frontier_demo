@@ -1,167 +1,579 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
+
 import { useWorkspace } from "@/components/WorkspaceContext";
 import { clients as defaultClients } from "@/lib/clients";
 
+type ClientRow = {
+  id: string;
+  workspaceId: string;
+  name: string;
+  status: string;
+  balance: string;
+  email?: string;
+  phone?: string;
+  address?: string;
+  city?: string;
+  state?: string;
+  zip?: string;
+  notes?: string;
+};
+
+const clientStatuses = ["Lead", "Active", "Inactive"] as const;
+
+function formatMoney(value: string) {
+  const numericValue = Number(value.replace(/[$,]/g, ""));
+
+  if (Number.isNaN(numericValue)) {
+    return "$0";
+  }
+
+  return `$${numericValue.toLocaleString()}`;
+}
+
 export default function ClientsPage() {
-const { activeWorkspace } = useWorkspace();
+  const { activeWorkspace } = useWorkspace();
 
-const [clientItems, setClientItems] = useState(defaultClients);
-const [selectedClients, setSelectedClients] = useState<string[]>([]);
-const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [clientItems, setClientItems] = useState<ClientRow[]>(defaultClients);
+  const [selectedClients, setSelectedClients] = useState<string[]>([]);
 
-const workspaceClients = clientItems.filter(
-(client) => client.workspaceId === activeWorkspace.id
-);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [newClientOpen, setNewClientOpen] = useState(false);
+  const [editClientOpen, setEditClientOpen] = useState(false);
+  const [editingClientId, setEditingClientId] = useState("");
 
-function toggleClient(clientId: string) {
-setSelectedClients((current) =>
-current.includes(clientId)
-? current.filter((id) => id !== clientId)
-: [...current, clientId]
-);
-}
+  const [clientName, setClientName] = useState("");
+  const [clientStatus, setClientStatus] =
+    useState<(typeof clientStatuses)[number]>("Active");
+  const [clientBalance, setClientBalance] = useState("");
+  const [clientEmail, setClientEmail] = useState("");
+  const [clientPhone, setClientPhone] = useState("");
+  const [clientAddress, setClientAddress] = useState("");
+  const [clientCity, setClientCity] = useState("");
+  const [clientState, setClientState] = useState("");
+  const [clientZip, setClientZip] = useState("");
+  const [clientNotes, setClientNotes] = useState("");
 
-function removeSelectedClients() {
-setClientItems(
-clientItems.filter(
-(client) => !selectedClients.includes(client.id)
-)
-);
+  useEffect(() => {
+    const savedClients = localStorage.getItem("frontier-clients");
+
+    if (savedClients) {
+      try {
+        setClientItems(JSON.parse(savedClients));
+      } catch {
+        setClientItems(defaultClients);
+      }
+    }
+  }, []);
+
+  const workspaceClients = clientItems.filter(
+    (client) => client.workspaceId === activeWorkspace.id
+  );
+
+  const allWorkspaceClientsSelected =
+    workspaceClients.length > 0 &&
+    workspaceClients.every((client) => selectedClients.includes(client.id));
+
+  function saveClients(updatedClients: ClientRow[]) {
+    setClientItems(updatedClients);
+    localStorage.setItem("frontier-clients", JSON.stringify(updatedClients));
+  }
+
+  function resetClientForm() {
+    setClientName("");
+    setClientStatus("Active");
+    setClientBalance("");
+    setClientEmail("");
+    setClientPhone("");
+    setClientAddress("");
+    setClientCity("");
+    setClientState("");
+    setClientZip("");
+    setClientNotes("");
+    setEditingClientId("");
+  }
+
+  function closeClientModals() {
+    setNewClientOpen(false);
+    setEditClientOpen(false);
+    resetClientForm();
+  }
+
+  function toggleClient(clientId: string) {
+    setSelectedClients((current) =>
+      current.includes(clientId)
+        ? current.filter((id) => id !== clientId)
+        : [...current, clientId]
+    );
+  }
+
+  function toggleAllWorkspaceClients() {
+    if (allWorkspaceClientsSelected) {
+      setSelectedClients((current) =>
+        current.filter(
+          (clientId) =>
+            !workspaceClients.some((client) => client.id === clientId)
+        )
+      );
+
+      return;
+    }
+
+    setSelectedClients((current) => {
+      const workspaceClientIds = workspaceClients.map((client) => client.id);
+
+      const preservedOtherWorkspaceSelections = current.filter(
+        (clientId) => !workspaceClientIds.includes(clientId)
+      );
+
+      return [...preservedOtherWorkspaceSelections, ...workspaceClientIds];
+    });
+  }
+
+  function clientNameAlreadyExists(name: string, ignoredClientId?: string) {
+    return workspaceClients.some(
+      (client) =>
+        client.id !== ignoredClientId &&
+        client.name.trim().toLowerCase() === name.trim().toLowerCase()
+    );
+  }
+
+  function addClient() {
+    if (!clientName.trim()) return;
+    if (clientNameAlreadyExists(clientName)) return;
+
+    const newClient: ClientRow = {
+      id: crypto.randomUUID(),
+      workspaceId: activeWorkspace.id,
+      name: clientName.trim(),
+      status: clientStatus,
+      balance: formatMoney(clientBalance || "0"),
+      email: clientEmail.trim(),
+      phone: clientPhone.trim(),
+      address: clientAddress.trim(),
+      city: clientCity.trim(),
+      state: clientState.trim(),
+      zip: clientZip.trim(),
+      notes: clientNotes.trim(),
+    };
+
+    saveClients([...clientItems, newClient]);
+    closeClientModals();
+  }
+
+  function openEditClient(client: ClientRow) {
+    setEditingClientId(client.id);
+    setClientName(client.name);
+    setClientStatus(
+      clientStatuses.includes(client.status as (typeof clientStatuses)[number])
+        ? (client.status as (typeof clientStatuses)[number])
+        : "Active"
+    );
+    setClientBalance(client.balance.replace(/[$,]/g, ""));
+    setClientEmail(client.email ?? "");
+    setClientPhone(client.phone ?? "");
+    setClientAddress(client.address ?? "");
+    setClientCity(client.city ?? "");
+    setClientState(client.state ?? "");
+    setClientZip(client.zip ?? "");
+    setClientNotes(client.notes ?? "");
+    setEditClientOpen(true);
+  }
+
+  function saveEditedClient() {
+    if (!editingClientId) return;
+    if (!clientName.trim()) return;
+    if (clientNameAlreadyExists(clientName, editingClientId)) return;
+
+    const updatedClients = clientItems.map((client) =>
+      client.id === editingClientId
+        ? {
+            ...client,
+            name: clientName.trim(),
+            status: clientStatus,
+            balance: formatMoney(clientBalance || "0"),
+            email: clientEmail.trim(),
+            phone: clientPhone.trim(),
+            address: clientAddress.trim(),
+            city: clientCity.trim(),
+            state: clientState.trim(),
+            zip: clientZip.trim(),
+            notes: clientNotes.trim(),
+          }
+        : client
+    );
+
+    saveClients(updatedClients);
+    closeClientModals();
+  }
+
+  function removeSelectedClients() {
+    const updatedClients = clientItems.filter(
+      (client) => !selectedClients.includes(client.id)
+    );
+
+    saveClients(updatedClients);
+    setSelectedClients([]);
+    setShowDeleteModal(false);
+  }
+
+  return (
+    <div className="space-y-6 text-gray-950 dark:text-gray-100">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
 
 
-setSelectedClients([]);
-setShowDeleteModal(false);
-
-
-}
-
-return ( <div className="space-y-6 text-gray-950 dark:text-gray-100"> <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"> <div> <h1 className="text-3xl font-bold">Clients</h1>
-
-```
-      <p className="mt-2 text-gray-500 dark:text-gray-400">
-        {activeWorkspace.name} clients
-      </p>
-    </div>
-
-    <div className="flex flex-col gap-2 sm:flex-row">
-      <button className="w-full rounded-lg bg-blue-600 px-4 py-2 text-center text-white hover:bg-blue-700 sm:w-auto">
-        + Add Client
-      </button>
-
-      <button
-        onClick={() => setShowDeleteModal(true)}
-        disabled={selectedClients.length === 0}
-        className="w-full rounded-lg bg-red-600 px-4 py-2 text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-gray-400 sm:w-auto"
-      >
-        Remove Selected
-      </button>
-    </div>
-  </div>
-
-  <div className="overflow-x-auto rounded-lg bg-white shadow dark:bg-gray-900">
-    <table className="min-w-[650px] w-full">
-      <thead className="bg-gray-100 dark:bg-gray-800">
-        <tr className="text-gray-700 dark:text-gray-300">
-          <th className="p-4 w-12">
-            <input
-              type="checkbox"
-              checked={
-                workspaceClients.length > 0 &&
-                selectedClients.length === workspaceClients.length
-              }
-              onChange={(e) =>
-                setSelectedClients(
-                  e.target.checked
-                    ? workspaceClients.map((client) => client.id)
-                    : []
-                )
-              }
-            />
-          </th>
-
-          <th className="p-4 text-left">Name</th>
-          <th className="p-4 text-left">Status</th>
-          <th className="p-4 text-left">Balance</th>
-        </tr>
-      </thead>
-
-      <tbody>
-        {workspaceClients.length > 0 ? (
-          workspaceClients.map((client) => (
-            <tr
-              key={client.id}
-              className="border-t border-gray-200 text-gray-900 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-100 dark:hover:bg-gray-800"
-            >
-              <td className="p-4">
-                <input
-                  type="checkbox"
-                  checked={selectedClients.includes(client.id)}
-                  onChange={() => toggleClient(client.id)}
-                />
-              </td>
-
-              <td className="p-4 break-words">
-                <Link
-                  href={`/clients/${client.id}`}
-                  className="text-blue-600 hover:underline dark:text-blue-400"
-                >
-                  {client.name}
-                </Link>
-              </td>
-
-              <td className="p-4">{client.status}</td>
-
-              <td className="p-4">{client.balance}</td>
-            </tr>
-          ))
-        ) : (
-          <tr>
-            <td
-              colSpan={4}
-              className="p-10 text-center text-lg text-gray-500 dark:text-gray-400"
-            >
-              No clients found for {activeWorkspace.name}
-            </td>
-          </tr>
-        )}
-      </tbody>
-    </table>
-  </div>
-
-  {showDeleteModal && (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-      <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl dark:bg-gray-900">
-        <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">
-          Remove Clients
-        </h2>
-
-        <p className="mt-4 text-gray-600 dark:text-gray-400">
-          Are you sure you want to remove the selected client(s)?
-        </p>
-
-        <div className="mt-6 flex justify-end gap-3">
+        <div className="flex flex-wrap gap-2">
           <button
-            onClick={() => setShowDeleteModal(false)}
-            className="rounded-lg border border-gray-300 px-4 py-2 hover:bg-gray-100 dark:border-gray-700 dark:hover:bg-gray-800"
+            type="button"
+            onClick={() => setNewClientOpen(true)}
+            className="rounded-lg bg-blue-600 px-6 py-3 text-white shadow hover:bg-blue-700"
           >
-            Cancel
+            + Add Client
           </button>
 
           <button
-            onClick={removeSelectedClients}
-            className="rounded-lg bg-red-600 px-4 py-2 text-white hover:bg-red-700"
+            type="button"
+            onClick={() => setShowDeleteModal(true)}
+            disabled={selectedClients.length === 0}
+            className="rounded-lg bg-red-600 px-6 py-3 text-white shadow hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            Remove
+            Remove Client
           </button>
         </div>
       </div>
+
+      {selectedClients.length > 0 && (
+        <div className="rounded-lg bg-gray-900 p-4 text-white">
+          {selectedClients.length} client
+          {selectedClients.length === 1 ? "" : "s"} selected
+        </div>
+      )}
+
+      <div className="overflow-x-auto rounded-lg bg-white shadow dark:bg-gray-900">
+        <table className="min-w-[1050px] w-full">
+          <thead className="bg-gray-100 dark:bg-gray-800">
+            <tr className="text-gray-700 dark:text-gray-300">
+              <th className="w-12 p-4">
+                <input
+                  type="checkbox"
+                  checked={allWorkspaceClientsSelected}
+                  onChange={toggleAllWorkspaceClients}
+                  disabled={workspaceClients.length === 0}
+                  className="h-4 w-4"
+                />
+              </th>
+
+              <th className="p-4 text-left">Name</th>
+              <th className="p-4 text-left">Status</th>
+              <th className="p-4 text-left">Phone</th>
+              <th className="p-4 text-left">Email</th>
+              <th className="p-4 text-left">Address</th>
+              <th className="p-4 text-right">Balance</th>
+              <th className="p-4 text-right">Actions</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            {workspaceClients.length > 0 ? (
+              workspaceClients.map((client) => {
+                const addressParts = [
+                  client.address,
+                  client.city,
+                  client.state,
+                  client.zip,
+                ].filter(Boolean);
+
+                return (
+                  <tr
+                    key={client.id}
+                    className="border-t border-gray-200 text-gray-900 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-100 dark:hover:bg-gray-800"
+                  >
+                    <td className="p-4">
+                      <input
+                        type="checkbox"
+                        checked={selectedClients.includes(client.id)}
+                        onChange={() => toggleClient(client.id)}
+                        className="h-4 w-4"
+                      />
+                    </td>
+
+                    <td className="p-4 font-medium">
+                      <Link
+                        href={`/clients/${client.id}`}
+                        className="text-blue-600 hover:underline dark:text-blue-400"
+                      >
+                        {client.name}
+                      </Link>
+                    </td>
+
+                    <td className="p-4">{client.status}</td>
+
+                    <td className="p-4">{client.phone || "—"}</td>
+
+                    <td className="p-4">
+                      {client.email ? (
+                        <a
+                          href={`mailto:${client.email}`}
+                          className="text-blue-600 hover:underline dark:text-blue-400"
+                        >
+                          {client.email}
+                        </a>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
+
+                    <td className="p-4">
+                      {addressParts.length > 0 ? addressParts.join(", ") : "—"}
+                    </td>
+
+                    <td className="p-4 text-right font-medium">
+                      {client.balance}
+                    </td>
+
+                    <td className="p-4 text-right">
+                      <button
+                        type="button"
+                        onClick={() => openEditClient(client)}
+                        className="text-blue-600 hover:underline dark:text-blue-400"
+                      >
+                        Edit
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })
+            ) : (
+              <tr>
+                <td
+                  colSpan={8}
+                  className="p-10 text-center text-lg text-gray-500 dark:text-gray-400"
+                >
+                  No clients found for {activeWorkspace.name}
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {(newClientOpen || editClientOpen) && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4">
+          <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-xl bg-white p-6 shadow-xl dark:bg-gray-900">
+            <div className="mb-6 flex items-center justify-between">
+              <h2 className="text-xl font-bold text-gray-950 dark:text-gray-100">
+                {editClientOpen ? "Edit Client" : "Add Client"}
+              </h2>
+
+              <button
+                type="button"
+                onClick={closeClientModals}
+                className="text-2xl text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="space-y-5">
+              <div>
+                <label className="mb-2 block text-sm font-medium">
+                  Client Name *
+                </label>
+
+                <input
+                  type="text"
+                  value={clientName}
+                  onChange={(event) => setClientName(event.target.value)}
+                  placeholder="Jones Family"
+                  className="w-full rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div>
+                  <label className="mb-2 block text-sm font-medium">
+                    Status
+                  </label>
+
+                  <select
+                    value={clientStatus}
+                    onChange={(event) =>
+                      setClientStatus(
+                        event.target.value as (typeof clientStatuses)[number]
+                      )
+                    }
+                    className="w-full rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800"
+                  >
+                    {clientStatuses.map((status) => (
+                      <option key={status}>{status}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="mb-2 block text-sm font-medium">
+                    Starting Balance
+                  </label>
+
+                  <input
+                    type="number"
+                    value={clientBalance}
+                    onChange={(event) => setClientBalance(event.target.value)}
+                    placeholder="0"
+                    className="w-full rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div>
+                  <label className="mb-2 block text-sm font-medium">
+                    Phone Number
+                  </label>
+
+                  <input
+                    type="tel"
+                    value={clientPhone}
+                    onChange={(event) => setClientPhone(event.target.value)}
+                    placeholder="(555) 123-4567"
+                    className="w-full rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800"
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-2 block text-sm font-medium">
+                    Email Address
+                  </label>
+
+                  <input
+                    type="email"
+                    value={clientEmail}
+                    onChange={(event) => setClientEmail(event.target.value)}
+                    placeholder="client@example.com"
+                    className="w-full rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="mb-2 block text-sm font-medium">
+                  Street Address
+                </label>
+
+                <input
+                  type="text"
+                  value={clientAddress}
+                  onChange={(event) => setClientAddress(event.target.value)}
+                  placeholder="123 Main St"
+                  className="w-full rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-[1fr_120px_140px]">
+                <div>
+                  <label className="mb-2 block text-sm font-medium">City</label>
+
+                  <input
+                    type="text"
+                    value={clientCity}
+                    onChange={(event) => setClientCity(event.target.value)}
+                    placeholder="Rochester Hills"
+                    className="w-full rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800"
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-2 block text-sm font-medium">State</label>
+
+                  <input
+                    type="text"
+                    value={clientState}
+                    onChange={(event) => setClientState(event.target.value)}
+                    placeholder="MI"
+                    className="w-full rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800"
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-2 block text-sm font-medium">ZIP</label>
+
+                  <input
+                    type="text"
+                    value={clientZip}
+                    onChange={(event) => setClientZip(event.target.value)}
+                    placeholder="48307"
+                    className="w-full rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="mb-2 block text-sm font-medium">Notes</label>
+
+                <textarea
+                  rows={4}
+                  value={clientNotes}
+                  onChange={(event) => setClientNotes(event.target.value)}
+                  placeholder="Gate code, preferred contact method, billing notes..."
+                  className="w-full rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800"
+                />
+              </div>
+
+              <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                <button
+                  type="button"
+                  onClick={closeClientModals}
+                  className="rounded-lg border border-gray-300 px-5 py-3 hover:bg-gray-100 dark:border-gray-700 dark:hover:bg-gray-800"
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="button"
+                  onClick={editClientOpen ? saveEditedClient : addClient}
+                  className="rounded-lg bg-blue-600 px-5 py-3 font-semibold text-white hover:bg-blue-700"
+                >
+                  {editClientOpen ? "Save Changes" : "Add Client"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showDeleteModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4">
+          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl dark:bg-gray-900">
+            <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">
+              Remove Clients
+            </h2>
+
+            <p className="mt-4 text-gray-600 dark:text-gray-400">
+              Are you sure you want to remove the selected client(s)?
+            </p>
+
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setShowDeleteModal(false)}
+                className="rounded-lg border border-gray-300 px-4 py-2 hover:bg-gray-100 dark:border-gray-700 dark:hover:bg-gray-800"
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                onClick={removeSelectedClients}
+                className="rounded-lg bg-red-600 px-4 py-2 text-white hover:bg-red-700"
+              >
+                Remove
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
-  )}
-</div>
-
-
-);
+  );
 }

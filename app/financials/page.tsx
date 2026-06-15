@@ -205,15 +205,6 @@ export default function FinancialsPage() {
 
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="text-3xl font-bold text-gray-950 dark:text-gray-100">
-          Financials
-        </h1>
-
-        <p className="mt-2 text-lg text-gray-500 dark:text-gray-400">
-          Revenue, expenses, and cash flow for {activeWorkspace.name}
-        </p>
-      </div>
 
       <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
         <SummaryCard

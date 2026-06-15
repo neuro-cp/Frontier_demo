@@ -152,22 +152,13 @@ export default function InventoryPage() {
   return (
     <div className="space-y-8">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-950 dark:text-gray-100">
-            Inventory
-          </h1>
 
-          <p className="mt-2 text-gray-500 dark:text-gray-400">
-            Scheduled and completed job material needs for{" "}
-            {activeWorkspace.name}
-          </p>
-        </div>
 
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
             onClick={() => setNewItemOpen(true)}
-            className="rounded-lg bg-blue-600 px-6 py-3 text-white shadow hover:bg-blue-700"
+            className="rounded-lg bg-blue-600 px-4 py-2 text-white shadow hover:bg-blue-700"
           >
             + Add Item
           </button>
@@ -176,7 +167,7 @@ export default function InventoryPage() {
             type="button"
             onClick={removeSelectedItems}
             disabled={selectedItems.length === 0}
-            className="rounded-lg bg-red-600 px-6 py-3 text-white shadow hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-lg bg-red-600 px-4 py-2 text-white shadow hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
             Remove Item
           </button>

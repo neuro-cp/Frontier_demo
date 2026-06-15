@@ -5,7 +5,22 @@ import Link from "next/link";
 
 import { useWorkspace } from "@/components/WorkspaceContext";
 import { jobs as defaultJobs, JobMaterial, JobStatus } from "@/lib/jobs";
-import { clients } from "@/lib/clients";
+import { clients as defaultClients } from "@/lib/clients";
+
+type ClientRow = {
+  id: string;
+  workspaceId: string;
+  name: string;
+  status: string;
+  balance: string;
+  email?: string;
+  phone?: string;
+  address?: string;
+  city?: string;
+  state?: string;
+  zip?: string;
+  notes?: string;
+};
 
 function getStatusColor(status: JobStatus) {
   switch (status) {
@@ -37,7 +52,7 @@ export default function JobsPage() {
   const [value, setValue] = useState("");
   const [date, setDate] = useState("");
   const [notes, setNotes] = useState("");
-
+  const [clientItems, setClientItems] = useState<ClientRow[]>(defaultClients);
   const [materialName, setMaterialName] = useState("");
   const [materialQuantity, setMaterialQuantity] = useState("");
   const [materials, setMaterials] = useState<JobMaterial[]>([]);
@@ -52,9 +67,18 @@ export default function JobsPage() {
         setJobItems(defaultJobs);
       }
     }
+    const savedClients = localStorage.getItem("frontier-clients");
+
+    if (savedClients) {
+      try {
+        setClientItems(JSON.parse(savedClients));
+      } catch {
+        setClientItems(defaultClients);
+      }
+    }
   }, []);
 
-  const workspaceClients = clients.filter(
+  const workspaceClients = clientItems.filter(
     (client) => client.workspaceId === activeWorkspace.id
   );
 
@@ -62,6 +86,14 @@ export default function JobsPage() {
     (job) => job.workspaceId === activeWorkspace.id
   );
 
+  function getClientByName(clientName: string) {
+    return workspaceClients.find(
+      (client) =>
+        client.name.trim().toLowerCase() ===
+        clientName.trim().toLowerCase()
+    );
+  }
+  
   const allWorkspaceJobsSelected =
     workspaceJobs.length > 0 &&
     workspaceJobs.every((job) => selectedJobs.includes(job.id));
@@ -180,19 +212,13 @@ export default function JobsPage() {
   return (
     <div className="space-y-6 text-gray-950 dark:text-gray-100">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-3xl font-bold">Jobs</h1>
 
-          <p className="mt-2 text-gray-500 dark:text-gray-400">
-            Jobs for {activeWorkspace.name}
-          </p>
-        </div>
 
-        <div className="flex flex-col gap-2 sm:flex-row">
+        <div className="flex flex-wrap gap-2">
           <button
             type="button"
             onClick={() => setNewJobOpen(true)}
-            className="rounded-lg bg-blue-600 px-6 py-3 text-white hover:bg-blue-700"
+            className="rounded-lg bg-blue-600 px-4 py-2 text-white hover:bg-blue-700"
           >
             + Add New Job
           </button>
@@ -201,7 +227,7 @@ export default function JobsPage() {
             type="button"
             onClick={deleteSelectedJobs}
             disabled={selectedJobs.length === 0}
-            className="rounded-lg bg-red-600 px-6 py-3 text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-lg bg-red-600 px-4 py-2 text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
             Delete Job
           </button>
@@ -422,46 +448,61 @@ export default function JobsPage() {
 
           <tbody>
             {workspaceJobs.length > 0 ? (
-              workspaceJobs.map((job) => (
-                <tr
-                  key={job.id}
-                  className="border-t border-gray-200 dark:border-gray-700"
-                >
-                  <td className="p-4">
-                    <input
-                      type="checkbox"
-                      checked={selectedJobs.includes(job.id)}
-                      onChange={() => toggleJob(job.id)}
-                      className="h-4 w-4"
-                    />
-                  </td>
+              workspaceJobs.map((job) => {
+                const matchedClient = getClientByName(job.client);
 
-                  <td className="p-4 font-medium">
-                    <Link
-                      href={`/jobs/${job.id}`}
-                      className="text-blue-600 hover:underline dark:text-blue-400"
-                    >
-                      {job.name}
-                    </Link>
-                  </td>
+                return (
+                  <tr
+                    key={job.id}
+                    className="border-t border-gray-200 dark:border-gray-700"
+                  >
+                    <td className="p-4">
+                      <input
+                        type="checkbox"
+                        checked={selectedJobs.includes(job.id)}
+                        onChange={() => toggleJob(job.id)}
+                        className="h-4 w-4"
+                      />
+                    </td>
 
-                  <td className="p-4">{job.client}</td>
+                    <td className="p-4 font-medium">
+                      <Link
+                        href={`/jobs/${job.id}`}
+                        className="text-blue-600 hover:underline dark:text-blue-400"
+                      >
+                        {job.name}
+                      </Link>
+                    </td>
 
-                  <td className="p-4">
-                    <span
-                      className={`rounded px-3 py-1 text-xs font-medium text-white ${getStatusColor(
-                        job.status
-                      )}`}
-                    >
-                      {job.status}
-                    </span>
-                  </td>
+                    <td className="p-4">
+                      {matchedClient ? (
+                        <Link
+                          href={`/clients/${matchedClient.id}`}
+                          className="text-blue-600 hover:underline dark:text-blue-400"
+                        >
+                          {job.client}
+                        </Link>
+                      ) : (
+                        <span>{job.client}</span>
+                      )}
+                    </td>
 
-                  <td className="p-4">{job.date || "—"}</td>
+                    <td className="p-4">
+                      <span
+                        className={`rounded px-3 py-1 text-xs font-medium text-white ${getStatusColor(
+                          job.status
+                        )}`}
+                      >
+                        {job.status}
+                      </span>
+                    </td>
 
-                  <td className="p-4 text-right font-medium">{job.value}</td>
-                </tr>
-              ))
+                    <td className="p-4">{job.date || "—"}</td>
+
+                    <td className="p-4 text-right font-medium">{job.value}</td>
+                  </tr>
+                );
+              })
             ) : (
               <tr>
                 <td

@@ -7,47 +7,53 @@ const navItems = [
   {
     label: "Dashboard",
     href: "/dashboard",
-    icon: "▦",
+    icon: "🏠",
   },
   {
     label: "Jobs",
     href: "/jobs",
-    icon: "⚒",
+    icon: "✅",
   },
   {
     label: "Clients",
     href: "/clients",
-    icon: "👥",
+    icon: "🧑‍💼",
   },
   {
     label: "Calendar",
     href: "/calendar",
-    icon: "▣",
+    icon: "📅",
   },
   {
     label: "Inventory",
     href: "/inventory",
-    icon: "◈",
+    icon: "🧱",
   },
   {
     label: "Financials",
     href: "/financials",
-    icon: "$",
+    icon: "💵",
+    
+  },
+      {
+    label: "Invoices",
+    href: "/invoices",
+    icon: "📄",
   },
   {
     label: "Documents",
     href: "/documents",
-    icon: "▤",
+    icon: "📁",
   },
     {
     label: "Logistics",
     href: "/logistics",
-    icon: "🗺️",
+    icon: "🛣️",
   },
   {
     label: "Settings",
     href: "/settings",
-    icon: "⚙",
+    icon: "⚙️",
   },
 ];
 
