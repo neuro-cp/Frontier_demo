@@ -23,13 +23,13 @@
   📁 inventory
     📄 page.tsx
   📁 invoices
+    📁 [id]
+      📄 page.tsx
     📁 new
       📄 page.tsx
     📄 page.tsx
   📁 jobs
     📁 [id]
-      📄 page.tsx
-    📁 new
       📄 page.tsx
     📄 page.tsx
   📄 layout.tsx
@@ -48,6 +48,8 @@
 📁 lib
   📄 clients.ts
   📄 expenses.ts
+  📄 frontierClients.ts
+  📄 frontierInvoices.ts
   📄 inventory.ts
   📄 invoices.ts
   📄 jobs.ts
@@ -89,7 +91,18 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 
 import { jobs as defaultJobs } from "@/lib/jobs";
+import { clients as defaultClients } from "@/lib/clients";
 import { useWorkspace } from "@/components/WorkspaceContext";
+import { ClientRow } from "@/lib/frontierClients";
+
+type ClientCalendarEvent = {
+  id: string;
+  workspaceId: string;
+  clientId: string;
+  clientName: string;
+  title: string;
+  date: string;
+};
 
 function getJobColor(status: string) {
   switch (status) {
@@ -109,17 +122,13 @@ function getJobColor(status: string) {
 }
 
 function formatMonthLabel(date: Date) {
-  return date.toLocaleDateString("en-US", {
-    month: "long",
-    year: "numeric",
-  });
+  return date.toLocaleDateString("en-US", { month: "long", year: "numeric" });
 }
 
 function formatDateString(date: Date) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
-
   return `${year}-${month}-${day}`;
 }
 
@@ -128,10 +137,19 @@ export default function CalendarPage() {
 
   const [view, setView] = useState("month");
   const [jobItems, setJobItems] = useState(defaultJobs);
+  const [clientItems, setClientItems] = useState<ClientRow[]>(defaultClients);
+  const [clientEvents, setClientEvents] = useState<ClientCalendarEvent[]>([]);
   const [currentMonth, setCurrentMonth] = useState(new Date(2026, 5, 1));
+
+  const [clientEventOpen, setClientEventOpen] = useState(false);
+  const [clientEventClientId, setClientEventClientId] = useState("");
+  const [clientEventTitle, setClientEventTitle] = useState("");
+  const [clientEventDate, setClientEventDate] = useState("");
 
   useEffect(() => {
     const savedJobs = localStorage.getItem("frontier-jobs");
+    const savedClients = localStorage.getItem("frontier-clients");
+    const savedClientEvents = localStorage.getItem("frontier-client-calendar-events");
 
     if (savedJobs) {
       try {
@@ -140,27 +158,46 @@ export default function CalendarPage() {
         setJobItems(defaultJobs);
       }
     }
+
+    if (savedClients) {
+      try {
+        setClientItems(JSON.parse(savedClients));
+      } catch {
+        setClientItems(defaultClients);
+      }
+    }
+
+    if (savedClientEvents) {
+      try {
+        setClientEvents(JSON.parse(savedClientEvents));
+      } catch {
+        setClientEvents([]);
+      }
+    }
   }, []);
+
+  const workspaceClients = clientItems.filter(
+    (client) => client.workspaceId === activeWorkspace.id
+  );
 
   const workspaceJobs = jobItems
     .filter((job) => job.workspaceId === activeWorkspace.id)
     .filter((job) => job.date)
     .sort((a, b) => a.date.localeCompare(b.date));
 
+  const workspaceClientEvents = clientEvents
+    .filter((event) => event.workspaceId === activeWorkspace.id)
+    .sort((a, b) => a.date.localeCompare(b.date));
+
   const monthYear = currentMonth.getFullYear();
   const monthIndex = currentMonth.getMonth();
-
   const firstDayOfMonth = new Date(monthYear, monthIndex, 1);
   const firstWeekdayIndex = firstDayOfMonth.getDay();
   const daysInMonth = new Date(monthYear, monthIndex + 1, 0).getDate();
 
   const calendarDays = Array.from({ length: 42 }, (_, index) => {
     const dayNumber = index - firstWeekdayIndex + 1;
-
-    if (dayNumber < 1 || dayNumber > daysInMonth) {
-      return null;
-    }
-
+    if (dayNumber < 1 || dayNumber > daysInMonth) return null;
     return new Date(monthYear, monthIndex, dayNumber);
   });
 
@@ -174,60 +211,68 @@ export default function CalendarPage() {
 
   function goToToday() {
     const today = new Date();
-
     setCurrentMonth(new Date(today.getFullYear(), today.getMonth(), 1));
+  }
+
+  function saveClientEvents(updatedEvents: ClientCalendarEvent[]) {
+    setClientEvents(updatedEvents);
+    localStorage.setItem("frontier-client-calendar-events", JSON.stringify(updatedEvents));
+  }
+
+  function closeClientEventModal() {
+    setClientEventOpen(false);
+    setClientEventClientId("");
+    setClientEventTitle("");
+    setClientEventDate("");
+  }
+
+  function addClientEvent() {
+    const selectedClient = workspaceClients.find((client) => client.id === clientEventClientId);
+    if (!selectedClient || !clientEventDate) return;
+
+    const newEvent: ClientCalendarEvent = {
+      id: crypto.randomUUID(),
+      workspaceId: activeWorkspace.id,
+      clientId: selectedClient.id,
+      clientName: selectedClient.name,
+      title: clientEventTitle.trim() || "Client Follow-up",
+      date: clientEventDate,
+    };
+
+    saveClientEvents([...clientEvents, newEvent]);
+    closeClientEventModal();
   }
 
   const currentMonthJobs = workspaceJobs.filter((job) => {
     const jobDate = new Date(`${job.date}T00:00:00`);
-
-    return (
-      jobDate.getFullYear() === monthYear &&
-      jobDate.getMonth() === monthIndex
-    );
+    return jobDate.getFullYear() === monthYear && jobDate.getMonth() === monthIndex;
   });
 
-  const weekJobs = workspaceJobs.slice(0, 7);
+  const currentMonthClientEvents = workspaceClientEvents.filter((event) => {
+    const eventDate = new Date(`${event.date}T00:00:00`);
+    return eventDate.getFullYear() === monthYear && eventDate.getMonth() === monthIndex;
+  });
+
+  const agendaItems = [
+    ...workspaceJobs.map((job) => ({ type: "job" as const, date: job.date, job })),
+    ...workspaceClientEvents.map((event) => ({ type: "client" as const, date: event.date, event })),
+  ].sort((a, b) => a.date.localeCompare(b.date));
+
+  const weekItems = agendaItems.slice(0, 7);
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-
-
         <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={goToPreviousMonth}
-            className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-800"
-          >
-            Prev
-          </button>
-
-          <button
-            type="button"
-            onClick={goToToday}
-            className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-800"
-          >
-            Today
-          </button>
-
-          <button
-            type="button"
-            onClick={goToNextMonth}
-            className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-800"
-          >
-            Next
-          </button>
-
-          <select
-            value={view}
-            onChange={(event) => setView(event.target.value)}
-            className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
-          >
+          <button type="button" onClick={goToPreviousMonth} className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-800">Prev</button>
+          <button type="button" onClick={goToToday} className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-800">Today</button>
+          <button type="button" onClick={goToNextMonth} className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-800">Next</button>
+          <select value={view} onChange={(event) => setView(event.target.value)} className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100">
             <option value="month">Month View</option>
             <option value="week">Week View</option>
             <option value="agenda">Agenda View</option>
           </select>
+          <button type="button" onClick={() => setClientEventOpen(true)} className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700">+ Client Event</button>
         </div>
       </div>
 
@@ -235,189 +280,82 @@ export default function CalendarPage() {
         {view === "month" && (
           <>
             <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <h2 className="text-xl font-semibold text-gray-950 dark:text-gray-100">
-                {formatMonthLabel(currentMonth)}
-              </h2>
-
+              <h2 className="text-xl font-semibold text-gray-950 dark:text-gray-100">{formatMonthLabel(currentMonth)}</h2>
               <p className="text-sm text-gray-500 dark:text-gray-400">
-                {currentMonthJobs.length} job
-                {currentMonthJobs.length === 1 ? "" : "s"} this month
+                {currentMonthJobs.length} job(s), {currentMonthClientEvents.length} client event(s)
               </p>
             </div>
 
             <div className="overflow-x-auto">
               <div className="grid min-w-[900px] grid-cols-7 gap-1 lg:gap-2">
-                {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(
-                  (dayName) => (
-                    <div
-                      key={dayName}
-                      className="p-2 text-sm font-semibold text-gray-500 dark:text-gray-400"
-                    >
-                      {dayName}
-                    </div>
-                  )
-                )}
+                {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((dayName) => <div key={dayName} className="p-2 text-sm font-semibold text-gray-500 dark:text-gray-400">{dayName}</div>)}
 
                 {calendarDays.map((day, index) => {
                   const dayString = day ? formatDateString(day) : "";
-
-                  const dayJobs = workspaceJobs.filter(
-                    (job) => job.date === dayString
-                  );
+                  const dayJobs = workspaceJobs.filter((job) => job.date === dayString);
+                  const dayClientEvents = workspaceClientEvents.filter((event) => event.date === dayString);
 
                   return (
-                    <div
-                      key={index}
-                      className="min-h-24 rounded-lg border border-gray-200 p-2 dark:border-gray-800 lg:min-h-28"
-                    >
-                      <div className="font-semibold text-gray-950 dark:text-gray-100">
-                        {day ? day.getDate() : ""}
-                      </div>
-
+                    <div key={index} className="min-h-24 rounded-lg border border-gray-200 p-2 dark:border-gray-800 lg:min-h-28">
+                      <div className="font-semibold text-gray-950 dark:text-gray-100">{day ? day.getDate() : ""}</div>
                       {dayJobs.map((job) => (
-                        <Link
-                          key={job.id}
-                          href={`/jobs/${job.id}`}
-                          className={`mt-1 block rounded px-2 py-1 text-xs font-medium text-white hover:opacity-90 ${getJobColor(
-                            job.status
-                          )}`}
-                        >
-                          {job.name}
-                        </Link>
+                        <Link key={job.id} href={`/jobs/${job.id}`} className={`mt-1 block rounded px-2 py-1 text-xs font-medium text-white hover:opacity-90 ${getJobColor(job.status)}`}>{job.name}</Link>
+                      ))}
+                      {dayClientEvents.map((event) => (
+                        <Link key={event.id} href={`/clients/${event.clientId}`} className="mt-1 block rounded bg-teal-600 px-2 py-1 text-xs font-medium text-white hover:opacity-90">{event.title}: {event.clientName}</Link>
                       ))}
                     </div>
                   );
                 })}
               </div>
             </div>
-
-            <div className="mt-6 flex flex-wrap items-center justify-center gap-6 border-t border-gray-200 pt-4 dark:border-gray-800">
-              <div className="flex items-center gap-2">
-                <div className="h-4 w-4 rounded bg-gray-500" />
-                <span className="text-sm text-gray-700 dark:text-gray-300">
-                  Lead
-                </span>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <div className="h-4 w-4 rounded bg-yellow-500" />
-                <span className="text-sm text-gray-700 dark:text-gray-300">
-                  Quoted
-                </span>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <div className="h-4 w-4 rounded bg-blue-500" />
-                <span className="text-sm text-gray-700 dark:text-gray-300">
-                  Scheduled
-                </span>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <div className="h-4 w-4 rounded bg-green-500" />
-                <span className="text-sm text-gray-700 dark:text-gray-300">
-                  Completed
-                </span>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <div className="h-4 w-4 rounded bg-purple-500" />
-                <span className="text-sm text-gray-700 dark:text-gray-300">
-                  Paid
-                </span>
-              </div>
-            </div>
           </>
         )}
 
-        {view === "week" && (
-          <>
-            <h2 className="mb-4 text-xl font-semibold text-gray-950 dark:text-gray-100">
-              Upcoming Week
-            </h2>
-
-            <div className="space-y-3">
-              {weekJobs.length > 0 ? (
-                weekJobs.map((job) => (
-                  <Link
-                    key={job.id}
-                    href={`/jobs/${job.id}`}
-                    className="block rounded-xl border border-gray-200 p-4 hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-800"
-                  >
+        {view !== "month" && (
+          <div className="space-y-3">
+            {(view === "week" ? weekItems : agendaItems).length > 0 ? (
+              (view === "week" ? weekItems : agendaItems).map((item) =>
+                item.type === "job" ? (
+                  <Link key={`job-${item.job.id}`} href={`/jobs/${item.job.id}`} className="block rounded-xl border border-gray-200 p-4 hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-800">
                     <div className="flex items-center justify-between">
-                      <div>
-                        <div className="font-semibold text-blue-600 hover:underline dark:text-blue-400">
-                          {job.name}
-                        </div>
-
-                        <div className="text-sm text-gray-500 dark:text-gray-400">
-                          {job.date}
-                        </div>
-                      </div>
-
-                      <span
-                        className={`rounded px-3 py-1 text-xs font-medium text-white ${getJobColor(
-                          job.status
-                        )}`}
-                      >
-                        {job.status}
-                      </span>
+                      <div><div className="font-semibold text-blue-600 hover:underline dark:text-blue-400">{item.job.name}</div><div className="text-sm text-gray-500 dark:text-gray-400">{item.job.date}</div></div>
+                      <span className={`rounded px-3 py-1 text-xs font-medium text-white ${getJobColor(item.job.status)}`}>{item.job.status}</span>
                     </div>
                   </Link>
-                ))
-              ) : (
-                <div className="text-center text-lg text-gray-500 dark:text-gray-400">
-                  No upcoming jobs for {activeWorkspace.name}
-                </div>
-              )}
-            </div>
-          </>
-        )}
-
-        {view === "agenda" && (
-          <>
-            <h2 className="mb-4 text-xl font-semibold text-gray-950 dark:text-gray-100">
-              Agenda
-            </h2>
-
-            <div className="space-y-3">
-              {workspaceJobs.length > 0 ? (
-                workspaceJobs.map((job) => (
-                  <Link
-                    key={job.id}
-                    href={`/jobs/${job.id}`}
-                    className="block rounded-xl border border-gray-200 p-4 hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-800"
-                  >
-                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                      <div>
-                        <div className="font-semibold text-blue-600 hover:underline dark:text-blue-400">
-                          {job.name}
-                        </div>
-
-                        <div className="text-sm text-gray-500 dark:text-gray-400">
-                          {job.date}
-                        </div>
-                      </div>
-
-                      <span
-                        className={`w-fit rounded px-3 py-1 text-xs font-medium text-white ${getJobColor(
-                          job.status
-                        )}`}
-                      >
-                        {job.status}
-                      </span>
-                    </div>
+                ) : (
+                  <Link key={`client-${item.event.id}`} href={`/clients/${item.event.clientId}`} className="block rounded-xl border border-teal-200 p-4 hover:bg-teal-50 dark:border-teal-900 dark:hover:bg-teal-950/30">
+                    <div className="font-semibold text-teal-700 dark:text-teal-300">{item.event.title}</div>
+                    <div className="text-sm text-gray-500 dark:text-gray-400">{item.event.clientName} · {item.event.date}</div>
                   </Link>
-                ))
-              ) : (
-                <div className="text-center text-lg text-gray-500 dark:text-gray-400">
-                  No scheduled jobs for {activeWorkspace.name}
-                </div>
-              )}
-            </div>
-          </>
+                )
+              )
+            ) : (
+              <div className="text-center text-lg text-gray-500 dark:text-gray-400">No calendar items for {activeWorkspace.name}</div>
+            )}
+          </div>
         )}
       </div>
+
+      {clientEventOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4">
+          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl dark:bg-gray-900">
+            <div className="mb-6 flex items-center justify-between">
+              <h2 className="text-xl font-bold text-gray-950 dark:text-gray-100">Add Client to Calendar</h2>
+              <button type="button" onClick={closeClientEventModal} className="text-2xl text-gray-500">×</button>
+            </div>
+            <div className="space-y-4">
+              <select value={clientEventClientId} onChange={(event) => setClientEventClientId(event.target.value)} className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800">
+                <option value="">Select Client</option>
+                {workspaceClients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
+              </select>
+              <input type="text" value={clientEventTitle} onChange={(event) => setClientEventTitle(event.target.value)} placeholder="Follow-up, estimate, walkthrough..." className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800" />
+              <input type="date" value={clientEventDate} onChange={(event) => setClientEventDate(event.target.value)} className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800" />
+              <button type="button" onClick={addClientEvent} className="w-full rounded-lg bg-blue-600 py-3 text-white hover:bg-blue-700">Add to Calendar</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -426,40 +364,160 @@ export default function CalendarPage() {
 ## app\clients\[id]\page.tsx
 
 ```tsx
-export default async function ClientPage({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}) {
-  const { id } = await params;
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { useParams } from "next/navigation";
+
+import { clients as defaultClients } from "@/lib/clients";
+import { jobs as defaultJobs, Job } from "@/lib/jobs";
+import { ClientRow } from "@/lib/frontierClients";
+import {
+  formatCurrency,
+  getInvoiceTotals,
+  InvoiceRow,
+  loadSavedInvoices,
+} from "@/lib/frontierInvoices";
+
+export default function ClientPage() {
+  const params = useParams();
+  const id = String(params.id);
+
+  const [clients, setClients] = useState<ClientRow[]>(defaultClients);
+  const [jobs, setJobs] = useState<Job[]>(defaultJobs);
+  const [invoices, setInvoices] = useState<InvoiceRow[]>([]);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    const savedClients = localStorage.getItem("frontier-clients");
+    const savedJobs = localStorage.getItem("frontier-jobs");
+
+    if (savedClients) {
+      try {
+        setClients(JSON.parse(savedClients));
+      } catch {
+        setClients(defaultClients);
+      }
+    }
+
+    if (savedJobs) {
+      try {
+        setJobs(JSON.parse(savedJobs));
+      } catch {
+        setJobs(defaultJobs);
+      }
+    }
+
+    setInvoices(loadSavedInvoices());
+    setLoaded(true);
+  }, []);
+
+  const client = clients.find((clientItem) => clientItem.id === id);
+
+  const clientJobs = useMemo(() => {
+    if (!client) return [];
+    return jobs.filter(
+      (job) =>
+        job.workspaceId === client.workspaceId &&
+        job.client.trim().toLowerCase() === client.name.trim().toLowerCase()
+    );
+  }, [client, jobs]);
+
+  const clientInvoices = useMemo(() => {
+    if (!client) return [];
+    return invoices.filter(
+      (invoice) =>
+        invoice.workspaceId === client.workspaceId &&
+        (invoice.sourceClientId === client.id ||
+          invoice.billToName.trim().toLowerCase() === client.name.trim().toLowerCase() ||
+          invoice.billToCompany.trim().toLowerCase() === client.name.trim().toLowerCase())
+    );
+  }, [client, invoices]);
+
+  const invoiceTotal = clientInvoices.reduce(
+    (total, invoice) => total + getInvoiceTotals(invoice).total,
+    0
+  );
+
+  if (!loaded) return null;
+
+  if (!client) {
+    return (
+      <div className="space-y-4 text-gray-950 dark:text-gray-100">
+        <Link href="/clients" className="text-blue-600 hover:underline dark:text-blue-400">← Back to Clients</Link>
+        <h1 className="text-3xl font-bold">Client not found</h1>
+      </div>
+    );
+  }
+
+  const addressParts = [client.address, client.city, client.state, client.zip].filter(Boolean);
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-3xl font-bold">
-        Client #{id}
-      </h1>
+    <div className="space-y-6 text-gray-950 dark:text-gray-100">
+      <Link href="/clients" className="text-blue-600 hover:underline dark:text-blue-400">← Back to Clients</Link>
 
-      <div className="bg-white p-6 rounded-lg shadow">
-        <h2 className="text-xl font-semibold mb-4">
-          Client Information
-        </h2>
+      <div className="rounded-lg bg-white p-6 shadow dark:bg-gray-900">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h1 className="text-3xl font-bold">{client.name}</h1>
+            <p className="mt-2 text-gray-500 dark:text-gray-400">{client.status}</p>
+          </div>
+          <div className="text-right text-lg font-bold">{client.balance}</div>
+        </div>
 
-        <p>Name: John Smith</p>
-        <p>Phone: (555) 123-4567</p>
-        <p>Email: john@example.com</p>
-        <p>Balance Due: $450</p>
+        <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <p><strong>Phone:</strong> {client.phone || "—"}</p>
+          <p><strong>Email:</strong> {client.email || "—"}</p>
+          <p className="sm:col-span-2"><strong>Address:</strong> {addressParts.length > 0 ? addressParts.join(", ") : "—"}</p>
+          {client.notes && <p className="sm:col-span-2"><strong>Notes:</strong> {client.notes}</p>}
+        </div>
       </div>
 
-      <div className="bg-white p-6 rounded-lg shadow">
-        <h2 className="text-xl font-semibold mb-4">
-          Jobs
-        </h2>
+      <div className="rounded-lg bg-white p-6 shadow dark:bg-gray-900">
+        <h2 className="mb-4 text-xl font-semibold">Jobs</h2>
+        {clientJobs.length > 0 ? (
+          <div className="space-y-3">
+            {clientJobs.map((job) => (
+              <Link key={job.id} href={`/jobs/${job.id}`} className="block rounded-lg border border-gray-200 p-4 hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-800">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <div className="font-semibold text-blue-600 dark:text-blue-400">{job.name}</div>
+                    <div className="text-sm text-gray-500 dark:text-gray-400">{job.status} · {job.date || "No date"}</div>
+                  </div>
+                  <div className="font-bold">{job.value}</div>
+                </div>
+              </Link>
+            ))}
+          </div>
+        ) : (
+          <p className="text-gray-500 dark:text-gray-400">No jobs found for this client.</p>
+        )}
+      </div>
 
-        <ul>
-          <li>Spring Cleanup</li>
-          <li>Mulch Installation</li>
-          <li>Weekly Maintenance</li>
-        </ul>
+      <div className="rounded-lg bg-white p-6 shadow dark:bg-gray-900">
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <h2 className="text-xl font-semibold">Invoices</h2>
+          <div className="font-bold">Total: {formatCurrency(invoiceTotal)}</div>
+        </div>
+
+        {clientInvoices.length > 0 ? (
+          <div className="space-y-3">
+            {clientInvoices.map((invoice) => (
+              <Link key={invoice.id} href={`/invoices/${invoice.id}`} className="block rounded-lg border border-gray-200 p-4 hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-800">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <div className="font-semibold text-blue-600 dark:text-blue-400">{invoice.invoiceNumber}</div>
+                    <div className="text-sm text-gray-500 dark:text-gray-400">{invoice.status} · {invoice.invoiceDate}</div>
+                  </div>
+                  <div className="font-bold">{formatCurrency(getInvoiceTotals(invoice).total)}</div>
+                </div>
+              </Link>
+            ))}
+          </div>
+        ) : (
+          <p className="text-gray-500 dark:text-gray-400">No invoices found for this client.</p>
+        )}
       </div>
     </div>
   );
@@ -494,6 +552,8 @@ type ClientRow = {
 
 const clientStatuses = ["Lead", "Active", "Inactive"] as const;
 
+type ClientStatusPriority = "default" | (typeof clientStatuses)[number];
+
 function formatMoney(value: string) {
   const numericValue = Number(value.replace(/[$,]/g, ""));
 
@@ -504,11 +564,29 @@ function formatMoney(value: string) {
   return `$${numericValue.toLocaleString()}`;
 }
 
+function getStatusClasses(status: string) {
+  if (status === "Active") {
+    return "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300";
+  }
+
+  if (status === "Lead") {
+    return "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300";
+  }
+
+  if (status === "Inactive") {
+    return "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300";
+  }
+
+  return "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300";
+}
+
 export default function ClientsPage() {
   const { activeWorkspace } = useWorkspace();
 
   const [clientItems, setClientItems] = useState<ClientRow[]>(defaultClients);
   const [selectedClients, setSelectedClients] = useState<string[]>([]);
+  const [statusPriority, setStatusPriority] =
+    useState<ClientStatusPriority>("default");
 
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [newClientOpen, setNewClientOpen] = useState(false);
@@ -543,6 +621,22 @@ export default function ClientsPage() {
     (client) => client.workspaceId === activeWorkspace.id
   );
 
+  const sortedWorkspaceClients = [...workspaceClients].sort((a, b) => {
+    if (statusPriority === "default") {
+      return a.name.localeCompare(b.name);
+    }
+
+    if (a.status === statusPriority && b.status !== statusPriority) {
+      return -1;
+    }
+
+    if (a.status !== statusPriority && b.status === statusPriority) {
+      return 1;
+    }
+
+    return a.name.localeCompare(b.name);
+  });
+
   const allWorkspaceClientsSelected =
     workspaceClients.length > 0 &&
     workspaceClients.every((client) => selectedClients.includes(client.id));
@@ -550,6 +644,23 @@ export default function ClientsPage() {
   function saveClients(updatedClients: ClientRow[]) {
     setClientItems(updatedClients);
     localStorage.setItem("frontier-clients", JSON.stringify(updatedClients));
+  }
+
+  function cycleStatusPriority() {
+    setStatusPriority((current) => {
+      if (current === "default") return "Active";
+      if (current === "Active") return "Lead";
+      if (current === "Lead") return "Inactive";
+      return "default";
+    });
+  }
+
+  function getStatusSortLabel() {
+    if (statusPriority === "default") {
+      return "Default";
+    }
+
+    return `${statusPriority} first`;
   }
 
   function resetClientForm() {
@@ -693,8 +804,6 @@ export default function ClientsPage() {
   return (
     <div className="space-y-6 text-gray-950 dark:text-gray-100">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-
-
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
@@ -737,7 +846,25 @@ export default function ClientsPage() {
               </th>
 
               <th className="p-4 text-left">Name</th>
-              <th className="p-4 text-left">Status</th>
+
+              <th className="p-4 text-left">
+                <button
+                  type="button"
+                  onClick={cycleStatusPriority}
+                  className="flex items-center gap-1 hover:text-blue-600 dark:hover:text-blue-400"
+                  title="Cycle status priority"
+                >
+                  <span>Status</span>
+                  <span className="text-xs">
+                    {statusPriority === "default" ? "↕" : "↑"}
+                  </span>
+                </button>
+
+                <div className="mt-1 text-xs font-normal text-gray-500 dark:text-gray-400">
+                  {getStatusSortLabel()}
+                </div>
+              </th>
+
               <th className="p-4 text-left">Phone</th>
               <th className="p-4 text-left">Email</th>
               <th className="p-4 text-left">Address</th>
@@ -747,8 +874,8 @@ export default function ClientsPage() {
           </thead>
 
           <tbody>
-            {workspaceClients.length > 0 ? (
-              workspaceClients.map((client) => {
+            {sortedWorkspaceClients.length > 0 ? (
+              sortedWorkspaceClients.map((client) => {
                 const addressParts = [
                   client.address,
                   client.city,
@@ -779,7 +906,15 @@ export default function ClientsPage() {
                       </Link>
                     </td>
 
-                    <td className="p-4">{client.status}</td>
+                    <td className="p-4">
+                      <span
+                        className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${getStatusClasses(
+                          client.status
+                        )}`}
+                      >
+                        {client.status}
+                      </span>
+                    </td>
 
                     <td className="p-4">{client.phone || "—"}</td>
 
@@ -1234,20 +1369,20 @@ export default function DocumentsPage() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className="text-3xl font-bold text-gray-950 dark:text-gray-100">
-            Documents
+            Document Extraction
           </h1>
-
           <p className="mt-2 text-lg text-gray-500 dark:text-gray-400">
-            Contracts, quotes, invoices, and photos for {activeWorkspace.name}
+            Upload documents for {activeWorkspace.name}. Extraction and verification pipeline comes later.
           </p>
         </div>
 
-        <button
-          onClick={() => setIsUploadOpen(true)}
-          className="w-full rounded-lg bg-blue-600 px-6 py-3 text-center text-white shadow hover:bg-blue-700 sm:w-auto"
-        >
+        <button onClick={() => setIsUploadOpen(true)} className="w-full rounded-lg bg-blue-600 px-6 py-3 text-center text-white shadow hover:bg-blue-700 sm:w-auto">
           + Upload Document
         </button>
+      </div>
+
+      <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-200">
+        Future flow: upload once → extract intended use and data → verify → choose whether to create a client, job, quote, invoice, expense, or calendar item.
       </div>
 
       <div className="overflow-x-auto rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
@@ -1255,17 +1390,15 @@ export default function DocumentsPage() {
           <thead>
             <tr className="border-b border-gray-200 text-left text-sm uppercase tracking-wide text-gray-500 dark:border-gray-800 dark:text-gray-400">
               <th className="px-6 py-4">Name</th>
-              <th className="px-6 py-4">Type</th>
+              <th className="px-6 py-4">Detected Type</th>
+              <th className="px-6 py-4">Extraction Status</th>
               <th className="px-6 py-4 text-right">File</th>
             </tr>
           </thead>
 
           <tbody>
             <tr>
-              <td
-                colSpan={3}
-                className="px-6 py-16 text-center text-2xl text-gray-500 dark:text-gray-400"
-              >
+              <td colSpan={4} className="px-6 py-16 text-center text-2xl text-gray-500 dark:text-gray-400">
                 No documents uploaded for {activeWorkspace.name}
               </td>
             </tr>
@@ -1275,111 +1408,36 @@ export default function DocumentsPage() {
 
       {isUploadOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4">
-          <div className="w-full max-w-2xl rounded-xl bg-white p-4 sm:p-6 lg:p-8 shadow-xl dark:bg-gray-900">
+          <div className="w-full max-w-2xl rounded-xl bg-white p-4 shadow-xl sm:p-6 lg:p-8 dark:bg-gray-900">
             <div className="mb-6 flex items-center justify-between">
-              <h2 className="text-2xl font-bold text-gray-950 dark:text-gray-100">
-                Upload Document
-              </h2>
-
-              <button
-                onClick={() => setIsUploadOpen(false)}
-                className="text-2xl text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
-              >
-                ×
-              </button>
+              <h2 className="text-2xl font-bold text-gray-950 dark:text-gray-100">Upload for Extraction</h2>
+              <button onClick={() => setIsUploadOpen(false)} className="text-2xl text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">×</button>
             </div>
 
             <form className="space-y-6">
               <div>
-                <label className="mb-2 block text-lg font-medium text-gray-900 dark:text-gray-100">
-                  Workspace
-                </label>
-
-                <input
-                  value={activeWorkspace.name}
-                  readOnly
-                  className="w-full rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-lg text-gray-700 outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300"
-                />
+                <label className="mb-2 block text-lg font-medium text-gray-900 dark:text-gray-100">Workspace</label>
+                <input value={activeWorkspace.name} readOnly className="w-full rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-lg text-gray-700 outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300" />
               </div>
 
               <div>
-                <label className="mb-2 block text-lg font-medium text-gray-900 dark:text-gray-100">
-                  Name *
-                </label>
-
-                <input
-                  type="text"
-                  placeholder="Document name"
-                  className="w-full rounded-lg border border-blue-500 bg-white px-4 py-3 text-lg text-gray-950 outline-none dark:bg-gray-800 dark:text-gray-100"
-                />
-              </div>
-
-              <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
-                <div>
-                  <label className="mb-2 block text-lg font-medium text-gray-900 dark:text-gray-100">
-                    Type
-                  </label>
-
-                  <select className="w-full rounded-lg border border-gray-200 bg-white px-4 py-3 text-lg text-gray-700 shadow-sm dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100">
-                    <option>Other</option>
-                    <option>Contract</option>
-                    <option>Quote</option>
-                    <option>Invoice</option>
-                    <option>Photo</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="mb-2 block text-lg font-medium text-gray-900 dark:text-gray-100">
-                    Client
-                  </label>
-
-                  <select className="w-full rounded-lg border border-gray-200 bg-white px-4 py-3 text-lg text-gray-700 shadow-sm dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100">
-                    <option>None</option>
-                    <option>John Smith</option>
-                    <option>Acme HOA</option>
-                    <option>Sunset Apartments</option>
-                  </select>
-                </div>
+                <label className="mb-2 block text-lg font-medium text-gray-900 dark:text-gray-100">Document Name</label>
+                <input type="text" placeholder="Quote, invoice, receipt, handwritten note..." className="w-full rounded-lg border border-blue-500 bg-white px-4 py-3 text-lg text-gray-950 outline-none dark:bg-gray-800 dark:text-gray-100" />
               </div>
 
               <div>
-                <label className="mb-2 block text-lg font-medium text-gray-900 dark:text-gray-100">
-                  File
-                </label>
-
-                <input
-                  type="file"
-                  className="block w-full text-sm text-gray-900 dark:text-gray-100"
-                />
+                <label className="mb-2 block text-lg font-medium text-gray-900 dark:text-gray-100">File</label>
+                <input type="file" className="block w-full text-sm text-gray-900 dark:text-gray-100" />
               </div>
 
               <div>
-                <label className="mb-2 block text-lg font-medium text-gray-900 dark:text-gray-100">
-                  Notes
-                </label>
-
-                <textarea
-                  rows={3}
-                  className="w-full rounded-lg border border-gray-200 bg-white px-4 py-3 text-lg text-gray-900 shadow-sm dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
-                />
+                <label className="mb-2 block text-lg font-medium text-gray-900 dark:text-gray-100">Notes</label>
+                <textarea rows={3} placeholder="Optional context for later extraction." className="w-full rounded-lg border border-gray-200 bg-white px-4 py-3 text-lg text-gray-900 shadow-sm dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100" />
               </div>
 
               <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-                <button
-                  type="button"
-                  onClick={() => setIsUploadOpen(false)}
-                  className="w-full rounded-lg border border-gray-200 px-6 py-3 text-lg text-gray-900 shadow-sm hover:bg-gray-50 dark:border-gray-700 dark:text-gray-100 dark:hover:bg-gray-800 sm:w-auto"
-                >
-                  Cancel
-                </button>
-
-                <button
-                  type="submit"
-                  className="w-full rounded-lg bg-blue-500 px-6 py-3 text-lg font-semibold text-white hover:bg-blue-600 sm:w-auto"
-                >
-                  Upload
-                </button>
+                <button type="button" onClick={() => setIsUploadOpen(false)} className="w-full rounded-lg border border-gray-200 px-6 py-3 text-lg text-gray-900 shadow-sm hover:bg-gray-50 dark:border-gray-700 dark:text-gray-100 dark:hover:bg-gray-800 sm:w-auto">Cancel</button>
+                <button type="button" onClick={() => setIsUploadOpen(false)} className="w-full rounded-lg bg-blue-500 px-6 py-3 text-lg font-semibold text-white hover:bg-blue-600 sm:w-auto">Save Upload Placeholder</button>
               </div>
             </form>
           </div>
@@ -1395,23 +1453,29 @@ export default function DocumentsPage() {
 ```tsx
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import Link from "next/link";
+
 import { useWorkspace } from "@/components/WorkspaceContext";
 import { invoices as defaultInvoices } from "@/lib/invoices";
-import { expenses as defaultExpenses } from "@/lib/expenses";
-import { clients } from "@/lib/clients";
+import { expenses as defaultExpenses, Expense } from "@/lib/expenses";
+import {
+  formatCurrency,
+  getInvoiceClientName,
+  getInvoiceTotals,
+  InvoiceRow,
+  InvoiceStatus,
+  invoiceStatuses,
+  loadSavedInvoices,
+  moneyToNumber,
+  saveSavedInvoices,
+} from "@/lib/frontierInvoices";
 
-const invoiceStatuses = ["Draft", "Sent", "Overdue", "Paid"] as const;
+type DefaultInvoice = (typeof defaultInvoices)[number];
 
-type InvoiceStatus = (typeof invoiceStatuses)[number];
-
-function moneyToNumber(value: string) {
-  return Number(value.replace(/[$,]/g, ""));
-}
-
-function formatMoney(value: number) {
-  return `$${value.toLocaleString()}`;
-}
+type FinancialInvoice =
+  | { source: "saved"; id: string; invoice: InvoiceRow }
+  | { source: "default"; id: string; invoice: DefaultInvoice };
 
 function SummaryCard({
   title,
@@ -1436,53 +1500,100 @@ function SummaryCard({
         {note && <p className="mt-3 text-green-600">{note}</p>}
       </div>
 
-      <div
-        className={`flex h-12 w-12 items-center justify-center rounded-xl text-2xl ${iconClass}`}
-      >
+      <div className={`flex h-12 w-12 items-center justify-center rounded-xl text-2xl ${iconClass}`}>
         {icon}
       </div>
     </div>
   );
 }
 
+function getFinancialInvoiceNumber(row: FinancialInvoice) {
+  return row.source === "saved" ? row.invoice.invoiceNumber : row.invoice.id;
+}
+
+function getFinancialInvoiceClient(row: FinancialInvoice) {
+  return row.source === "saved"
+    ? getInvoiceClientName(row.invoice)
+    : row.invoice.client;
+}
+
+function getFinancialInvoiceStatus(row: FinancialInvoice): InvoiceStatus {
+  return row.invoice.status as InvoiceStatus;
+}
+
+function getFinancialInvoiceTotal(row: FinancialInvoice) {
+  return row.source === "saved"
+    ? getInvoiceTotals(row.invoice).total
+    : moneyToNumber(row.invoice.amount);
+}
+
 export default function FinancialsPage() {
   const { activeWorkspace } = useWorkspace();
 
-  const [invoiceItems, setInvoiceItems] = useState(defaultInvoices);
-  const [expenseItems, setExpenseItems] = useState(defaultExpenses);
+  const [savedInvoices, setSavedInvoices] = useState<InvoiceRow[]>([]);
+  const [defaultInvoiceItems, setDefaultInvoiceItems] =
+    useState(defaultInvoices);
+  const [expenseItems, setExpenseItems] = useState<Expense[]>(defaultExpenses);
 
   const [selectedInvoices, setSelectedInvoices] = useState<string[]>([]);
   const [selectedExpenses, setSelectedExpenses] = useState<string[]>([]);
-
-  const [newInvoiceOpen, setNewInvoiceOpen] = useState(false);
   const [newExpenseOpen, setNewExpenseOpen] = useState(false);
-
-  const [invoiceClient, setInvoiceClient] = useState("");
-  const [invoiceStatus, setInvoiceStatus] = useState<InvoiceStatus>("Draft");
-  const [invoiceAmount, setInvoiceAmount] = useState("");
-  const [invoiceFileName, setInvoiceFileName] = useState("");
 
   const [expenseDescription, setExpenseDescription] = useState("");
   const [expenseCategory, setExpenseCategory] = useState("Materials");
   const [expenseAmount, setExpenseAmount] = useState("");
 
-  const workspaceInvoices = invoiceItems.filter(
-    (invoice) => invoice.workspaceId === activeWorkspace.id
-  );
+  useEffect(() => {
+    setSavedInvoices(loadSavedInvoices());
+
+    const savedExpenses = localStorage.getItem("frontier-expenses");
+
+    if (savedExpenses) {
+      try {
+        setExpenseItems(JSON.parse(savedExpenses));
+      } catch {
+        setExpenseItems(defaultExpenses);
+      }
+    }
+  }, []);
+
+  const generatedInvoiceRows: FinancialInvoice[] = savedInvoices
+    .filter((invoice) => invoice.workspaceId === activeWorkspace.id)
+    .map((invoice) => ({
+      source: "saved",
+      id: invoice.id,
+      invoice,
+    }));
+
+  const defaultInvoiceRows: FinancialInvoice[] = defaultInvoiceItems
+    .filter((invoice) => invoice.workspaceId === activeWorkspace.id)
+    .map((invoice) => ({
+      source: "default",
+      id: `default-${invoice.id}`,
+      invoice,
+    }));
+
+  const workspaceInvoices = [...generatedInvoiceRows, ...defaultInvoiceRows];
 
   const workspaceExpenses = expenseItems.filter(
     (expense) => expense.workspaceId === activeWorkspace.id
   );
 
-  const workspaceClients = clients.filter(
-    (client) => client.workspaceId === activeWorkspace.id
-  );
+  function saveSavedInvoiceItems(updatedInvoices: InvoiceRow[]) {
+    setSavedInvoices(updatedInvoices);
+    saveSavedInvoices(updatedInvoices);
+  }
 
-  function toggleInvoice(id: string) {
+  function saveExpenses(updatedExpenses: Expense[]) {
+    setExpenseItems(updatedExpenses);
+    localStorage.setItem("frontier-expenses", JSON.stringify(updatedExpenses));
+  }
+
+  function toggleInvoice(rowId: string) {
     setSelectedInvoices((current) =>
-      current.includes(id)
-        ? current.filter((invoiceId) => invoiceId !== id)
-        : [...current, id]
+      current.includes(rowId)
+        ? current.filter((invoiceId) => invoiceId !== rowId)
+        : [...current, rowId]
     );
   }
 
@@ -1495,40 +1606,53 @@ export default function FinancialsPage() {
   }
 
   function removeSelectedInvoices() {
-    setInvoiceItems((current) =>
-      current.filter((invoice) => !selectedInvoices.includes(invoice.id))
+    const selectedSavedInvoiceIds = selectedInvoices.filter(
+      (id) => !id.startsWith("default-")
+    );
+
+    if (selectedSavedInvoiceIds.length > 0) {
+      saveSavedInvoiceItems(
+        savedInvoices.filter(
+          (invoice) => !selectedSavedInvoiceIds.includes(invoice.id)
+        )
+      );
+    }
+
+    setDefaultInvoiceItems((current) =>
+      current.filter(
+        (invoice) => !selectedInvoices.includes(`default-${invoice.id}`)
+      )
     );
 
     setSelectedInvoices([]);
   }
 
   function removeSelectedExpenses() {
-    setExpenseItems((current) =>
-      current.filter(
+    saveExpenses(
+      expenseItems.filter(
         (expense) =>
-          !selectedExpenses.includes(
-            `${expense.workspaceId}-${expense.description}`
-          )
+          !selectedExpenses.includes(`${expense.workspaceId}-${expense.description}`)
       )
     );
 
     setSelectedExpenses([]);
   }
 
-  function updateInvoiceStatus(id: string, status: InvoiceStatus) {
-    setInvoiceItems((current) =>
+  function updateInvoiceStatus(row: FinancialInvoice, status: InvoiceStatus) {
+    if (row.source === "saved") {
+      saveSavedInvoiceItems(
+        savedInvoices.map((invoice) =>
+          invoice.id === row.invoice.id ? { ...invoice, status } : invoice
+        )
+      );
+      return;
+    }
+
+    setDefaultInvoiceItems((current) =>
       current.map((invoice) =>
-        invoice.id === id ? { ...invoice, status } : invoice
+        invoice.id === row.invoice.id ? { ...invoice, status } : invoice
       )
     );
-  }
-
-  function closeInvoiceModal() {
-    setNewInvoiceOpen(false);
-    setInvoiceClient("");
-    setInvoiceStatus("Draft");
-    setInvoiceAmount("");
-    setInvoiceFileName("");
   }
 
   function closeExpenseModal() {
@@ -1538,44 +1662,18 @@ export default function FinancialsPage() {
     setExpenseAmount("");
   }
 
-  function addInvoice() {
-    if (!invoiceClient.trim()) return;
-
-    const amount = Number(invoiceAmount);
-
-    if (Number.isNaN(amount) || amount <= 0) return;
-
-    const nextInvoiceNumber = invoiceItems.length + 1;
-    const nextInvoiceId = `INV-${String(nextInvoiceNumber).padStart(3, "0")}`;
-
-    setInvoiceItems((current) => [
-      ...current,
-      {
-        id: nextInvoiceId,
-        client: invoiceClient,
-        status: invoiceStatus,
-        amount: formatMoney(amount),
-        workspaceId: activeWorkspace.id,
-        supportingFile: invoiceFileName,
-      },
-    ]);
-
-    closeInvoiceModal();
-  }
-
   function addExpense() {
     if (!expenseDescription.trim()) return;
 
     const amount = Number(expenseAmount);
-
     if (Number.isNaN(amount) || amount <= 0) return;
 
-    setExpenseItems((current) => [
-      ...current,
+    saveExpenses([
+      ...expenseItems,
       {
         description: expenseDescription.trim(),
         category: expenseCategory,
-        amount: formatMoney(amount),
+        amount: formatCurrency(amount),
         workspaceId: activeWorkspace.id,
       },
     ]);
@@ -1584,12 +1682,12 @@ export default function FinancialsPage() {
   }
 
   const revenue = workspaceInvoices
-    .filter((invoice) => invoice.status === "Paid")
-    .reduce((total, invoice) => total + moneyToNumber(invoice.amount), 0);
+    .filter((row) => getFinancialInvoiceStatus(row) === "Paid")
+    .reduce((total, row) => total + getFinancialInvoiceTotal(row), 0);
 
   const outstanding = workspaceInvoices
-    .filter((invoice) => invoice.status !== "Paid")
-    .reduce((total, invoice) => total + moneyToNumber(invoice.amount), 0);
+    .filter((row) => getFinancialInvoiceStatus(row) !== "Paid")
+    .reduce((total, row) => total + getFinancialInvoiceTotal(row), 0);
 
   const totalExpenses = workspaceExpenses.reduce(
     (total, expense) => total + moneyToNumber(expense.amount),
@@ -1600,11 +1698,10 @@ export default function FinancialsPage() {
 
   return (
     <div className="space-y-8">
-
       <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
         <SummaryCard
           title="Revenue"
-          value={formatMoney(revenue)}
+          value={formatCurrency(revenue)}
           icon="$"
           iconClass="bg-green-100 text-green-600 dark:bg-green-900/40 dark:text-green-300"
           note="Paid invoices"
@@ -1612,21 +1709,21 @@ export default function FinancialsPage() {
 
         <SummaryCard
           title="Expenses"
-          value={formatMoney(totalExpenses)}
+          value={formatCurrency(totalExpenses)}
           icon="↘"
           iconClass="bg-red-100 text-red-600 dark:bg-red-900/40 dark:text-red-300"
         />
 
         <SummaryCard
           title="Outstanding"
-          value={formatMoney(outstanding)}
+          value={formatCurrency(outstanding)}
           icon="◷"
           iconClass="bg-orange-100 text-orange-600 dark:bg-orange-900/40 dark:text-orange-300"
         />
 
         <SummaryCard
           title="Profit"
-          value={formatMoney(profit)}
+          value={formatCurrency(profit)}
           icon="↗"
           iconClass="bg-blue-100 text-blue-600 dark:bg-blue-900/40 dark:text-blue-300"
         />
@@ -1640,14 +1737,15 @@ export default function FinancialsPage() {
             </h2>
 
             <div className="flex gap-2">
-              <button
-                onClick={() => setNewInvoiceOpen(true)}
+              <Link
+                href="/invoices/new"
                 className="rounded-lg bg-blue-600 px-3 py-2 text-sm text-white hover:bg-blue-700"
               >
-                + Add Invoice
-              </button>
+                + Create Invoice
+              </Link>
 
               <button
+                type="button"
                 onClick={removeSelectedInvoices}
                 disabled={selectedInvoices.length === 0}
                 className="rounded-lg bg-red-600 px-3 py-2 text-sm text-white disabled:opacity-50"
@@ -1657,7 +1755,7 @@ export default function FinancialsPage() {
             </div>
           </div>
 
-          <table className="min-w-[720px] w-full">
+          <table className="min-w-[820px] w-full">
             <thead>
               <tr className="border-b border-gray-200 text-left text-sm uppercase tracking-wide text-gray-500 dark:border-gray-800 dark:text-gray-400">
                 <th className="w-12 px-4 py-4"></th>
@@ -1670,36 +1768,42 @@ export default function FinancialsPage() {
 
             <tbody>
               {workspaceInvoices.length > 0 ? (
-                workspaceInvoices.map((invoice) => (
+                workspaceInvoices.map((row) => (
                   <tr
-                    key={invoice.id}
+                    key={row.id}
                     className="border-b border-gray-200 text-base last:border-b-0 dark:border-gray-800 lg:text-lg"
                   >
                     <td className="px-4 py-5 text-center">
                       <input
                         type="checkbox"
-                        checked={selectedInvoices.includes(invoice.id)}
-                        onChange={() => toggleInvoice(invoice.id)}
+                        checked={selectedInvoices.includes(row.id)}
+                        onChange={() => toggleInvoice(row.id)}
                         className="h-4 w-4"
                       />
                     </td>
 
                     <td className="px-6 py-5 font-medium text-gray-950 dark:text-gray-100">
-                      {invoice.id}
+                      {row.source === "saved" ? (
+                        <Link
+                          href={`/invoices/${row.invoice.id}`}
+                          className="text-blue-600 hover:underline dark:text-blue-400"
+                        >
+                          {getFinancialInvoiceNumber(row)}
+                        </Link>
+                      ) : (
+                        getFinancialInvoiceNumber(row)
+                      )}
                     </td>
 
                     <td className="px-6 py-5 text-gray-500 dark:text-gray-400">
-                      {invoice.client}
+                      {getFinancialInvoiceClient(row)}
                     </td>
 
                     <td className="px-6 py-5">
                       <select
-                        value={invoice.status}
+                        value={getFinancialInvoiceStatus(row)}
                         onChange={(event) =>
-                          updateInvoiceStatus(
-                            invoice.id,
-                            event.target.value as InvoiceStatus
-                          )
+                          updateInvoiceStatus(row, event.target.value as InvoiceStatus)
                         }
                         className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
                       >
@@ -1710,16 +1814,13 @@ export default function FinancialsPage() {
                     </td>
 
                     <td className="px-6 py-5 text-right font-medium text-gray-950 dark:text-gray-100">
-                      {invoice.amount}
+                      {formatCurrency(getFinancialInvoiceTotal(row))}
                     </td>
                   </tr>
                 ))
               ) : (
                 <tr>
-                  <td
-                    colSpan={5}
-                    className="px-6 py-12 text-center text-lg text-gray-500 dark:text-gray-400"
-                  >
+                  <td colSpan={5} className="px-6 py-12 text-center text-lg text-gray-500 dark:text-gray-400">
                     No invoices for {activeWorkspace.name}
                   </td>
                 </tr>
@@ -1768,10 +1869,7 @@ export default function FinancialsPage() {
                   const expenseId = `${expense.workspaceId}-${expense.description}`;
 
                   return (
-                    <tr
-                      key={expenseId}
-                      className="border-b border-gray-200 text-base last:border-b-0 dark:border-gray-800 lg:text-lg"
-                    >
+                    <tr key={expenseId} className="border-b border-gray-200 text-base last:border-b-0 dark:border-gray-800 lg:text-lg">
                       <td className="px-4 py-5 text-center">
                         <input
                           type="checkbox"
@@ -1784,11 +1882,9 @@ export default function FinancialsPage() {
                       <td className="px-6 py-5 font-medium text-gray-950 dark:text-gray-100">
                         {expense.description}
                       </td>
-
                       <td className="px-6 py-5 text-gray-500 dark:text-gray-400">
                         {expense.category}
                       </td>
-
                       <td className="px-6 py-5 text-right font-medium text-red-600 dark:text-red-400">
                         {expense.amount}
                       </td>
@@ -1797,10 +1893,7 @@ export default function FinancialsPage() {
                 })
               ) : (
                 <tr>
-                  <td
-                    colSpan={4}
-                    className="px-6 py-12 text-center text-lg text-gray-500 dark:text-gray-400"
-                  >
+                  <td colSpan={4} className="px-6 py-12 text-center text-lg text-gray-500 dark:text-gray-400">
                     No expenses for {activeWorkspace.name}
                   </td>
                 </tr>
@@ -1810,95 +1903,12 @@ export default function FinancialsPage() {
         </div>
       </div>
 
-      {newInvoiceOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4">
-          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl dark:bg-gray-900">
-            <div className="mb-6 flex items-center justify-between">
-              <h2 className="text-xl font-bold text-gray-950 dark:text-gray-100">
-                Add Invoice
-              </h2>
-
-              <button
-                onClick={closeInvoiceModal}
-                className="text-2xl text-gray-500"
-              >
-                ×
-              </button>
-            </div>
-
-            <div className="space-y-4">
-              <select
-                value={invoiceClient}
-                onChange={(event) => setInvoiceClient(event.target.value)}
-                className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800"
-              >
-                <option value="">Select Client</option>
-                {workspaceClients.map((client) => (
-                  <option key={client.id} value={client.name}>
-                    {client.name}
-                  </option>
-                ))}
-              </select>
-
-              <select
-                value={invoiceStatus}
-                onChange={(event) =>
-                  setInvoiceStatus(event.target.value as InvoiceStatus)
-                }
-                className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800"
-              >
-                {invoiceStatuses.map((status) => (
-                  <option key={status}>{status}</option>
-                ))}
-              </select>
-
-              <input
-                type="number"
-                value={invoiceAmount}
-                onChange={(event) => setInvoiceAmount(event.target.value)}
-                placeholder="Amount"
-                className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800"
-              />
-
-              <input
-                type="file"
-                onChange={(event) =>
-                  setInvoiceFileName(event.target.files?.[0]?.name ?? "")
-                }
-                className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800"
-              />
-
-              {invoiceFileName && (
-                <p className="text-sm text-gray-500 dark:text-gray-400">
-                  Attached: {invoiceFileName}
-                </p>
-              )}
-
-              <button
-                onClick={addInvoice}
-                className="w-full rounded-lg bg-blue-600 py-3 text-white hover:bg-blue-700"
-              >
-                Add Invoice
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {newExpenseOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4">
           <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl dark:bg-gray-900">
             <div className="mb-6 flex items-center justify-between">
-              <h2 className="text-xl font-bold text-gray-950 dark:text-gray-100">
-                Add Expense
-              </h2>
-
-              <button
-                onClick={closeExpenseModal}
-                className="text-2xl text-gray-500"
-              >
-                ×
-              </button>
+              <h2 className="text-xl font-bold text-gray-950 dark:text-gray-100">Add Expense</h2>
+              <button onClick={closeExpenseModal} className="text-2xl text-gray-500">×</button>
             </div>
 
             <div className="space-y-4">
@@ -2009,6 +2019,33 @@ html.dark body {
   color: #f9fafb;
   border-color: #374151;
 }
+
+@media print {
+  aside,
+  header,
+  .print-hidden {
+    display: none !important;
+  }
+
+  main {
+    padding: 0 !important;
+    overflow: visible !important;
+  }
+
+  body {
+    background: white !important;
+  }
+
+  .invoice-print-page {
+    
+    margin: 0.7in auto 0 auto !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+    border: none !important;
+    width: 100% !important;
+    max-width: none !important;
+  }
+}
 ```
 
 ## app\inventory\page.tsx
@@ -2017,7 +2054,6 @@ html.dark body {
 "use client";
 
 import { useEffect, useState } from "react";
-
 import { useWorkspace } from "@/components/WorkspaceContext";
 import { inventory as defaultInventory } from "@/lib/inventory";
 import { jobs as defaultJobs } from "@/lib/jobs";
@@ -2034,25 +2070,37 @@ type InventoryRow = {
 export default function InventoryPage() {
   const { activeWorkspace } = useWorkspace();
 
-  const [inventoryItems, setInventoryItems] = useState<InventoryRow[]>(
-    defaultInventory
-  );
+  const [inventoryItems, setInventoryItems] = useState<InventoryRow[]>(defaultInventory);
   const [jobItems, setJobItems] = useState(defaultJobs);
   const [selectedItems, setSelectedItems] = useState<string[]>([]);
 
   const [newItemOpen, setNewItemOpen] = useState(false);
+  const [editTargetOpen, setEditTargetOpen] = useState(false);
+  const [editingItemName, setEditingItemName] = useState("");
+  const [editingCurrentQty, setEditingCurrentQty] = useState("");
+  const [editingTargetQty, setEditingTargetQty] = useState("");
+
   const [itemName, setItemName] = useState("");
   const [currentQty, setCurrentQty] = useState("");
   const [targetQty, setTargetQty] = useState("");
 
   useEffect(() => {
     const savedJobs = localStorage.getItem("frontier-jobs");
+    const savedInventory = localStorage.getItem("frontier-inventory");
 
     if (savedJobs) {
       try {
         setJobItems(JSON.parse(savedJobs));
       } catch {
         setJobItems(defaultJobs);
+      }
+    }
+
+    if (savedInventory) {
+      try {
+        setInventoryItems(JSON.parse(savedInventory));
+      } catch {
+        setInventoryItems(defaultInventory);
       }
     }
   }, []);
@@ -2080,12 +2128,9 @@ export default function InventoryPage() {
     )
     .filter((material, index, materials) => {
       const normalizedName = material.name.toLowerCase();
-
       return (
         material.name.length > 0 &&
-        materials.findIndex(
-          (candidate) => candidate.name.toLowerCase() === normalizedName
-        ) === index
+        materials.findIndex((candidate) => candidate.name.toLowerCase() === normalizedName) === index
       );
     });
 
@@ -2094,19 +2139,21 @@ export default function InventoryPage() {
     ...autoMaterialRows.filter(
       (material) =>
         !workspaceInventory.some(
-          (item) =>
-            item.name.trim().toLowerCase() === material.name.trim().toLowerCase()
+          (item) => item.name.trim().toLowerCase() === material.name.trim().toLowerCase()
         )
     ),
   ];
 
+  function saveInventory(updatedItems: InventoryRow[]) {
+    const persistedItems = updatedItems.filter((item) => !item.autoGenerated);
+    setInventoryItems(persistedItems);
+    localStorage.setItem("frontier-inventory", JSON.stringify(persistedItems));
+  }
+
   function getReservedForItem(itemName: string) {
     return activeMaterialJobs.flatMap((job) =>
       job.materials
-        .filter(
-          (material) =>
-            material.name.trim().toLowerCase() === itemName.trim().toLowerCase()
-        )
+        .filter((material) => material.name.trim().toLowerCase() === itemName.trim().toLowerCase())
         .map((material) => ({
           jobId: job.id,
           jobName: job.name,
@@ -2125,10 +2172,7 @@ export default function InventoryPage() {
   }
 
   function removeSelectedItems() {
-    setInventoryItems((current) =>
-      current.filter((item) => !selectedItems.includes(item.name))
-    );
-
+    saveInventory(inventoryItems.filter((item) => !selectedItems.includes(item.name)));
     setSelectedItems([]);
   }
 
@@ -2148,115 +2192,87 @@ export default function InventoryPage() {
 
     const current = Number(currentQty);
     const target = Number(targetQty);
-
     if (Number.isNaN(current) || Number.isNaN(target)) return;
 
-    setInventoryItems((existing) => [
-      ...existing,
-      {
-        name: itemName.trim(),
-        currentQty: current,
-        targetQty: target,
-        warning: current < target,
-        workspaceId: activeWorkspace.id,
-      },
-    ]);
+    const newItem: InventoryRow = {
+      name: itemName.trim(),
+      currentQty: current,
+      targetQty: target,
+      warning: current < target,
+      workspaceId: activeWorkspace.id,
+    };
 
+    saveInventory([...inventoryItems, newItem]);
     closeNewItemModal();
+  }
+
+  function openTargetEditor(item: InventoryRow) {
+    setEditingItemName(item.name);
+    setEditingCurrentQty(String(item.currentQty ?? 0));
+    setEditingTargetQty(String(item.targetQty ?? 0));
+    setEditTargetOpen(true);
+  }
+
+  function closeTargetEditor() {
+    setEditTargetOpen(false);
+    setEditingItemName("");
+    setEditingCurrentQty("");
+    setEditingTargetQty("");
+  }
+
+  function saveTargetEditor() {
+    if (!editingItemName.trim()) return;
+
+    const current = Number(editingCurrentQty);
+    const target = Number(editingTargetQty);
+    if (Number.isNaN(current) || Number.isNaN(target)) return;
+
+    const existingItem = inventoryItems.find(
+      (item) =>
+        item.workspaceId === activeWorkspace.id &&
+        item.name.trim().toLowerCase() === editingItemName.trim().toLowerCase()
+    );
+
+    const updatedItem: InventoryRow = {
+      ...(existingItem ?? {
+        name: editingItemName.trim(),
+        workspaceId: activeWorkspace.id,
+      }),
+      currentQty: current,
+      targetQty: target,
+      warning: current < target,
+      autoGenerated: false,
+    };
+
+    const updatedItems = existingItem
+      ? inventoryItems.map((item) =>
+          item.workspaceId === activeWorkspace.id &&
+          item.name.trim().toLowerCase() === editingItemName.trim().toLowerCase()
+            ? updatedItem
+            : item
+        )
+      : [...inventoryItems, updatedItem];
+
+    saveInventory(updatedItems);
+    closeTargetEditor();
   }
 
   return (
     <div className="space-y-8">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-
-
         <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => setNewItemOpen(true)}
-            className="rounded-lg bg-blue-600 px-4 py-2 text-white shadow hover:bg-blue-700"
-          >
+          <button type="button" onClick={() => setNewItemOpen(true)} className="rounded-lg bg-blue-600 px-4 py-2 text-white shadow hover:bg-blue-700">
             + Add Item
           </button>
-
-          <button
-            type="button"
-            onClick={removeSelectedItems}
-            disabled={selectedItems.length === 0}
-            className="rounded-lg bg-red-600 px-4 py-2 text-white shadow hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
-          >
+          <button type="button" onClick={removeSelectedItems} disabled={selectedItems.length === 0} className="rounded-lg bg-red-600 px-4 py-2 text-white shadow hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50">
             Remove Item
           </button>
         </div>
       </div>
 
       <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-200">
-        Inventory demand is calculated only from{" "}
-        <strong>Scheduled</strong> and <strong>Completed</strong> jobs. Lead,
-        Quoted, and Paid jobs do not reserve inventory. Materials from jobs will
-        auto-appear even if no inventory item exists yet.
+        Click a <strong>Target Qty</strong> value to update inventory thresholds.
       </div>
-
-      {selectedItems.length > 0 && (
-        <div className="rounded-xl bg-gray-900 p-4 text-white">
-          {selectedItems.length} item
-          {selectedItems.length !== 1 ? "s" : ""} selected
-        </div>
-      )}
-
-      {newItemOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4">
-          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl dark:bg-gray-900">
-            <div className="mb-6 flex items-center justify-between">
-              <h2 className="text-xl font-bold text-gray-950 dark:text-gray-100">
-                Add Inventory Item
-              </h2>
-
-              <button
-                type="button"
-                onClick={closeNewItemModal}
-                className="text-2xl text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
-              >
-                ×
-              </button>
-            </div>
-
-            <div className="space-y-4">
-              <input
-                type="text"
-                value={itemName}
-                onChange={(event) => setItemName(event.target.value)}
-                placeholder="Item Name"
-                className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800"
-              />
-
-              <input
-                type="number"
-                value={currentQty}
-                onChange={(event) => setCurrentQty(event.target.value)}
-                placeholder="Current Quantity"
-                className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800"
-              />
-
-              <input
-                type="number"
-                value={targetQty}
-                onChange={(event) => setTargetQty(event.target.value)}
-                placeholder="Target Quantity"
-                className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800"
-              />
-
-              <button
-                type="button"
-                onClick={addInventoryItem}
-                className="w-full rounded-lg bg-blue-600 py-3 text-white hover:bg-blue-700"
-              >
-                Add Item
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       <div className="overflow-x-auto rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
         <table className="min-w-[1100px] w-full">
@@ -2277,124 +2293,366 @@ export default function InventoryPage() {
             {mergedInventory.length > 0 ? (
               mergedInventory.map((item) => {
                 const reservedJobs = getReservedForItem(item.name);
-
-                const reservedQty = reservedJobs.reduce(
-                  (total, reserved) => total + reserved.quantity,
-                  0
-                );
-
-                const availableAfterJobs =
-                  item.currentQty === null ? null : item.currentQty - reservedQty;
-
-                const suggestedOrder =
-                  item.targetQty === null || availableAfterJobs === null
-                    ? null
-                    : Math.max(item.targetQty - availableAfterJobs, 0);
-
-                const warning =
-                  item.currentQty === null ||
-                  item.targetQty === null ||
-                  (availableAfterJobs !== null &&
-                    availableAfterJobs < item.targetQty);
+                const reservedQty = reservedJobs.reduce((total, reserved) => total + reserved.quantity, 0);
+                const availableAfterJobs = item.currentQty === null ? null : item.currentQty - reservedQty;
+                const suggestedOrder = item.targetQty === null || availableAfterJobs === null ? null : Math.max(item.targetQty - availableAfterJobs, 0);
+                const warning = item.currentQty === null || item.targetQty === null || (availableAfterJobs !== null && availableAfterJobs < item.targetQty);
 
                 return (
-                  <tr
-                    key={`${item.workspaceId}-${item.name}`}
-                    className="border-b border-gray-200 text-base last:border-b-0 dark:border-gray-800 lg:text-lg"
-                  >
+                  <tr key={`${item.workspaceId}-${item.name}`} className="border-b border-gray-200 text-base last:border-b-0 dark:border-gray-800 lg:text-lg">
                     <td className="px-4 py-5 text-center">
-                      <input
-                        type="checkbox"
-                        checked={selectedItems.includes(item.name)}
-                        onChange={() => toggleItem(item.name)}
-                        disabled={item.autoGenerated}
-                        className="h-4 w-4 disabled:cursor-not-allowed disabled:opacity-40"
-                        title={
-                          item.autoGenerated
-                            ? "Auto-generated from job materials"
-                            : undefined
-                        }
-                      />
+                      <input type="checkbox" checked={selectedItems.includes(item.name)} onChange={() => toggleItem(item.name)} disabled={item.autoGenerated} className="h-4 w-4 disabled:cursor-not-allowed disabled:opacity-40" />
                     </td>
-
                     <td className="px-6 py-5 font-medium text-gray-950 dark:text-gray-100">
                       <div className="flex items-center gap-3">
-                        {warning && (
-                          <span className="text-orange-500">⚠</span>
-                        )}
-
+                        {warning && <span className="text-orange-500">⚠</span>}
                         <span>{item.name}</span>
-
-                        {item.autoGenerated && (
-                          <span className="rounded-full bg-blue-100 px-2 py-1 text-xs font-medium text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
-                            Job material
-                          </span>
-                        )}
+                        {item.autoGenerated && <span className="rounded-full bg-blue-100 px-2 py-1 text-xs font-medium text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">Job material</span>}
                       </div>
                     </td>
-
-                    <td className="px-6 py-5 text-center text-gray-900 dark:text-gray-100">
-                      {item.currentQty ?? "—"}
+                    <td className="px-6 py-5 text-center text-gray-900 dark:text-gray-100">{item.currentQty ?? "—"}</td>
+                    <td className="px-6 py-5 text-center text-blue-600 dark:text-blue-400">{reservedQty}</td>
+                    <td className={`px-6 py-5 text-center ${warning ? "text-red-600 dark:text-red-400" : "text-green-600 dark:text-green-400"}`}>{availableAfterJobs ?? "—"}</td>
+                    <td className="px-6 py-5 text-center">
+                      <button type="button" onClick={() => openTargetEditor(item)} className="rounded px-2 py-1 text-blue-600 hover:bg-blue-50 hover:underline dark:text-blue-400 dark:hover:bg-blue-950/30">
+                        {item.targetQty ?? "Set target"}
+                      </button>
                     </td>
-
-                    <td className="px-6 py-5 text-center text-blue-600 dark:text-blue-400">
-                      {reservedQty}
-                    </td>
-
-                    <td
-                      className={`px-6 py-5 text-center ${
-                        warning
-                          ? "text-red-600 dark:text-red-400"
-                          : "text-green-600 dark:text-green-400"
-                      }`}
-                    >
-                      {availableAfterJobs ?? "—"}
-                    </td>
-
-                    <td className="px-6 py-5 text-center text-gray-500 dark:text-gray-400">
-                      {item.targetQty ?? "—"}
-                    </td>
-
                     <td className="px-6 py-5 text-sm text-gray-600 dark:text-gray-400">
                       {reservedJobs.length > 0 ? (
                         <div className="space-y-1">
                           {reservedJobs.map((reserved) => (
-                            <div key={`${reserved.jobId}-${reserved.quantity}`}>
-                              {reserved.quantity} → {reserved.jobName} (
-                              {reserved.jobStatus})
-                            </div>
+                            <div key={`${reserved.jobId}-${reserved.quantity}`}>{reserved.quantity} → {reserved.jobName} ({reserved.jobStatus})</div>
                           ))}
                         </div>
-                      ) : (
-                        "—"
-                      )}
+                      ) : "—"}
                     </td>
-
-                    <td
-                      className={`px-6 py-5 text-right ${
-                        warning
-                          ? "text-orange-600 dark:text-orange-400"
-                          : "text-green-600 dark:text-green-400"
-                      }`}
-                    >
-                      {suggestedOrder ?? "—"}
-                    </td>
+                    <td className={`px-6 py-5 text-right ${warning ? "text-orange-600 dark:text-orange-400" : "text-green-600 dark:text-green-400"}`}>{suggestedOrder ?? "—"}</td>
                   </tr>
                 );
               })
             ) : (
-              <tr>
-                <td
-                  colSpan={8}
-                  className="px-6 py-16 text-center text-xl text-gray-500 dark:text-gray-400"
-                >
-                  No inventory items or scheduled job materials for{" "}
-                  {activeWorkspace.name}
-                </td>
-              </tr>
+              <tr><td colSpan={8} className="px-6 py-16 text-center text-xl text-gray-500 dark:text-gray-400">No inventory items or scheduled job materials for {activeWorkspace.name}</td></tr>
             )}
           </tbody>
         </table>
+      </div>
+
+      {(newItemOpen || editTargetOpen) && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4">
+          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl dark:bg-gray-900">
+            <div className="mb-6 flex items-center justify-between">
+              <h2 className="text-xl font-bold text-gray-950 dark:text-gray-100">{editTargetOpen ? `Edit ${editingItemName}` : "Add Inventory Item"}</h2>
+              <button type="button" onClick={editTargetOpen ? closeTargetEditor : closeNewItemModal} className="text-2xl text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">×</button>
+            </div>
+
+            <div className="space-y-4">
+              {!editTargetOpen && <input type="text" value={itemName} onChange={(event) => setItemName(event.target.value)} placeholder="Item Name" className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800" />}
+              <input type="number" value={editTargetOpen ? editingCurrentQty : currentQty} onChange={(event) => editTargetOpen ? setEditingCurrentQty(event.target.value) : setCurrentQty(event.target.value)} placeholder="Current Quantity" className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800" />
+              <input type="number" value={editTargetOpen ? editingTargetQty : targetQty} onChange={(event) => editTargetOpen ? setEditingTargetQty(event.target.value) : setTargetQty(event.target.value)} placeholder="Target Quantity" className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800" />
+              <button type="button" onClick={editTargetOpen ? saveTargetEditor : addInventoryItem} className="w-full rounded-lg bg-blue-600 py-3 text-white hover:bg-blue-700">
+                {editTargetOpen ? "Save Quantity Targets" : "Add Item"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+```
+
+## app\invoices\[id]\page.tsx
+
+```tsx
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { useParams } from "next/navigation";
+
+import {
+  formatMoneyNumber,
+  getInvoiceTotals,
+  getInvoiceClientName,
+  getLineTotal,
+  InvoiceRow,
+  loadSavedInvoices,
+  moneyToNumber,
+} from "@/lib/frontierInvoices";
+
+const borderColor = "#9ca3af";
+const headerBlue = "#dbeafe";
+const amountColumnWidth = "144px";
+
+export default function InvoiceDetailPage() {
+  const params = useParams();
+  const invoiceId = String(params.id);
+
+  const [invoices, setInvoices] = useState<InvoiceRow[]>([]);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    setInvoices(loadSavedInvoices());
+    setLoaded(true);
+  }, []);
+
+  const invoice = useMemo(() => {
+    return invoices.find((item) => item.id === invoiceId);
+  }, [invoices, invoiceId]);
+
+  if (!loaded) {
+    return <div className="text-gray-400">Loading invoice...</div>;
+  }
+
+  if (!invoice) {
+    return (
+      <div className="space-y-4 text-gray-950 dark:text-gray-100">
+        <Link href="/invoices" className="text-blue-600 hover:underline dark:text-blue-400">
+          ← Back to Invoices
+        </Link>
+
+        <h1 className="text-3xl font-bold">Invoice not found</h1>
+      </div>
+    );
+  }
+
+  const totals = getInvoiceTotals(invoice);
+  const billToDisplay = getInvoiceClientName(invoice);
+
+  const mailSubject = encodeURIComponent(`Invoice ${invoice.invoiceNumber}`);
+  const mailBody = encodeURIComponent(
+    `Hello,\n\nPlease see invoice ${invoice.invoiceNumber} for $${formatMoneyNumber(
+      totals.total
+    )}.\n\nPlease attach the saved PDF before sending.\n\nThank you.`
+  );
+
+  const gmailHref = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(
+    invoice.billToEmail
+  )}&su=${mailSubject}&body=${mailBody}`;
+
+  const displayRows = [
+    ...invoice.lineItems.map((item) => ({
+      id: item.id,
+      description:
+        item.quantity > 1
+          ? `${item.description} — ${item.quantity} × $${formatMoneyNumber(
+              moneyToNumber(item.unitPrice)
+            )}`
+          : item.description,
+      amount: formatMoneyNumber(getLineTotal(item)),
+    })),
+    ...(totals.discount > 0
+      ? [
+          {
+            id: "discount",
+            description:
+              invoice.discountType === "Percent"
+                ? `Discount (${invoice.discountValue}%)`
+                : "Discount",
+            amount: `(${formatMoneyNumber(totals.discount)})`,
+          },
+        ]
+      : []),
+    ...(totals.tax > 0
+      ? [
+          {
+            id: "tax",
+            description: `Tax (${invoice.taxRate}% after discount)`,
+            amount: formatMoneyNumber(totals.tax),
+          },
+        ]
+      : []),
+  ];
+
+  return (
+    <div className="space-y-6 text-gray-950 dark:text-gray-100">
+      <div className="print-hidden flex flex-col gap-4 print:hidden sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <Link href="/invoices" className="text-blue-600 hover:underline dark:text-blue-400">
+            ← Back to Invoices
+          </Link>
+
+          <h1 className="mt-3 text-3xl font-bold">
+            Invoice {invoice.invoiceNumber}
+          </h1>
+
+          {invoice.jobId && (
+            <Link
+              href={`/jobs/${invoice.jobId}`}
+              className="mt-2 inline-block text-sm text-blue-600 hover:underline dark:text-blue-400"
+            >
+              Linked job: {invoice.jobName || invoice.jobId}
+            </Link>
+          )}
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          <a
+            href={gmailHref}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="rounded-lg bg-blue-600 px-4 py-2 font-semibold text-white hover:bg-blue-700"
+          >
+            Send Email
+          </a>
+
+          <button
+            type="button"
+            onClick={() => window.print()}
+            className="rounded-lg border border-gray-300 px-4 py-2 font-semibold hover:bg-gray-100 dark:border-gray-700 dark:hover:bg-gray-800"
+          >
+            Print / Save PDF
+          </button>
+        </div>
+      </div>
+
+      <div className="invoice-print-page mx-auto max-w-4xl rounded-xl bg-white p-8 text-black shadow print:max-w-none print:rounded-none print:p-0 print:shadow-none">
+        <div className="grid grid-cols-2 gap-8">
+          <div className="text-sm leading-5">
+            <p className="font-bold">{invoice.companyName}</p>
+            <p>{invoice.companyAddress}</p>
+            <p>
+              {invoice.companyCity}, {invoice.companyState} {invoice.companyZip}
+            </p>
+            <p>{invoice.companyPhone}</p>
+            <p>{invoice.companyEmail}</p>
+          </div>
+
+          <div className="text-center">
+            <h2 className="text-4xl font-bold text-blue-500">INVOICE</h2>
+
+            <div
+              className="mt-4 grid text-sm"
+              style={{
+                gridTemplateColumns: "1fr 1fr",
+                borderTop: `1px solid ${borderColor}`,
+                borderLeft: `1px solid ${borderColor}`,
+              }}
+            >
+              {["INVOICE #", "DATE", invoice.invoiceNumber, invoice.invoiceDate].map((value, index) => (
+                <div
+                  key={`${value}-${index}`}
+                  className={`px-3 py-1 ${index < 2 ? "font-bold" : ""}`}
+                  style={{
+                    background: index < 2 ? headerBlue : undefined,
+                    borderRight: `1px solid ${borderColor}`,
+                    borderBottom: `1px solid ${borderColor}`,
+                  }}
+                >
+                  {value}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-10 max-w-sm text-sm leading-5">
+          <div
+            className="px-2 py-1 font-bold"
+            style={{ background: headerBlue, border: `1px solid ${borderColor}` }}
+          >
+            BILL TO
+          </div>
+
+          <div className="px-2 py-2">
+            <p>{billToDisplay}</p>
+            {invoice.billToAddress && <p>{invoice.billToAddress}</p>}
+            {(invoice.billToCity || invoice.billToState || invoice.billToZip) && (
+              <p>
+                {invoice.billToCity}, {invoice.billToState} {invoice.billToZip}
+              </p>
+            )}
+            {invoice.billToPhone && <p>{invoice.billToPhone}</p>}
+            {invoice.billToEmail && <p>{invoice.billToEmail}</p>}
+          </div>
+        </div>
+
+        <div className="mt-8 text-sm">
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: `1fr ${amountColumnWidth}`,
+              borderTop: `1px solid ${borderColor}`,
+              borderLeft: `1px solid ${borderColor}`,
+              borderRight: `1px solid ${borderColor}`,
+            }}
+          >
+            <div
+              className="px-3 py-2 font-bold"
+              style={{
+                background: headerBlue,
+                borderRight: `1px solid ${borderColor}`,
+                borderBottom: `1px solid ${borderColor}`,
+              }}
+            >
+              DESCRIPTION
+            </div>
+
+            <div
+              className="px-3 py-2 text-right font-bold"
+              style={{ background: headerBlue, borderBottom: `1px solid ${borderColor}` }}
+            >
+              AMOUNT
+            </div>
+
+            {displayRows.map((row) => (
+              <div key={`${row.id}-description`} className="contents invoice-row">
+                <div
+                  className="px-3 py-1"
+                  style={{ borderRight: `1px solid ${borderColor}` }}
+                >
+                  {row.description}
+                </div>
+
+                <div className="px-3 py-1 text-right">{row.amount}</div>
+              </div>
+            ))}
+
+            {displayRows.length < 8 && (
+              <>
+                <div style={{ minHeight: "224px", borderRight: `1px solid ${borderColor}` }} />
+                <div />
+              </>
+            )}
+
+            <div
+              className="px-3 py-3 text-center italic"
+              style={{
+                borderTop: `1px solid ${borderColor}`,
+                borderRight: `1px solid ${borderColor}`,
+                borderBottom: `1px solid ${borderColor}`,
+              }}
+            >
+              {invoice.footerMessage || "Thank you for your business!"}
+            </div>
+
+            <div
+              className="px-3 py-3"
+              style={{
+                borderTop: `1px solid ${borderColor}`,
+                borderBottom: `1px solid ${borderColor}`,
+              }}
+            >
+              <div className="flex justify-between gap-3 font-bold">
+                <span>TOTAL</span>
+                <span>${formatMoneyNumber(totals.total)}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-10 text-center text-sm">
+          <p>
+            {invoice.contactMessage ||
+              "If you have any questions about this invoice, please contact us."}
+          </p>
+          <p>
+            {invoice.companyPhone}
+            {invoice.companyPhone && invoice.companyEmail ? ", " : ""}
+            {invoice.companyEmail}
+          </p>
+        </div>
       </div>
     </div>
   );
@@ -2407,95 +2665,46 @@ export default function InventoryPage() {
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 
 import { useWorkspace } from "@/components/WorkspaceContext";
 import { clients as defaultClients } from "@/lib/clients";
-
-type InvoiceSetupDraft = {
-  id: string;
-  workspaceId: string;
-  invoiceNumber: string;
-  invoiceDate: string;
-
-  companyName: string;
-  companyAddress: string;
-  companyCity: string;
-  companyState: string;
-  companyZip: string;
-  companyPhone: string;
-  companyEmail: string;
-
-  billToName: string;
-  billToCompany: string;
-  billToAddress: string;
-  billToCity: string;
-  billToState: string;
-  billToZip: string;
-  billToPhone: string;
-  billToEmail: string;
-
-  footerMessage: string;
-  contactMessage: string;
-};
-
-type ClientRow = {
-  id: string;
-  workspaceId: string;
-  name: string;
-  status: string;
-  balance: string;
-  email?: string;
-  phone?: string;
-  address?: string;
-  city?: string;
-  state?: string;
-  zip?: string;
-  notes?: string;
-};
+import { jobs as defaultJobs, Job } from "@/lib/jobs";
+import { ClientRow, loadClients } from "@/lib/frontierClients";
+import { InvoiceSetupDraft, loadSavedInvoices } from "@/lib/frontierInvoices";
 
 function getTodayDate() {
   return new Date().toISOString().slice(0, 10);
 }
 
 function getNextInvoiceNumber() {
-  const savedInvoices = localStorage.getItem("frontier-invoices");
+  const savedInvoices = loadSavedInvoices();
+  const nextNumber = savedInvoices.length + 1;
 
-  if (!savedInvoices) {
-    return "INV-001";
-  }
-
-  try {
-    const parsed = JSON.parse(savedInvoices) as { invoiceNumber?: string }[];
-    const nextNumber = parsed.length + 1;
-
-    return `INV-${String(nextNumber).padStart(3, "0")}`;
-  } catch {
-    return "INV-001";
-  }
+  return `INV-${String(nextNumber).padStart(3, "0")}`;
 }
 
 function formatPhone(value: string) {
   const digits = value.replace(/\D/g, "").slice(0, 10);
 
-  if (digits.length <= 3) {
-    return digits;
-  }
-
-  if (digits.length <= 6) {
-    return `(${digits.slice(0, 3)}) ${digits.slice(3)}`;
-  }
+  if (digits.length <= 3) return digits;
+  if (digits.length <= 6) return `(${digits.slice(0, 3)}) ${digits.slice(3)}`;
 
   return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
 }
 
 export default function NewInvoicePage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const startingJobId = searchParams.get("jobId") || "";
   const { activeWorkspace } = useWorkspace();
 
   const [clientItems, setClientItems] = useState<ClientRow[]>(defaultClients);
+  const [jobItems, setJobItems] = useState<Job[]>(defaultJobs);
   const [selectedClientId, setSelectedClientId] = useState("new");
+  const [selectedJobId, setSelectedJobId] = useState("");
+  const [autoLoadedJobId, setAutoLoadedJobId] = useState("");
 
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [invoiceDate, setInvoiceDate] = useState(getTodayDate());
@@ -2517,13 +2726,15 @@ export default function NewInvoicePage() {
   );
 
   useEffect(() => {
-    const savedClients = localStorage.getItem("frontier-clients");
+    setClientItems(loadClients());
 
-    if (savedClients) {
+    const savedJobs = localStorage.getItem("frontier-jobs");
+
+    if (savedJobs) {
       try {
-        setClientItems(JSON.parse(savedClients));
+        setJobItems(JSON.parse(savedJobs));
       } catch {
-        setClientItems(defaultClients);
+        setJobItems(defaultJobs);
       }
     }
   }, []);
@@ -2531,6 +2742,14 @@ export default function NewInvoicePage() {
   const workspaceClients = clientItems.filter(
     (client) => client.workspaceId === activeWorkspace.id
   );
+
+  const activeWorkspaceClients = workspaceClients.filter(
+    (client) => client.status === "Active"
+  );
+
+  const workspaceJobs = jobItems
+    .filter((job) => job.workspaceId === activeWorkspace.id)
+    .sort((a, b) => a.name.localeCompare(b.name));
 
   const companyPlaceholder = {
     companyName: `${activeWorkspace.name} Company`,
@@ -2577,8 +2796,47 @@ export default function NewInvoicePage() {
     setBillToEmail(selectedClient.email ?? "");
   }
 
+  function populateFromJob(jobId: string) {
+    if (!jobId) {
+      setSelectedJobId("");
+      return;
+    }
+
+    const selectedJob = workspaceJobs.find((job) => job.id === jobId);
+
+    if (!selectedJob) return;
+
+    setSelectedJobId(selectedJob.id);
+
+    const matchedClient = workspaceClients.find(
+      (client) =>
+        client.name.trim().toLowerCase() ===
+        selectedJob.client.trim().toLowerCase()
+    );
+
+    if (matchedClient) {
+      populateBillToFromClient(matchedClient.id);
+    } else {
+      setSelectedClientId("new");
+      setBillToName(selectedJob.client);
+    }
+  }
+
+  useEffect(() => {
+    if (!startingJobId || autoLoadedJobId === startingJobId) return;
+    if (workspaceJobs.length === 0) return;
+
+    populateFromJob(startingJobId);
+    setAutoLoadedJobId(startingJobId);
+  }, [startingJobId, autoLoadedJobId, workspaceJobs]);
+
+  function markManualBillToEdit() {
+    setSelectedClientId("new");
+  }
+
   function continueToBuilder() {
     const resolvedInvoiceNumber = invoiceNumber.trim() || getNextInvoiceNumber();
+    const attachedJob = workspaceJobs.find((job) => job.id === selectedJobId);
 
     if (!invoiceDate.trim()) return;
     if (!billToName.trim() && !billToCompany.trim()) return;
@@ -2588,6 +2846,10 @@ export default function NewInvoicePage() {
       workspaceId: activeWorkspace.id,
       invoiceNumber: resolvedInvoiceNumber,
       invoiceDate,
+
+      jobId: attachedJob?.id,
+      jobName: attachedJob?.name,
+      sourceClientId: selectedClientId !== "new" ? selectedClientId : undefined,
 
       ...companyPlaceholder,
 
@@ -2632,7 +2894,23 @@ export default function NewInvoicePage() {
       </div>
 
       <div className="rounded-xl bg-white p-4 shadow dark:bg-gray-900 sm:p-6">
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-[2fr_1fr]">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_1fr_180px]">
+          <div>
+            <label className={labelClass}>Attach to Job</label>
+            <select
+              value={selectedJobId}
+              onChange={(event) => populateFromJob(event.target.value)}
+              className={`${inputClass} w-full bg-white`}
+            >
+              <option value="">No attached job</option>
+              {workspaceJobs.map((job) => (
+                <option key={job.id} value={job.id}>
+                  {job.name} — {job.client}
+                </option>
+              ))}
+            </select>
+          </div>
+
           <div>
             <label className={labelClass}>Invoice #</label>
             <input
@@ -2677,23 +2955,26 @@ export default function NewInvoicePage() {
 
         <section className="rounded-xl bg-white p-4 shadow dark:bg-gray-900 sm:p-6">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <h2 className="text-xl font-bold">Bill To</h2>
-
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-              <select
-                value={selectedClientId}
-                onChange={(event) => populateBillToFromClient(event.target.value)}
-                className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-800"
-              >
-                <option value="new">New Client</option>
-
-                {workspaceClients.map((client) => (
-                  <option key={client.id} value={client.id}>
-                    {client.name}
-                  </option>
-                ))}
-              </select>
+            <div>
+              <h2 className="text-xl font-bold">Bill To</h2>
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                Active clients show in the dropdown. Manually typed matching leads are promoted to Active when saved.
+              </p>
             </div>
+
+            <select
+              value={selectedClientId}
+              onChange={(event) => populateBillToFromClient(event.target.value)}
+              className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-800"
+            >
+              <option value="new">New Client</option>
+
+              {activeWorkspaceClients.map((client) => (
+                <option key={client.id} value={client.id}>
+                  {client.name}
+                </option>
+              ))}
+            </select>
           </div>
 
           <div className="mt-4 space-y-4">
@@ -2701,7 +2982,7 @@ export default function NewInvoicePage() {
               <input
                 value={billToName}
                 onChange={(event) => {
-                  setSelectedClientId("new");
+                  markManualBillToEdit();
                   setBillToName(event.target.value);
                 }}
                 placeholder="Name"
@@ -2711,7 +2992,7 @@ export default function NewInvoicePage() {
               <input
                 value={billToCompany}
                 onChange={(event) => {
-                  setSelectedClientId("new");
+                  markManualBillToEdit();
                   setBillToCompany(event.target.value);
                 }}
                 placeholder="Company Name"
@@ -2722,7 +3003,7 @@ export default function NewInvoicePage() {
             <input
               value={billToAddress}
               onChange={(event) => {
-                setSelectedClientId("new");
+                markManualBillToEdit();
                 setBillToAddress(event.target.value);
               }}
               placeholder="Street Address"
@@ -2733,7 +3014,7 @@ export default function NewInvoicePage() {
               <input
                 value={billToCity}
                 onChange={(event) => {
-                  setSelectedClientId("new");
+                  markManualBillToEdit();
                   setBillToCity(event.target.value);
                 }}
                 placeholder="City"
@@ -2743,7 +3024,7 @@ export default function NewInvoicePage() {
               <input
                 value={billToState}
                 onChange={(event) => {
-                  setSelectedClientId("new");
+                  markManualBillToEdit();
                   setBillToState(event.target.value.toUpperCase());
                 }}
                 placeholder="State"
@@ -2754,7 +3035,7 @@ export default function NewInvoicePage() {
               <input
                 value={billToZip}
                 onChange={(event) => {
-                  setSelectedClientId("new");
+                  markManualBillToEdit();
                   setBillToZip(event.target.value);
                 }}
                 placeholder="ZIP"
@@ -2769,7 +3050,7 @@ export default function NewInvoicePage() {
                 inputMode="tel"
                 value={billToPhone}
                 onChange={(event) => {
-                  setSelectedClientId("new");
+                  markManualBillToEdit();
                   setBillToPhone(formatPhone(event.target.value));
                 }}
                 placeholder="Phone"
@@ -2780,7 +3061,7 @@ export default function NewInvoicePage() {
                 type="email"
                 value={billToEmail}
                 onChange={(event) => {
-                  setSelectedClientId("new");
+                  markManualBillToEdit();
                   setBillToEmail(event.target.value);
                 }}
                 placeholder="Email"
@@ -2847,109 +3128,16 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 
 import { useWorkspace } from "@/components/WorkspaceContext";
-
-const invoiceStatuses = ["Draft", "Sent", "Overdue", "Paid"] as const;
-const discountTypes = ["None", "Percent", "Fixed"] as const;
-
-type InvoiceStatus = (typeof invoiceStatuses)[number];
-type DiscountType = (typeof discountTypes)[number];
-
-type InvoiceLineItem = {
-  id: string;
-  description: string;
-  quantity: number;
-  unitPrice: string;
-};
-
-type InvoiceRow = {
-  id: string;
-  workspaceId: string;
-  invoiceNumber: string;
-  invoiceDate: string;
-
-  companyName: string;
-  companyAddress: string;
-  companyCity: string;
-  companyState: string;
-  companyZip: string;
-  companyPhone: string;
-  companyEmail: string;
-
-  billToName: string;
-  billToCompany: string;
-  billToAddress: string;
-  billToCity: string;
-  billToState: string;
-  billToZip: string;
-  billToPhone: string;
-  billToEmail: string;
-
-  lineItems: InvoiceLineItem[];
-
-  discountType: DiscountType;
-  discountValue: string;
-  taxRate: string;
-
-  footerMessage: string;
-  contactMessage: string;
-  status: InvoiceStatus;
-};
-
-function moneyToNumber(value: string) {
-  return Number(value.replace(/[$,]/g, "")) || 0;
-}
-
-function formatMoney(value: number) {
-  return `$${value.toLocaleString(undefined, {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
-}
-
-function getLineTotal(item: InvoiceLineItem) {
-  return item.quantity * moneyToNumber(item.unitPrice);
-}
-
-function getSubtotal(lineItems: InvoiceLineItem[]) {
-  return lineItems.reduce((total, item) => total + getLineTotal(item), 0);
-}
-
-function getDiscountAmount(
-  subtotal: number,
-  discountType: DiscountType,
-  discountValue: string
-) {
-  const value = Number(discountValue) || 0;
-
-  if (discountType === "Percent") {
-    return Math.min(subtotal * (value / 100), subtotal);
-  }
-
-  if (discountType === "Fixed") {
-    return Math.min(value, subtotal);
-  }
-
-  return 0;
-}
-
-function getTaxAmount(afterDiscountSubtotal: number, taxRate: string) {
-  const rate = Number(taxRate) || 0;
-
-  return afterDiscountSubtotal * (rate / 100);
-}
-
-function getInvoiceTotal(invoice: InvoiceRow) {
-  const subtotal = getSubtotal(invoice.lineItems);
-  const discount = getDiscountAmount(
-    subtotal,
-    invoice.discountType,
-    invoice.discountValue
-  );
-  const taxableSubtotal = Math.max(subtotal - discount, 0);
-  const tax = getTaxAmount(taxableSubtotal, invoice.taxRate);
-
-  return taxableSubtotal + tax;
-}
+import {
+  formatCurrency,
+  getInvoiceClientName,
+  getInvoiceTotals,
+  InvoiceRow,
+  invoiceStatuses,
+  InvoiceStatus,
+  loadSavedInvoices,
+  saveSavedInvoices,
+} from "@/lib/frontierInvoices";
 
 export default function InvoicesPage() {
   const { activeWorkspace } = useWorkspace();
@@ -2959,15 +3147,7 @@ export default function InvoicesPage() {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
 
   useEffect(() => {
-    const savedInvoices = localStorage.getItem("frontier-invoices");
-
-    if (savedInvoices) {
-      try {
-        setInvoices(JSON.parse(savedInvoices));
-      } catch {
-        setInvoices([]);
-      }
-    }
+    setInvoices(loadSavedInvoices());
   }, []);
 
   const workspaceInvoices = invoices.filter(
@@ -2976,11 +3156,11 @@ export default function InvoicesPage() {
 
   const totalOutstanding = workspaceInvoices
     .filter((invoice) => invoice.status !== "Paid")
-    .reduce((total, invoice) => total + getInvoiceTotal(invoice), 0);
+    .reduce((total, invoice) => total + getInvoiceTotals(invoice).total, 0);
 
   function saveInvoices(updatedInvoices: InvoiceRow[]) {
     setInvoices(updatedInvoices);
-    localStorage.setItem("frontier-invoices", JSON.stringify(updatedInvoices));
+    saveSavedInvoices(updatedInvoices);
   }
 
   function toggleInvoice(id: string) {
@@ -2993,12 +3173,7 @@ export default function InvoicesPage() {
 
   function openDeleteModal() {
     if (selectedInvoices.length === 0) return;
-
     setShowDeleteModal(true);
-  }
-
-  function closeDeleteModal() {
-    setShowDeleteModal(false);
   }
 
   function removeSelectedInvoices() {
@@ -3023,7 +3198,6 @@ export default function InvoicesPage() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className="text-3xl font-bold">Invoices</h1>
-
           <p className="mt-2 text-gray-500 dark:text-gray-400">
             Create and manage invoices for {activeWorkspace.name}
           </p>
@@ -3057,18 +3231,14 @@ export default function InvoicesPage() {
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <div className="rounded-xl bg-white p-4 shadow dark:bg-gray-900">
-          <p className="text-sm text-gray-500 dark:text-gray-400">
-            Total Invoices
-          </p>
+          <p className="text-sm text-gray-500 dark:text-gray-400">Total Invoices</p>
           <p className="mt-1 text-2xl font-bold">{workspaceInvoices.length}</p>
         </div>
 
         <div className="rounded-xl bg-white p-4 shadow dark:bg-gray-900">
-          <p className="text-sm text-gray-500 dark:text-gray-400">
-            Outstanding
-          </p>
+          <p className="text-sm text-gray-500 dark:text-gray-400">Outstanding</p>
           <p className="mt-1 text-2xl font-bold">
-            {formatMoney(totalOutstanding)}
+            {formatCurrency(totalOutstanding)}
           </p>
         </div>
 
@@ -3081,13 +3251,14 @@ export default function InvoicesPage() {
       </div>
 
       <div className="overflow-x-auto rounded-lg bg-white shadow dark:bg-gray-900">
-        <table className="w-full min-w-[900px]">
+        <table className="w-full min-w-[1000px]">
           <thead className="bg-gray-100 dark:bg-gray-800">
             <tr className="text-left text-gray-700 dark:text-gray-300">
               <th className="w-12 p-4"></th>
               <th className="p-4">Invoice #</th>
               <th className="p-4">Date</th>
               <th className="p-4">Bill To</th>
+              <th className="p-4">Job</th>
               <th className="p-4">Status</th>
               <th className="p-4 text-right">Total</th>
             </tr>
@@ -3109,12 +3280,29 @@ export default function InvoicesPage() {
                     />
                   </td>
 
-                  <td className="p-4 font-medium">{invoice.invoiceNumber}</td>
+                  <td className="p-4 font-medium">
+                    <Link
+                      href={`/invoices/${invoice.id}`}
+                      className="text-blue-600 hover:underline dark:text-blue-400"
+                    >
+                      {invoice.invoiceNumber}
+                    </Link>
+                  </td>
 
                   <td className="p-4">{invoice.invoiceDate}</td>
+                  <td className="p-4">{getInvoiceClientName(invoice)}</td>
 
                   <td className="p-4">
-                    {invoice.billToCompany || invoice.billToName || "—"}
+                    {invoice.jobId ? (
+                      <Link
+                        href={`/jobs/${invoice.jobId}`}
+                        className="text-blue-600 hover:underline dark:text-blue-400"
+                      >
+                        {invoice.jobName || "Open Job"}
+                      </Link>
+                    ) : (
+                      "—"
+                    )}
                   </td>
 
                   <td className="p-4">
@@ -3135,14 +3323,14 @@ export default function InvoicesPage() {
                   </td>
 
                   <td className="p-4 text-right font-medium">
-                    {formatMoney(getInvoiceTotal(invoice))}
+                    {formatCurrency(getInvoiceTotals(invoice).total)}
                   </td>
                 </tr>
               ))
             ) : (
               <tr>
                 <td
-                  colSpan={6}
+                  colSpan={7}
                   className="p-10 text-center text-lg text-gray-500 dark:text-gray-400"
                 >
                   No invoices found for {activeWorkspace.name}
@@ -3172,7 +3360,7 @@ export default function InvoicesPage() {
             <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
               <button
                 type="button"
-                onClick={closeDeleteModal}
+                onClick={() => setShowDeleteModal(false)}
                 className="rounded-lg border border-gray-300 px-4 py-2 hover:bg-gray-100 dark:border-gray-700 dark:hover:bg-gray-800"
               >
                 Cancel
@@ -3201,20 +3389,17 @@ export default function InvoicesPage() {
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
+import Link from "next/link";
 
+import { jobs as defaultJobs, Job, JobMaterial, JobStatus } from "@/lib/jobs";
 import {
-  jobs as defaultJobs,
-  JobMaterial,
-  JobStatus,
-} from "@/lib/jobs";
+  formatCurrency,
+  getInvoiceTotals,
+  InvoiceRow,
+  loadSavedInvoices,
+} from "@/lib/frontierInvoices";
 
-const jobStatuses: JobStatus[] = [
-  "Lead",
-  "Quoted",
-  "Scheduled",
-  "Completed",
-  "Paid",
-];
+const jobStatuses: JobStatus[] = ["Lead", "Quoted", "Scheduled", "Completed", "Paid"];
 
 function getStatusClasses(status: string) {
   switch (status) {
@@ -3237,7 +3422,8 @@ export default function JobPage() {
   const params = useParams();
   const id = String(params.id);
 
-  const [jobItems, setJobItems] = useState(defaultJobs);
+  const [jobItems, setJobItems] = useState<Job[]>(defaultJobs);
+  const [invoiceItems, setInvoiceItems] = useState<InvoiceRow[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
 
@@ -3263,10 +3449,16 @@ export default function JobPage() {
       }
     }
 
+    setInvoiceItems(loadSavedInvoices());
     setLoaded(true);
   }, []);
 
-  const job = jobItems.find((job) => job.id === id);
+  const job = jobItems.find((item) => item.id === id);
+  const jobInvoices = invoiceItems.filter((invoice) => invoice.jobId === id);
+  const invoiceTotal = jobInvoices.reduce(
+    (total, invoice) => total + getInvoiceTotals(invoice).total,
+    0
+  );
 
   function openEditBox() {
     if (!job) return;
@@ -3280,7 +3472,6 @@ export default function JobPage() {
     setEditMaterials(job.materials ?? []);
     setEditMaterialName("");
     setEditMaterialQuantity("");
-
     setEditOpen(true);
   }
 
@@ -3294,25 +3485,15 @@ export default function JobPage() {
     if (!editMaterialName.trim()) return;
 
     const quantity = Number(editMaterialQuantity);
-
     if (Number.isNaN(quantity) || quantity <= 0) return;
 
-    setEditMaterials((current) => [
-      ...current,
-      {
-        name: editMaterialName.trim(),
-        quantity,
-      },
-    ]);
-
+    setEditMaterials((current) => [...current, { name: editMaterialName.trim(), quantity }]);
     setEditMaterialName("");
     setEditMaterialQuantity("");
   }
 
   function removeEditMaterial(indexToRemove: number) {
-    setEditMaterials((current) =>
-      current.filter((_, index) => index !== indexToRemove)
-    );
+    setEditMaterials((current) => current.filter((_, index) => index !== indexToRemove));
   }
 
   function saveEditedJob() {
@@ -3345,15 +3526,12 @@ export default function JobPage() {
     setEditOpen(false);
   }
 
-  if (!loaded) {
-    return null;
-  }
+  if (!loaded) return null;
 
   if (!job) {
     return (
       <div className="space-y-4 p-6 text-gray-950 dark:text-gray-100">
         <h1 className="text-3xl font-bold">Job not found</h1>
-
         <p className="text-gray-500 dark:text-gray-400">
           This job does not exist in the current saved job list.
         </p>
@@ -3366,335 +3544,146 @@ export default function JobPage() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className="text-3xl font-bold">{job.name}</h1>
-
-          <p className="mt-2 text-gray-500 dark:text-gray-400">
-            {job.client}
-          </p>
+          <p className="mt-2 text-gray-500 dark:text-gray-400">{job.client}</p>
         </div>
 
-        <button
-          type="button"
-          onClick={openEditBox}
-          className="w-full rounded-lg bg-blue-600 px-5 py-3 font-semibold text-white hover:bg-blue-700 sm:w-auto"
-        >
-          Edit Job
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <Link
+            href={`/invoices/new?jobId=${job.id}`}
+            className="rounded-lg border border-blue-600 px-5 py-3 font-semibold text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-950/30"
+          >
+            Create Invoice
+          </Link>
+
+          <button
+            type="button"
+            onClick={openEditBox}
+            className="rounded-lg bg-blue-600 px-5 py-3 font-semibold text-white hover:bg-blue-700"
+          >
+            Edit Job
+          </button>
+        </div>
       </div>
 
       <div className="rounded-lg bg-white p-6 shadow dark:bg-gray-900">
         <h2 className="mb-4 text-xl font-semibold">Job Information</h2>
-
         <div className="space-y-3">
-          <p>
-            <strong>Client:</strong> {job.client}
-          </p>
-
+          <p><strong>Client:</strong> {job.client}</p>
           <div className="flex items-center gap-2">
             <strong>Status:</strong>
-
-            <span
-              className={`rounded-full px-3 py-1 text-sm font-semibold ${getStatusClasses(
-                job.status
-              )}`}
-            >
-              {job.status}
-            </span>
+            <span className={`rounded-full px-3 py-1 text-sm font-semibold ${getStatusClasses(job.status)}`}>{job.status}</span>
           </div>
-
-          <p>
-            <strong>Scheduled Date:</strong> {job.date || "—"}
-          </p>
-
-          <p>
-            <strong>Estimated Value:</strong> {job.value}
-          </p>
+          <p><strong>Scheduled Date:</strong> {job.date || "—"}</p>
+          <p><strong>Estimated Value:</strong> {job.value}</p>
         </div>
       </div>
 
       <div className="rounded-lg bg-white p-6 shadow dark:bg-gray-900">
         <h2 className="mb-4 text-xl font-semibold">Materials</h2>
-
         {job.materials && job.materials.length > 0 ? (
           <ul className="ml-6 list-disc">
             {job.materials.map((material, index) => (
-              <li key={`${material.name}-${index}`}>
-                {material.quantity} × {material.name}
-              </li>
+              <li key={`${material.name}-${index}`}>{material.quantity} × {material.name}</li>
             ))}
           </ul>
         ) : (
-          <p className="text-gray-500 dark:text-gray-400">
-            No materials added.
-          </p>
+          <p className="text-gray-500 dark:text-gray-400">No materials added.</p>
         )}
       </div>
 
       <div className="rounded-lg bg-white p-6 shadow dark:bg-gray-900">
         <h2 className="mb-4 text-xl font-semibold">Notes</h2>
-
         <p className="whitespace-pre-wrap text-gray-700 dark:text-gray-300">
           {job.notes || "No notes added."}
         </p>
       </div>
 
       <div className="rounded-lg bg-white p-6 shadow dark:bg-gray-900">
-        <h2 className="mb-4 text-xl font-semibold">Invoice</h2>
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <h2 className="text-xl font-semibold">Invoices</h2>
+          <Link href={`/invoices/new?jobId=${job.id}`} className="text-blue-600 hover:underline dark:text-blue-400">
+            + Create invoice for this job
+          </Link>
+        </div>
 
-        <p>Total: {job.value}</p>
-        <p>Status: Unpaid</p>
+        {jobInvoices.length > 0 ? (
+          <div className="space-y-3">
+            {jobInvoices.map((invoice) => (
+              <div key={invoice.id} className="rounded-lg border border-gray-200 p-4 dark:border-gray-800">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <Link href={`/invoices/${invoice.id}`} className="font-semibold text-blue-600 hover:underline dark:text-blue-400">
+                      {invoice.invoiceNumber}
+                    </Link>
+                    <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                      {invoice.status} · {invoice.invoiceDate}
+                    </p>
+                  </div>
+                  <div className="text-lg font-bold">
+                    {formatCurrency(getInvoiceTotals(invoice).total)}
+                  </div>
+                </div>
+              </div>
+            ))}
+
+            <div className="border-t border-gray-200 pt-3 text-right text-lg font-bold dark:border-gray-800">
+              Invoice Total: {formatCurrency(invoiceTotal)}
+            </div>
+          </div>
+        ) : (
+          <p className="text-gray-500 dark:text-gray-400">No invoices attached to this job.</p>
+        )}
       </div>
 
       {editOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4">
           <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-xl bg-white p-6 shadow-xl dark:bg-gray-900">
             <div className="mb-6 flex items-center justify-between">
-              <h2 className="text-xl font-bold text-gray-950 dark:text-gray-100">
-                Edit Job
-              </h2>
-
-              <button
-                type="button"
-                onClick={closeEditBox}
-                className="text-2xl text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
-              >
-                ×
-              </button>
+              <h2 className="text-xl font-bold text-gray-950 dark:text-gray-100">Edit Job</h2>
+              <button type="button" onClick={closeEditBox} className="text-2xl text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">×</button>
             </div>
 
             <div className="space-y-4">
-              <input
-                type="text"
-                value={editName}
-                onChange={(event) => setEditName(event.target.value)}
-                placeholder="Job Name"
-                className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800"
-              />
-
-              <input
-                type="text"
-                value={editClient}
-                onChange={(event) => setEditClient(event.target.value)}
-                placeholder="Client"
-                className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800"
-              />
-
-              <select
-                value={editStatus}
-                onChange={(event) =>
-                  setEditStatus(event.target.value as JobStatus)
-                }
-                className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800"
-              >
-                {jobStatuses.map((status) => (
-                  <option key={status}>{status}</option>
-                ))}
+              <input type="text" value={editName} onChange={(event) => setEditName(event.target.value)} placeholder="Job Name" className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800" />
+              <input type="text" value={editClient} onChange={(event) => setEditClient(event.target.value)} placeholder="Client" className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800" />
+              <select value={editStatus} onChange={(event) => setEditStatus(event.target.value as JobStatus)} className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800">
+                {jobStatuses.map((statusItem) => <option key={statusItem}>{statusItem}</option>)}
               </select>
-
-              <input
-                type="date"
-                value={editDate}
-                onChange={(event) => setEditDate(event.target.value)}
-                className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800"
-              />
-
-              <input
-                type="number"
-                value={editValue}
-                onChange={(event) => setEditValue(event.target.value)}
-                placeholder="Estimated Value"
-                className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800"
-              />
+              <input type="date" value={editDate} onChange={(event) => setEditDate(event.target.value)} className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800" />
+              <input type="number" value={editValue} onChange={(event) => setEditValue(event.target.value)} placeholder="Estimated Value" className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800" />
 
               <div className="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
-                <h3 className="text-lg font-semibold text-gray-950 dark:text-gray-100">
-                  Materials
-                </h3>
-
+                <h3 className="text-lg font-semibold text-gray-950 dark:text-gray-100">Materials</h3>
                 <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-[1fr_140px_auto]">
-                  <input
-                    type="text"
-                    value={editMaterialName}
-                    onChange={(event) =>
-                      setEditMaterialName(event.target.value)
-                    }
-                    placeholder="Material name"
-                    className="rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800"
-                  />
-
-                  <input
-                    type="number"
-                    value={editMaterialQuantity}
-                    onChange={(event) =>
-                      setEditMaterialQuantity(event.target.value)
-                    }
-                    placeholder="Qty"
-                    className="rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800"
-                  />
-
-                  <button
-                    type="button"
-                    onClick={addEditMaterial}
-                    className="rounded-lg bg-blue-600 px-5 py-3 text-white hover:bg-blue-700"
-                  >
-                    Add
-                  </button>
+                  <input type="text" value={editMaterialName} onChange={(event) => setEditMaterialName(event.target.value)} placeholder="Material name" className="rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800" />
+                  <input type="number" value={editMaterialQuantity} onChange={(event) => setEditMaterialQuantity(event.target.value)} placeholder="Qty" className="rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800" />
+                  <button type="button" onClick={addEditMaterial} className="rounded-lg bg-blue-600 px-5 py-3 text-white hover:bg-blue-700">Add</button>
                 </div>
 
                 <div className="mt-4 space-y-2">
                   {editMaterials.length > 0 ? (
                     editMaterials.map((material, index) => (
-                      <div
-                        key={`${material.name}-${index}`}
-                        className="flex items-center justify-between rounded-lg bg-gray-100 p-3 dark:bg-gray-800"
-                      >
-                        <span>
-                          {material.quantity} × {material.name}
-                        </span>
-
-                        <button
-                          type="button"
-                          onClick={() => removeEditMaterial(index)}
-                          className="text-sm text-red-600 hover:underline dark:text-red-400"
-                        >
-                          Remove
-                        </button>
+                      <div key={`${material.name}-${index}`} className="flex items-center justify-between rounded-lg bg-gray-100 p-3 dark:bg-gray-800">
+                        <span>{material.quantity} × {material.name}</span>
+                        <button type="button" onClick={() => removeEditMaterial(index)} className="text-sm text-red-600 hover:underline dark:text-red-400">Remove</button>
                       </div>
                     ))
                   ) : (
-                    <p className="text-sm text-gray-500 dark:text-gray-400">
-                      No materials added.
-                    </p>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">No materials added.</p>
                   )}
                 </div>
               </div>
 
-              <textarea
-                rows={4}
-                value={editNotes}
-                onChange={(event) => setEditNotes(event.target.value)}
-                placeholder="Notes"
-                className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800"
-              />
+              <textarea rows={4} value={editNotes} onChange={(event) => setEditNotes(event.target.value)} placeholder="Notes" className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800" />
 
               <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-                <button
-                  type="button"
-                  onClick={closeEditBox}
-                  className="rounded-lg border border-gray-300 px-5 py-3 hover:bg-gray-100 dark:border-gray-700 dark:hover:bg-gray-800"
-                >
-                  Cancel
-                </button>
-
-                <button
-                  type="button"
-                  onClick={saveEditedJob}
-                  className="rounded-lg bg-blue-600 px-5 py-3 font-semibold text-white hover:bg-blue-700"
-                >
-                  Save Changes
-                </button>
+                <button type="button" onClick={closeEditBox} className="rounded-lg border border-gray-300 px-5 py-3 hover:bg-gray-100 dark:border-gray-700 dark:hover:bg-gray-800">Cancel</button>
+                <button type="button" onClick={saveEditedJob} className="rounded-lg bg-blue-600 px-5 py-3 font-semibold text-white hover:bg-blue-700">Save Changes</button>
               </div>
             </div>
           </div>
         </div>
       )}
-    </div>
-  );
-}
-```
-
-## app\jobs\new\page.tsx
-
-```tsx
-export default function NewJobPage() {
-  return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold">
-          New Job
-        </h1>
-
-        <p className="text-gray-500">
-          Create a new job for a client
-        </p>
-      </div>
-
-      <div className="bg-white rounded-lg shadow p-6">
-        <form className="space-y-6">
-
-          <div>
-            <label className="block text-sm font-medium mb-2">
-              Client
-            </label>
-
-            <input
-              type="text"
-              placeholder="John Smith"
-              className="w-full border rounded-lg p-3"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium mb-2">
-              Job Name
-            </label>
-
-            <input
-              type="text"
-              placeholder="Spring Cleanup"
-              className="w-full border rounded-lg p-3"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium mb-2">
-              Status
-            </label>
-
-            <select
-              className="w-full border rounded-lg p-3"
-              defaultValue="Lead"
-            >
-              <option>Lead</option>
-              <option>Quoted</option>
-              <option>Scheduled</option>
-              <option>Completed</option>
-              <option>Paid</option>
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium mb-2">
-              Estimated Value
-            </label>
-
-            <input
-              type="text"
-              placeholder="$500"
-              className="w-full border rounded-lg p-3"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium mb-2">
-              Notes
-            </label>
-
-            <textarea
-              rows={5}
-              placeholder="Job details..."
-              className="w-full border rounded-lg p-3"
-            />
-          </div>
-
-          <button
-            type="submit"
-            className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700"
-          >
-            Create Job
-          </button>
-
-        </form>
-      </div>
     </div>
   );
 }
@@ -3709,23 +3698,15 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 
 import { useWorkspace } from "@/components/WorkspaceContext";
-import { jobs as defaultJobs, JobMaterial, JobStatus } from "@/lib/jobs";
+import { jobs as defaultJobs, Job, JobMaterial, JobStatus } from "@/lib/jobs";
 import { clients as defaultClients } from "@/lib/clients";
-
-type ClientRow = {
-  id: string;
-  workspaceId: string;
-  name: string;
-  status: string;
-  balance: string;
-  email?: string;
-  phone?: string;
-  address?: string;
-  city?: string;
-  state?: string;
-  zip?: string;
-  notes?: string;
-};
+import { ClientRow } from "@/lib/frontierClients";
+import {
+  formatCurrency,
+  getInvoiceTotals,
+  InvoiceRow,
+  loadSavedInvoices,
+} from "@/lib/frontierInvoices";
 
 function getStatusColor(status: JobStatus) {
   switch (status) {
@@ -3747,7 +3728,8 @@ function getStatusColor(status: JobStatus) {
 export default function JobsPage() {
   const { activeWorkspace } = useWorkspace();
 
-  const [jobItems, setJobItems] = useState(defaultJobs);
+  const [jobItems, setJobItems] = useState<Job[]>(defaultJobs);
+  const [invoiceItems, setInvoiceItems] = useState<InvoiceRow[]>([]);
   const [selectedJobs, setSelectedJobs] = useState<string[]>([]);
   const [newJobOpen, setNewJobOpen] = useState(false);
 
@@ -3764,6 +3746,7 @@ export default function JobsPage() {
 
   useEffect(() => {
     const savedJobs = localStorage.getItem("frontier-jobs");
+    const savedClients = localStorage.getItem("frontier-clients");
 
     if (savedJobs) {
       try {
@@ -3772,7 +3755,6 @@ export default function JobsPage() {
         setJobItems(defaultJobs);
       }
     }
-    const savedClients = localStorage.getItem("frontier-clients");
 
     if (savedClients) {
       try {
@@ -3781,29 +3763,41 @@ export default function JobsPage() {
         setClientItems(defaultClients);
       }
     }
+
+    setInvoiceItems(loadSavedInvoices());
   }, []);
 
   const workspaceClients = clientItems.filter(
-    (client) => client.workspaceId === activeWorkspace.id
+    (clientItem) => clientItem.workspaceId === activeWorkspace.id
   );
 
   const workspaceJobs = jobItems.filter(
     (job) => job.workspaceId === activeWorkspace.id
   );
 
-  function getClientByName(clientName: string) {
-    return workspaceClients.find(
-      (client) =>
-        client.name.trim().toLowerCase() ===
-        clientName.trim().toLowerCase()
-    );
-  }
-  
   const allWorkspaceJobsSelected =
     workspaceJobs.length > 0 &&
     workspaceJobs.every((job) => selectedJobs.includes(job.id));
 
-  function saveJobs(updatedJobs: typeof defaultJobs) {
+  function getClientByName(clientName: string) {
+    return workspaceClients.find(
+      (clientItem) =>
+        clientItem.name.trim().toLowerCase() === clientName.trim().toLowerCase()
+    );
+  }
+
+  function getInvoicesForJob(jobId: string) {
+    return invoiceItems.filter((invoice) => invoice.jobId === jobId);
+  }
+
+  function getInvoiceTotalForJob(jobId: string) {
+    return getInvoicesForJob(jobId).reduce(
+      (total, invoice) => total + getInvoiceTotals(invoice).total,
+      0
+    );
+  }
+
+  function saveJobs(updatedJobs: Job[]) {
     setJobItems(updatedJobs);
     localStorage.setItem("frontier-jobs", JSON.stringify(updatedJobs));
   }
@@ -3836,11 +3830,8 @@ export default function JobsPage() {
   function toggleAllWorkspaceJobs() {
     if (allWorkspaceJobsSelected) {
       setSelectedJobs((current) =>
-        current.filter(
-          (jobId) => !workspaceJobs.some((job) => job.id === jobId)
-        )
+        current.filter((jobId) => !workspaceJobs.some((job) => job.id === jobId))
       );
-
       return;
     }
 
@@ -3855,11 +3846,7 @@ export default function JobsPage() {
   }
 
   function deleteSelectedJobs() {
-    const updatedJobs = jobItems.filter(
-      (job) => !selectedJobs.includes(job.id)
-    );
-
-    saveJobs(updatedJobs);
+    saveJobs(jobItems.filter((job) => !selectedJobs.includes(job.id)));
     setSelectedJobs([]);
   }
 
@@ -3869,27 +3856,17 @@ export default function JobsPage() {
     const quantity = Number(materialQuantity);
     if (Number.isNaN(quantity) || quantity <= 0) return;
 
-    setMaterials((current) => [
-      ...current,
-      {
-        name: materialName.trim(),
-        quantity,
-      },
-    ]);
-
+    setMaterials((current) => [...current, { name: materialName.trim(), quantity }]);
     setMaterialName("");
     setMaterialQuantity("");
   }
 
   function removeMaterial(indexToRemove: number) {
-    setMaterials((current) =>
-      current.filter((_, index) => index !== indexToRemove)
-    );
+    setMaterials((current) => current.filter((_, index) => index !== indexToRemove));
   }
 
   function createJob(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-
     if (!client.trim() || !jobName.trim()) return;
 
     const formattedValue = value.trim()
@@ -3898,7 +3875,7 @@ export default function JobsPage() {
         : `$${value.trim()}`
       : "$0";
 
-    const newJob = {
+    const newJob: Job = {
       id: crypto.randomUUID(),
       workspaceId: activeWorkspace.id,
       name: jobName.trim(),
@@ -3917,8 +3894,6 @@ export default function JobsPage() {
   return (
     <div className="space-y-6 text-gray-950 dark:text-gray-100">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-
-
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
@@ -3949,20 +3924,12 @@ export default function JobsPage() {
         <div className="rounded-lg bg-white p-6 shadow dark:bg-gray-900">
           <div className="mb-6 flex items-center justify-between">
             <h2 className="text-xl font-bold">Add New Job</h2>
-
-            <button
-              type="button"
-              onClick={closeNewJobBox}
-              className="text-2xl text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
-            >
-              ×
-            </button>
+            <button type="button" onClick={closeNewJobBox} className="text-2xl text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">×</button>
           </div>
 
           <form onSubmit={createJob} className="space-y-6">
             <div>
               <label className="mb-2 block text-sm font-medium">Client</label>
-
               <select
                 value={client}
                 onChange={(event) => setClient(event.target.value)}
@@ -3970,20 +3937,16 @@ export default function JobsPage() {
                 className="w-full rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800"
               >
                 <option value="">Select Client</option>
-
-                {workspaceClients.map((client) => (
-                  <option key={client.id} value={client.name}>
-                    {client.name}
+                {workspaceClients.map((clientItem) => (
+                  <option key={clientItem.id} value={clientItem.name}>
+                    {clientItem.name}
                   </option>
                 ))}
               </select>
             </div>
 
             <div>
-              <label className="mb-2 block text-sm font-medium">
-                Job Name
-              </label>
-
+              <label className="mb-2 block text-sm font-medium">Job Name</label>
               <input
                 type="text"
                 value={jobName}
@@ -3996,12 +3959,9 @@ export default function JobsPage() {
 
             <div>
               <label className="mb-2 block text-sm font-medium">Status</label>
-
               <select
                 value={status}
-                onChange={(event) =>
-                  setStatus(event.target.value as JobStatus)
-                }
+                onChange={(event) => setStatus(event.target.value as JobStatus)}
                 className="w-full rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800"
               >
                 <option>Lead</option>
@@ -4013,10 +3973,7 @@ export default function JobsPage() {
             </div>
 
             <div>
-              <label className="mb-2 block text-sm font-medium">
-                Scheduled Date
-              </label>
-
+              <label className="mb-2 block text-sm font-medium">Scheduled Date</label>
               <input
                 type="date"
                 value={date}
@@ -4026,10 +3983,7 @@ export default function JobsPage() {
             </div>
 
             <div>
-              <label className="mb-2 block text-sm font-medium">
-                Estimated Value
-              </label>
-
+              <label className="mb-2 block text-sm font-medium">Estimated Value</label>
               <input
                 type="number"
                 value={value}
@@ -4041,7 +3995,6 @@ export default function JobsPage() {
 
             <div className="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
               <h3 className="text-xl font-semibold">Materials</h3>
-
               <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-[1fr_160px_auto]">
                 <input
                   type="text"
@@ -4050,22 +4003,14 @@ export default function JobsPage() {
                   placeholder="Material name"
                   className="rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800"
                 />
-
                 <input
                   type="number"
                   value={materialQuantity}
-                  onChange={(event) =>
-                    setMaterialQuantity(event.target.value)
-                  }
+                  onChange={(event) => setMaterialQuantity(event.target.value)}
                   placeholder="Quantity"
                   className="rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800"
                 />
-
-                <button
-                  type="button"
-                  onClick={addMaterial}
-                  className="rounded-lg bg-blue-600 px-5 py-3 text-white hover:bg-blue-700"
-                >
+                <button type="button" onClick={addMaterial} className="rounded-lg bg-blue-600 px-5 py-3 text-white hover:bg-blue-700">
                   Add Material
                 </button>
               </div>
@@ -4073,34 +4018,19 @@ export default function JobsPage() {
               <div className="mt-4 space-y-2">
                 {materials.length > 0 ? (
                   materials.map((material, index) => (
-                    <div
-                      key={`${material.name}-${index}`}
-                      className="flex items-center justify-between rounded-lg bg-gray-100 p-3 dark:bg-gray-800"
-                    >
-                      <span>
-                        {material.quantity} × {material.name}
-                      </span>
-
-                      <button
-                        type="button"
-                        onClick={() => removeMaterial(index)}
-                        className="text-sm text-red-600 hover:underline dark:text-red-400"
-                      >
-                        Remove
-                      </button>
+                    <div key={`${material.name}-${index}`} className="flex items-center justify-between rounded-lg bg-gray-100 p-3 dark:bg-gray-800">
+                      <span>{material.quantity} × {material.name}</span>
+                      <button type="button" onClick={() => removeMaterial(index)} className="text-sm text-red-600 hover:underline dark:text-red-400">Remove</button>
                     </div>
                   ))
                 ) : (
-                  <p className="text-sm text-gray-500 dark:text-gray-400">
-                    No materials added yet.
-                  </p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">No materials added yet.</p>
                 )}
               </div>
             </div>
 
             <div>
               <label className="mb-2 block text-sm font-medium">Notes</label>
-
               <textarea
                 rows={5}
                 value={notes}
@@ -4111,27 +4041,15 @@ export default function JobsPage() {
             </div>
 
             <div className="flex gap-3">
-              <button
-                type="submit"
-                className="rounded-lg bg-blue-600 px-6 py-3 text-white hover:bg-blue-700"
-              >
-                Create Job
-              </button>
-
-              <button
-                type="button"
-                onClick={closeNewJobBox}
-                className="rounded-lg bg-red-600 px-6 py-3 text-white hover:bg-red-700"
-              >
-                Cancel
-              </button>
+              <button type="submit" className="rounded-lg bg-blue-600 px-6 py-3 text-white hover:bg-blue-700">Create Job</button>
+              <button type="button" onClick={closeNewJobBox} className="rounded-lg bg-red-600 px-6 py-3 text-white hover:bg-red-700">Cancel</button>
             </div>
           </form>
         </div>
       )}
 
       <div className="overflow-x-auto rounded-lg bg-white shadow dark:bg-gray-900">
-        <table className="min-w-[820px] w-full">
+        <table className="min-w-[980px] w-full">
           <thead className="bg-gray-100 dark:bg-gray-800">
             <tr className="text-left text-gray-700 dark:text-gray-300">
               <th className="w-12 p-4">
@@ -4148,6 +4066,7 @@ export default function JobsPage() {
               <th className="p-4">Status</th>
               <th className="p-4">Date</th>
               <th className="p-4 text-right">Value</th>
+              <th className="p-4 text-right">Invoice</th>
             </tr>
           </thead>
 
@@ -4155,12 +4074,12 @@ export default function JobsPage() {
             {workspaceJobs.length > 0 ? (
               workspaceJobs.map((job) => {
                 const matchedClient = getClientByName(job.client);
+                const jobInvoices = getInvoicesForJob(job.id);
+                const invoiceTotal = getInvoiceTotalForJob(job.id);
+                const firstInvoice = jobInvoices[0];
 
                 return (
-                  <tr
-                    key={job.id}
-                    className="border-t border-gray-200 dark:border-gray-700"
-                  >
+                  <tr key={job.id} className="border-t border-gray-200 dark:border-gray-700">
                     <td className="p-4">
                       <input
                         type="checkbox"
@@ -4171,20 +4090,14 @@ export default function JobsPage() {
                     </td>
 
                     <td className="p-4 font-medium">
-                      <Link
-                        href={`/jobs/${job.id}`}
-                        className="text-blue-600 hover:underline dark:text-blue-400"
-                      >
+                      <Link href={`/jobs/${job.id}`} className="text-blue-600 hover:underline dark:text-blue-400">
                         {job.name}
                       </Link>
                     </td>
 
                     <td className="p-4">
                       {matchedClient ? (
-                        <Link
-                          href={`/clients/${matchedClient.id}`}
-                          className="text-blue-600 hover:underline dark:text-blue-400"
-                        >
+                        <Link href={`/clients/${matchedClient.id}`} className="text-blue-600 hover:underline dark:text-blue-400">
                           {job.client}
                         </Link>
                       ) : (
@@ -4193,27 +4106,36 @@ export default function JobsPage() {
                     </td>
 
                     <td className="p-4">
-                      <span
-                        className={`rounded px-3 py-1 text-xs font-medium text-white ${getStatusColor(
-                          job.status
-                        )}`}
-                      >
+                      <span className={`rounded px-3 py-1 text-xs font-medium text-white ${getStatusColor(job.status)}`}>
                         {job.status}
                       </span>
                     </td>
 
                     <td className="p-4">{job.date || "—"}</td>
-
                     <td className="p-4 text-right font-medium">{job.value}</td>
+                    <td className="p-4 text-right">
+                      {firstInvoice ? (
+                        <div>
+                          <Link href={`/invoices/${firstInvoice.id}`} className="font-medium text-blue-600 hover:underline dark:text-blue-400">
+                            {firstInvoice.invoiceNumber}
+                          </Link>
+                          <div className="text-xs text-gray-500 dark:text-gray-400">
+                            {jobInvoices.length > 1 ? `${jobInvoices.length} invoices · ` : ""}
+                            {formatCurrency(invoiceTotal)}
+                          </div>
+                        </div>
+                      ) : (
+                        <Link href={`/invoices/new?jobId=${job.id}`} className="text-sm text-blue-600 hover:underline dark:text-blue-400">
+                          Create
+                        </Link>
+                      )}
+                    </td>
                   </tr>
                 );
               })
             ) : (
               <tr>
-                <td
-                  colSpan={6}
-                  className="p-10 text-center text-lg text-gray-500 dark:text-gray-400"
-                >
+                <td colSpan={7} className="p-10 text-center text-lg text-gray-500 dark:text-gray-400">
                   No jobs found for {activeWorkspace.name}
                 </td>
               </tr>
@@ -4632,228 +4554,650 @@ export default function Home() {
 ```tsx
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useWorkspace } from "@/components/WorkspaceContext";
+
+type SettingsTab =
+  | "business"
+  | "invoice"
+  | "tax"
+  | "workspace"
+  | "permissions";
+
+type WorkspaceSettings = {
+  workspaceId: string;
+
+  companyName: string;
+  companyAddress: string;
+  companyCity: string;
+  companyState: string;
+  companyZip: string;
+  companyPhone: string;
+  companyEmail: string;
+  companyWebsite: string;
+
+  defaultInvoiceTerms: string;
+  defaultFooterMessage: string;
+  defaultContactMessage: string;
+  defaultInvoiceStatus: "Draft" | "Sent";
+
+  taxState: string;
+  defaultTaxRate: string;
+  taxLocationMode: "Business location" | "Job location";
+  discountBeforeTax: boolean;
+
+  workspaceNickname: string;
+  businessType: string;
+  notes: string;
+};
+
+const businessTypes = [
+  "Landscaping",
+  "Tree Service",
+  "Lawn Care",
+  "Snow Removal",
+  "Property Management",
+  "Construction",
+  "Auto Repair",
+  "IT Services",
+  "Plumbing",
+  "Electrical",
+  "Cleaning",
+  "Restaurant",
+  "Property Maintenance",
+  "Other",
+];
 
 const roles = [
   {
     name: "Owner",
     color: "text-purple-600",
     description:
-      "Full access to all features. Manage workspace settings, billing, and team members.",
+      "Full access. Can manage settings, billing, team members, clients, invoices, jobs, inventory, and documents.",
   },
   {
     name: "Manager",
     color: "text-blue-600",
     description:
-      "Can manage clients, inventory, and scheduling. Cannot change workspace settings.",
+      "Can manage daily operations, clients, jobs, invoices, calendar, inventory, logistics, and documents.",
   },
   {
     name: "Employee",
     color: "text-gray-700 dark:text-gray-300",
     description:
-      "Can view assigned jobs and notes. Read-only access to other sections.",
+      "Can view assigned jobs, update job notes, view calendar, and access limited client/job information.",
   },
 ];
+
+function getDefaultSettings(workspaceId: string, workspaceName: string): WorkspaceSettings {
+  return {
+    workspaceId,
+
+    companyName: `${workspaceName} Company`,
+    companyAddress: "123 Business Street",
+    companyCity: "Rochester Hills",
+    companyState: "MI",
+    companyZip: "48307",
+    companyPhone: "(555) 123-4567",
+    companyEmail: "billing@example.com",
+    companyWebsite: "",
+
+    defaultInvoiceTerms: "Due upon receipt",
+    defaultFooterMessage: "Thank you for your business!",
+    defaultContactMessage: "Please contact us with any questions about this invoice.",
+    defaultInvoiceStatus: "Draft",
+
+    taxState: "MI",
+    defaultTaxRate: "6",
+    taxLocationMode: "Business location",
+    discountBeforeTax: true,
+
+    workspaceNickname: workspaceName,
+    businessType: workspaceName,
+    notes: "",
+  };
+}
+
+function loadAllSettings() {
+  if (typeof window === "undefined") return [];
+
+  const saved = localStorage.getItem("frontier-settings");
+
+  if (!saved) return [];
+
+  try {
+    const parsed = JSON.parse(saved);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveAllSettings(settings: WorkspaceSettings[]) {
+  localStorage.setItem("frontier-settings", JSON.stringify(settings));
+}
 
 export default function SettingsPage() {
   const { activeWorkspace } = useWorkspace();
 
-  const [tab, setTab] = useState<"general" | "permissions">("general");
+  const [tab, setTab] = useState<SettingsTab>("business");
+  const [allSettings, setAllSettings] = useState<WorkspaceSettings[]>([]);
+  const [settings, setSettings] = useState<WorkspaceSettings>(
+    getDefaultSettings(activeWorkspace.id, activeWorkspace.name)
+  );
+
+  const [savedNotice, setSavedNotice] = useState("");
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole] = useState("Employee");
+
+  useEffect(() => {
+    const loadedSettings = loadAllSettings();
+    const currentSettings =
+      loadedSettings.find((item) => item.workspaceId === activeWorkspace.id) ??
+      getDefaultSettings(activeWorkspace.id, activeWorkspace.name);
+
+    setAllSettings(loadedSettings);
+    setSettings(currentSettings);
+    setSavedNotice("");
+  }, [activeWorkspace.id, activeWorkspace.name]);
+
+  function updateSetting<K extends keyof WorkspaceSettings>(
+    key: K,
+    value: WorkspaceSettings[K]
+  ) {
+    setSettings((current) => ({
+      ...current,
+      [key]: value,
+    }));
+  }
+
+  function saveSettings() {
+    const withoutCurrentWorkspace = allSettings.filter(
+      (item) => item.workspaceId !== activeWorkspace.id
+    );
+
+    const updatedSettings = [...withoutCurrentWorkspace, settings];
+
+    setAllSettings(updatedSettings);
+    saveAllSettings(updatedSettings);
+
+    setSavedNotice("Settings saved.");
+    window.setTimeout(() => setSavedNotice(""), 2500);
+  }
+
+  function resetWorkspaceSettings() {
+    const resetSettings = getDefaultSettings(activeWorkspace.id, activeWorkspace.name);
+    const updatedSettings = allSettings.filter(
+      (item) => item.workspaceId !== activeWorkspace.id
+    );
+
+    setSettings(resetSettings);
+    setAllSettings(updatedSettings);
+    saveAllSettings(updatedSettings);
+    setSavedNotice("Settings reset.");
+    window.setTimeout(() => setSavedNotice(""), 2500);
+  }
 
   function handleInviteSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    console.log("Invite sent to:", inviteEmail);
-    console.log("Workspace:", activeWorkspace.name);
-
     setInviteEmail("");
+    setInviteRole("Employee");
     setInviteOpen(false);
+    setSavedNotice("Invite placeholder saved.");
+    window.setTimeout(() => setSavedNotice(""), 2500);
   }
 
-  return (
-    <div className="space-y-8">
-      <div>
-        <h1 className="text-3xl font-bold text-gray-950 dark:text-gray-100">
-          Settings
-        </h1>
+  const inputClass =
+    "w-full rounded-lg border border-gray-300 bg-white px-4 py-3 text-gray-950 shadow-sm outline-none focus:border-blue-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100";
 
-        <p className="mt-2 text-lg text-gray-500 dark:text-gray-400">
-          Manage configuration for {activeWorkspace.name}
-        </p>
+  const labelClass = "mb-2 block text-sm font-semibold text-gray-800 dark:text-gray-100";
+
+  const tabClass = (target: SettingsTab) =>
+    `rounded-lg px-4 py-2 text-sm font-semibold ${
+      tab === target
+        ? "bg-blue-600 text-white shadow"
+        : "bg-white text-gray-700 hover:bg-gray-100 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800"
+    }`;
+
+  return (
+    <div className="space-y-8 text-gray-950 dark:text-gray-100">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <h1 className="text-3xl font-bold">Settings</h1>
+          <p className="mt-2 text-gray-500 dark:text-gray-400">
+            Configure {activeWorkspace.name} defaults for invoices, taxes, workspace behavior, and team access.
+          </p>
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={resetWorkspaceSettings}
+            className="rounded-lg border border-gray-300 px-4 py-2 font-semibold hover:bg-gray-100 dark:border-gray-700 dark:hover:bg-gray-800"
+          >
+            Reset
+          </button>
+
+          <button
+            type="button"
+            onClick={saveSettings}
+            className="rounded-lg bg-blue-600 px-5 py-2 font-semibold text-white hover:bg-blue-700"
+          >
+            Save Settings
+          </button>
+        </div>
       </div>
 
-      <div className="flex w-full flex-col gap-2 rounded-xl bg-gray-100 p-1 sm:inline-flex sm:w-auto sm:flex-row dark:bg-gray-800">
-        <button
-          onClick={() => setTab("general")}
-          className={`rounded-lg px-4 py-2 text-lg ${
-            tab === "general"
-              ? "bg-white text-gray-950 shadow dark:bg-gray-900 dark:text-gray-100"
-              : "text-gray-500 dark:text-gray-400"
-          }`}
-        >
-          General
-        </button>
+      {savedNotice && (
+        <div className="rounded-lg border border-green-200 bg-green-50 p-4 font-semibold text-green-700 dark:border-green-900 dark:bg-green-950/40 dark:text-green-300">
+          {savedNotice}
+        </div>
+      )}
 
-        <button
-          onClick={() => setTab("permissions")}
-          className={`rounded-lg px-4 py-2 text-lg ${
-            tab === "permissions"
-              ? "bg-white text-gray-950 shadow dark:bg-gray-900 dark:text-gray-100"
-              : "text-gray-500 dark:text-gray-400"
-          }`}
-        >
+      <div className="flex flex-wrap gap-2 rounded-xl bg-gray-100 p-2 dark:bg-gray-800">
+        <button onClick={() => setTab("business")} className={tabClass("business")}>
+          Business Profile
+        </button>
+        <button onClick={() => setTab("invoice")} className={tabClass("invoice")}>
+          Invoice Defaults
+        </button>
+        <button onClick={() => setTab("tax")} className={tabClass("tax")}>
+          Tax
+        </button>
+        <button onClick={() => setTab("workspace")} className={tabClass("workspace")}>
+          Workspace
+        </button>
+        <button onClick={() => setTab("permissions")} className={tabClass("permissions")}>
           Permissions
         </button>
       </div>
 
-      {tab === "general" && (
-        <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-6 lg:p-8 shadow-sm dark:border-gray-800 dark:bg-gray-900">
-          <div className="space-y-6">
-            <div>
-              <label className="mb-3 block text-lg font-medium text-gray-900 dark:text-gray-100">
-                Workspace Name
-              </label>
+      {tab === "business" && (
+        <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-gray-900 sm:p-6">
+          <h2 className="text-2xl font-bold">Business Profile</h2>
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+            This should later feed the invoice “From” section automatically.
+          </p>
 
+          <div className="mt-6 grid grid-cols-1 gap-5 xl:grid-cols-2">
+            <div>
+              <label className={labelClass}>Company Name</label>
               <input
-                value={activeWorkspace.name}
-                readOnly
-                className="w-full rounded-lg border border-gray-200 bg-white px-5 py-3 text-xl text-gray-950 shadow-sm outline-none focus:border-blue-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
+                value={settings.companyName}
+                onChange={(event) => updateSetting("companyName", event.target.value)}
+                className={inputClass}
               />
             </div>
 
             <div>
-              <label className="mb-3 block text-lg font-medium text-gray-900 dark:text-gray-100">
-                Business Type
-              </label>
+              <label className={labelClass}>Company Email</label>
+              <input
+                type="email"
+                value={settings.companyEmail}
+                onChange={(event) => updateSetting("companyEmail", event.target.value)}
+                className={inputClass}
+              />
+            </div>
 
+            <div>
+              <label className={labelClass}>Company Phone</label>
+              <input
+                value={settings.companyPhone}
+                onChange={(event) => updateSetting("companyPhone", event.target.value)}
+                className={inputClass}
+              />
+            </div>
+
+            <div>
+              <label className={labelClass}>Website</label>
+              <input
+                value={settings.companyWebsite}
+                onChange={(event) => updateSetting("companyWebsite", event.target.value)}
+                placeholder="https://example.com"
+                className={inputClass}
+              />
+            </div>
+
+            <div className="xl:col-span-2">
+              <label className={labelClass}>Street Address</label>
+              <input
+                value={settings.companyAddress}
+                onChange={(event) => updateSetting("companyAddress", event.target.value)}
+                className={inputClass}
+              />
+            </div>
+
+            <div>
+              <label className={labelClass}>City</label>
+              <input
+                value={settings.companyCity}
+                onChange={(event) => updateSetting("companyCity", event.target.value)}
+                className={inputClass}
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className={labelClass}>State</label>
+                <input
+                  value={settings.companyState}
+                  onChange={(event) =>
+                    updateSetting("companyState", event.target.value.toUpperCase())
+                  }
+                  maxLength={2}
+                  className={inputClass}
+                />
+              </div>
+
+              <div>
+                <label className={labelClass}>ZIP</label>
+                <input
+                  value={settings.companyZip}
+                  onChange={(event) => updateSetting("companyZip", event.target.value)}
+                  className={inputClass}
+                />
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {tab === "invoice" && (
+        <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-gray-900 sm:p-6">
+          <h2 className="text-2xl font-bold">Invoice Defaults</h2>
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+            These values should be connected to the invoice builder next.
+          </p>
+
+          <div className="mt-6 grid grid-cols-1 gap-5 xl:grid-cols-2">
+            <div>
+              <label className={labelClass}>Default Invoice Status</label>
               <select
-                defaultValue={activeWorkspace.name}
-                className="w-full rounded-lg border border-gray-200 bg-white px-5 py-3 text-lg text-gray-950 shadow-sm outline-none focus:border-blue-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
+                value={settings.defaultInvoiceStatus}
+                onChange={(event) =>
+                  updateSetting(
+                    "defaultInvoiceStatus",
+                    event.target.value as WorkspaceSettings["defaultInvoiceStatus"]
+                  )
+                }
+                className={inputClass}
               >
-                <option>Landscaping</option>
-                <option>Snow Removal</option>
-                <option>Properties</option>
-                <option>Construction</option>
-                <option>Cleaning</option>
-                <option>Property Maintenance</option>
-                <option>Other</option>
+                <option>Draft</option>
+                <option>Sent</option>
               </select>
             </div>
 
-            <button 
-              className="w-full rounded-lg bg-blue-600 px-6 py-3 text-lg font-semibold text-white shadow hover:bg-blue-700 sm:w-auto"
-            >  
-              Save Changes
-            </button>
+            <div>
+              <label className={labelClass}>Default Terms</label>
+              <input
+                value={settings.defaultInvoiceTerms}
+                onChange={(event) =>
+                  updateSetting("defaultInvoiceTerms", event.target.value)
+                }
+                placeholder="Due upon receipt"
+                className={inputClass}
+              />
+            </div>
+
+            <div className="xl:col-span-2">
+              <label className={labelClass}>Default Footer Message</label>
+              <input
+                value={settings.defaultFooterMessage}
+                onChange={(event) =>
+                  updateSetting("defaultFooterMessage", event.target.value)
+                }
+                className={inputClass}
+              />
+            </div>
+
+            <div className="xl:col-span-2">
+              <label className={labelClass}>Default Contact Message</label>
+              <input
+                value={settings.defaultContactMessage}
+                onChange={(event) =>
+                  updateSetting("defaultContactMessage", event.target.value)
+                }
+                className={inputClass}
+              />
+            </div>
           </div>
-        </div>
+        </section>
+      )}
+
+      {tab === "tax" && (
+        <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-gray-900 sm:p-6">
+          <h2 className="text-2xl font-bold">Tax Settings</h2>
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+            Discount is currently set to apply before tax, which is the normal invoice calculation flow.
+          </p>
+
+          <div className="mt-6 grid grid-cols-1 gap-5 xl:grid-cols-2">
+            <div>
+              <label className={labelClass}>Tax State</label>
+              <input
+                value={settings.taxState}
+                onChange={(event) =>
+                  updateSetting("taxState", event.target.value.toUpperCase())
+                }
+                maxLength={2}
+                className={inputClass}
+              />
+            </div>
+
+            <div>
+              <label className={labelClass}>Default Tax Rate %</label>
+              <input
+                type="number"
+                value={settings.defaultTaxRate}
+                onChange={(event) => updateSetting("defaultTaxRate", event.target.value)}
+                placeholder="6"
+                className={inputClass}
+              />
+            </div>
+
+            <div>
+              <label className={labelClass}>Tax Location Basis</label>
+              <select
+                value={settings.taxLocationMode}
+                onChange={(event) =>
+                  updateSetting(
+                    "taxLocationMode",
+                    event.target.value as WorkspaceSettings["taxLocationMode"]
+                  )
+                }
+                className={inputClass}
+              >
+                <option>Business location</option>
+                <option>Job location</option>
+              </select>
+            </div>
+
+            <div className="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
+              <label className="flex items-start gap-3">
+                <input
+                  type="checkbox"
+                  checked={settings.discountBeforeTax}
+                  onChange={(event) =>
+                    updateSetting("discountBeforeTax", event.target.checked)
+                  }
+                  className="mt-1 h-4 w-4"
+                />
+
+                <span>
+                  <span className="block font-semibold">Apply discount before tax</span>
+                  <span className="mt-1 block text-sm text-gray-500 dark:text-gray-400">
+                    Keeps invoice totals consistent with the current calculation helper.
+                  </span>
+                </span>
+              </label>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {tab === "workspace" && (
+        <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-gray-900 sm:p-6">
+          <h2 className="text-2xl font-bold">Workspace Configuration</h2>
+
+          <div className="mt-6 grid grid-cols-1 gap-5 xl:grid-cols-2">
+            <div>
+              <label className={labelClass}>Workspace Name</label>
+              <input value={activeWorkspace.name} readOnly className={inputClass} />
+            </div>
+
+            <div>
+              <label className={labelClass}>Display Nickname</label>
+              <input
+                value={settings.workspaceNickname}
+                onChange={(event) =>
+                  updateSetting("workspaceNickname", event.target.value)
+                }
+                className={inputClass}
+              />
+            </div>
+
+            <div>
+              <label className={labelClass}>Business Type</label>
+              <select
+                value={settings.businessType}
+                onChange={(event) => updateSetting("businessType", event.target.value)}
+                className={inputClass}
+              >
+                {businessTypes.map((type) => (
+                  <option key={type}>{type}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className={labelClass}>Workspace ID</label>
+              <input value={activeWorkspace.id} readOnly className={inputClass} />
+            </div>
+
+            <div className="xl:col-span-2">
+              <label className={labelClass}>Internal Notes</label>
+              <textarea
+                rows={5}
+                value={settings.notes}
+                onChange={(event) => updateSetting("notes", event.target.value)}
+                placeholder="Internal workspace notes, default operating procedures, billing notes..."
+                className={inputClass}
+              />
+            </div>
+          </div>
+        </section>
       )}
 
       {tab === "permissions" && (
-        <div className="space-y-6">
-          <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-6 lg:p-8 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+        <section className="space-y-6">
+          <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-gray-900 sm:p-6">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
               <div>
-                <h2 className="text-2xl font-bold text-gray-950 dark:text-gray-100">
-                  Team Members
-                </h2>
-
-                <p className="mt-2 text-lg text-gray-500 dark:text-gray-400">
-                  {activeWorkspace.name}
-                </p>
-
-                <p className="mt-8 text-lg text-gray-500 dark:text-gray-400">
-                  No team members yet
+                <h2 className="text-2xl font-bold">Team Members</h2>
+                <p className="mt-2 text-gray-500 dark:text-gray-400">
+                  Invite placeholder for {activeWorkspace.name}. Real auth comes later.
                 </p>
               </div>
 
               <button
+                type="button"
                 onClick={() => setInviteOpen(true)}
-                className="w-full rounded-lg bg-blue-600 px-5 py-3 text-lg font-semibold text-white shadow hover:bg-blue-700 sm:w-auto"
+                className="rounded-lg bg-blue-600 px-5 py-3 font-semibold text-white hover:bg-blue-700"
               >
-                Invite
+                Invite Member
               </button>
+            </div>
+
+            <div className="mt-6 rounded-xl border border-dashed border-gray-300 p-8 text-center text-gray-500 dark:border-gray-700 dark:text-gray-400">
+              No team members saved yet.
             </div>
           </div>
 
-          <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-6 lg:p-8 shadow-sm dark:border-gray-800 dark:bg-gray-900">
-            <h2 className="mb-6 text-2xl font-bold text-gray-950 dark:text-gray-100">
-              Role Permissions
-            </h2>
+          <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-gray-900 sm:p-6">
+            <h2 className="text-2xl font-bold">Role Permissions</h2>
 
-            <div className="space-y-5">
+            <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-3">
               {roles.map((role) => (
                 <div
                   key={role.name}
                   className="rounded-xl border border-gray-200 p-5 dark:border-gray-800"
                 >
-                  <h3 className={`text-lg font-bold ${role.color}`}>
-                    {role.name}
-                  </h3>
-
-                  <p className="mt-2 text-gray-500 dark:text-gray-400">
+                  <h3 className={`text-lg font-bold ${role.color}`}>{role.name}</h3>
+                  <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
                     {role.description}
                   </p>
                 </div>
               ))}
             </div>
           </div>
-        </div>
+        </section>
       )}
 
       {inviteOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4">
-          <div className="w-full max-w-xl rounded-xl bg-white p-4 sm:p-6 lg:p-8 shadow-xl dark:bg-gray-900">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/75 p-4">
+          <div className="w-full max-w-xl rounded-xl bg-white p-6 shadow-xl dark:bg-gray-900">
             <div className="mb-6 flex items-center justify-between">
-              <h2 className="text-2xl font-bold text-gray-950 dark:text-gray-100">
-                Invite Team Member
-              </h2>
+              <h2 className="text-2xl font-bold">Invite Team Member</h2>
 
               <button
                 type="button"
-                onClick={() => setInviteOpen(false)}
+                onClick={() => {
+                  setInviteOpen(false);
+                  setInviteEmail("");
+                  setInviteRole("Employee");
+                }}
                 className="text-2xl text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
               >
                 ×
               </button>
             </div>
 
-            <form onSubmit={handleInviteSubmit} className="space-y-6">
+            <form onSubmit={handleInviteSubmit} className="space-y-5">
               <div>
-                <label className="mb-2 block text-lg font-medium text-gray-900 dark:text-gray-100">
-                  Email Address *
-                </label>
-
+                <label className={labelClass}>Email Address *</label>
                 <input
                   type="email"
                   value={inviteEmail}
                   onChange={(event) => setInviteEmail(event.target.value)}
                   placeholder="employee@example.com"
                   required
-                  className="w-full rounded-lg border border-blue-500 bg-white px-4 py-3 text-lg text-gray-950 outline-none dark:bg-gray-800 dark:text-gray-100"
+                  className={inputClass}
                 />
               </div>
 
-              <div className="flex flex-col-reverse gap-3 pt-2 sm:flex-row sm:justify-end">
+              <div>
+                <label className={labelClass}>Role</label>
+                <select
+                  value={inviteRole}
+                  onChange={(event) => setInviteRole(event.target.value)}
+                  className={inputClass}
+                >
+                  <option>Owner</option>
+                  <option>Manager</option>
+                  <option>Employee</option>
+                </select>
+              </div>
+
+              <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
                 <button
                   type="button"
                   onClick={() => {
-                    setInviteEmail("");
                     setInviteOpen(false);
+                    setInviteEmail("");
+                    setInviteRole("Employee");
                   }}
-                  className="w-full rounded-lg border border-gray-200 px-6 py-3 text-lg text-gray-900 shadow-sm hover:bg-gray-50 dark:border-gray-700 dark:text-gray-100 dark:hover:bg-gray-800 sm:w-auto"
+                  className="rounded-lg border border-gray-300 px-5 py-3 hover:bg-gray-100 dark:border-gray-700 dark:hover:bg-gray-800"
                 >
                   Cancel
                 </button>
 
                 <button
                   type="submit"
-                  className="w-full rounded-lg bg-blue-600 px-6 py-3 text-lg font-semibold text-white shadow hover:bg-blue-700 sm:w-auto"
+                  className="rounded-lg bg-blue-600 px-5 py-3 font-semibold text-white hover:bg-blue-700"
                 >
-                  Send Invite
+                  Save Invite Placeholder
                 </button>
               </div>
             </form>
@@ -4880,6 +5224,51 @@ import { useEffect, useState } from "react";
 import Sidebar from "./Sidebar";
 import { useWorkspace } from "@/components/WorkspaceContext";
 
+type WorkspaceDisplaySettings = {
+  workspaceId: string;
+  workspaceNickname?: string;
+  businessType?: string;
+  userDisplayName?: string;
+  userEmail?: string;
+};
+
+const businessTypes = [
+  "Landscaping",
+  "Tree Service",
+  "Lawn Care",
+  "Snow Removal",
+  "Property Management",
+  "Construction",
+  "Auto Repair",
+  "IT Services",
+  "Plumbing",
+  "Electrical",
+  "Cleaning",
+  "Restaurant",
+  "Property Maintenance",
+  "Other",
+];
+
+function loadWorkspaceSettings(workspaceId: string): WorkspaceDisplaySettings | null {
+  if (typeof window === "undefined") return null;
+
+  const saved = localStorage.getItem("frontier-settings");
+  if (!saved) return null;
+
+  try {
+    const parsed = JSON.parse(saved);
+    if (!Array.isArray(parsed)) return null;
+
+    return (
+      parsed.find(
+        (item: WorkspaceDisplaySettings) => item.workspaceId === workspaceId
+      ) ?? null
+    );
+  } catch {
+    return null;
+  }
+}
+
 export default function AppShell({
   children,
 }: {
@@ -4892,6 +5281,8 @@ export default function AppShell({
   const [workspaceName, setWorkspaceName] = useState("");
   const [workspaceType, setWorkspaceType] = useState("Landscaping");
   const [customWorkspaceType, setCustomWorkspaceType] = useState("");
+  const [displaySettings, setDisplaySettings] =
+    useState<WorkspaceDisplaySettings | null>(null);
 
   const {
     workspaces,
@@ -4909,6 +5300,37 @@ export default function AppShell({
     }
   }, []);
 
+  useEffect(() => {
+    function refreshDisplaySettings() {
+      setDisplaySettings(loadWorkspaceSettings(activeWorkspace.id));
+    }
+
+    refreshDisplaySettings();
+
+    window.addEventListener("storage", refreshDisplaySettings);
+    window.addEventListener("frontier-settings-updated", refreshDisplaySettings);
+
+    return () => {
+      window.removeEventListener("storage", refreshDisplaySettings);
+      window.removeEventListener(
+        "frontier-settings-updated",
+        refreshDisplaySettings
+      );
+    };
+  }, [activeWorkspace.id]);
+
+  const displayedWorkspaceName =
+    displaySettings?.workspaceNickname?.trim() || activeWorkspace.name;
+
+  const displayedWorkspaceType =
+    displaySettings?.businessType?.trim() || activeWorkspace.type;
+
+  const displayedUserName =
+    displaySettings?.userDisplayName?.trim() || "Nicholas Thompson";
+
+  const displayedUserEmail =
+    displaySettings?.userEmail?.trim() || "thomp3ns@gmail.com";
+
   function toggleDarkMode() {
     const nextMode = !darkMode;
 
@@ -4923,6 +5345,55 @@ export default function AppShell({
     }
   }
 
+  function resetNewWorkspaceForm() {
+    setWorkspaceName("");
+    setWorkspaceType("Landscaping");
+    setCustomWorkspaceType("");
+  }
+
+  function closeNewWorkspaceModal() {
+    setNewWorkspaceOpen(false);
+    setWorkspaceOpen(false);
+    setUserOpen(false);
+    resetNewWorkspaceForm();
+  }
+
+  function createWorkspace() {
+    if (!workspaceName.trim()) return;
+
+    const resolvedType =
+      workspaceType === "Other" ? customWorkspaceType.trim() : workspaceType;
+
+    if (!resolvedType) return;
+
+    addWorkspace({
+      id: crypto.randomUUID(),
+      name: workspaceName.trim(),
+      type: resolvedType,
+    });
+
+    resetNewWorkspaceForm();
+    setNewWorkspaceOpen(false);
+  }
+
+  function getWorkspaceDisplayName(workspace: {
+    id: string;
+    name: string;
+    type: string;
+  }) {
+    const saved = loadWorkspaceSettings(workspace.id);
+    return saved?.workspaceNickname?.trim() || workspace.name;
+  }
+
+  function getWorkspaceDisplayType(workspace: {
+    id: string;
+    name: string;
+    type: string;
+  }) {
+    const saved = loadWorkspaceSettings(workspace.id);
+    return saved?.businessType?.trim() || workspace.type;
+  }
+
   return (
     <div className="flex h-screen w-full overflow-hidden bg-gray-100 text-gray-950 dark:bg-gray-950 dark:text-gray-100">
       <Sidebar />
@@ -4935,19 +5406,15 @@ export default function AppShell({
                 setWorkspaceOpen(!workspaceOpen);
                 setUserOpen(false);
               }}
-              className="flex items-center gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3 shadow-sm hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:hover:bg-gray-800"
+              className="flex max-w-[52vw] items-center gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3 shadow-sm hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:hover:bg-gray-800 sm:max-w-none"
             >
-              <span className="text-blue-600">
-                ▤
+              <span className="text-blue-600">▤</span>
+
+              <span className="truncate font-semibold">
+                {displayedWorkspaceName}
               </span>
 
-              <span className="font-semibold">
-                {activeWorkspace.name}
-              </span>
-
-              <span className="text-gray-500">
-                ⌄
-              </span>
+              <span className="text-gray-500">⌄</span>
             </button>
 
             {workspaceOpen && (
@@ -4969,17 +5436,15 @@ export default function AppShell({
                         : ""
                     }`}
                   >
-                    <span className="mt-1 text-xl">
-                      ▤
-                    </span>
+                    <span className="mt-1 text-xl">▤</span>
 
-                    <span>
-                      <span className="block font-semibold">
-                        {workspace.name}
+                    <span className="min-w-0">
+                      <span className="block truncate font-semibold">
+                        {getWorkspaceDisplayName(workspace)}
                       </span>
 
-                      <span className="block text-sm text-gray-500 dark:text-gray-400">
-                        {workspace.type}
+                      <span className="block truncate text-sm text-gray-500 dark:text-gray-400">
+                        {getWorkspaceDisplayType(workspace)}
                       </span>
                     </span>
                   </button>
@@ -4992,13 +5457,9 @@ export default function AppShell({
                   }}
                   className="flex w-full items-center gap-4 border-t border-gray-200 px-4 py-4 text-left hover:bg-gray-100 dark:border-gray-700 dark:hover:bg-gray-800"
                 >
-                  <span className="text-xl">
-                    +
-                  </span>
+                  <span className="text-xl">+</span>
 
-                  <span className="font-medium">
-                    New Workspace
-                  </span>
+                  <span className="font-medium">New Workspace</span>
                 </button>
               </div>
             )}
@@ -5025,29 +5486,32 @@ export default function AppShell({
                   ♙
                 </span>
 
-                <span className="hidden font-semibold md:block">
-                  Nicholas Thompson
+                <span className="hidden max-w-48 truncate font-semibold md:block">
+                  {displayedUserName}
                 </span>
 
-                <span className="text-gray-500">
-                  ⌄
-                </span>
+                <span className="text-gray-500">⌄</span>
               </button>
 
               {userOpen && (
                 <div className="absolute right-0 top-14 z-50 w-72 max-w-[90vw] overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-900">
-                  <div className="border-b border-gray-200 px-4 py-4 font-semibold dark:border-gray-700">
-                    thomp3ns@gmail.com
+                  <div className="border-b border-gray-200 px-4 py-4 dark:border-gray-700">
+                    <div className="font-semibold">{displayedUserName}</div>
+                    <div className="mt-1 break-all text-sm text-gray-500 dark:text-gray-400">
+                      {displayedUserEmail}
+                    </div>
+                  </div>
+
+                  <div className="border-b border-gray-200 px-4 py-3 text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
+                    {displayedWorkspaceName}
+                    <br />
+                    {displayedWorkspaceType}
                   </div>
 
                   <button className="flex w-full items-center gap-4 px-4 py-4 text-left hover:bg-gray-100 dark:hover:bg-gray-800">
-                    <span className="text-xl">
-                      ↪
-                    </span>
+                    <span className="text-xl">↪</span>
 
-                    <span className="font-medium">
-                      Sign Out
-                    </span>
+                    <span className="font-medium">Sign Out</span>
                   </button>
                 </div>
               )}
@@ -5058,102 +5522,62 @@ export default function AppShell({
         <main className="min-h-0 min-w-0 flex-1 overflow-y-auto p-3 sm:p-4 lg:p-6">
           {children}
         </main>
-        
+
         {newWorkspaceOpen && (
-  <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4">
-    <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl dark:bg-gray-900">
-      <div className="mb-6 flex items-center justify-between">
-        <h2 className="text-xl font-bold">
-          New Workspace
-        </h2>
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4">
+            <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl dark:bg-gray-900">
+              <div className="mb-6 flex items-center justify-between">
+                <h2 className="text-xl font-bold">New Workspace</h2>
 
-        <button
-          onClick={() => {
-            setNewWorkspaceOpen(false);
-            setWorkspaceOpen(false);
-            setUserOpen(false);
-            setWorkspaceName("");
-            setWorkspaceType("Landscaping");
-            setCustomWorkspaceType("");
-          }}
+                <button
+                  onClick={closeNewWorkspaceModal}
+                  className="text-2xl text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+                >
+                  ×
+                </button>
+              </div>
 
-          className="text-2xl text-gray-500"
-        >
-          ×
-        </button>
-      </div>
+              <div className="space-y-4">
+                <input
+                  type="text"
+                  value={workspaceName}
+                  onChange={(event) => setWorkspaceName(event.target.value)}
+                  placeholder="Workspace Name"
+                  className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800"
+                />
 
-      <div className="space-y-4">
-        <input
-          type="text"
-          value={workspaceName}
-          onChange={(e) => setWorkspaceName(e.target.value)}
-          placeholder="Workspace Name"
-          className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800"
-        />
+                <select
+                  value={workspaceType}
+                  onChange={(event) => setWorkspaceType(event.target.value)}
+                  className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800"
+                >
+                  {businessTypes.map((type) => (
+                    <option key={type}>{type}</option>
+                  ))}
+                </select>
 
-        <select
-          value={workspaceType}
-          onChange={(e) => setWorkspaceType(e.target.value)}
-          className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800"
-        >
-          <option>Landscaping</option>
-          <option>Tree Service</option>
-          <option>Lawn Care</option>
-          <option>Snow Removal</option>
-          <option>Property Management</option>
-          <option>Construction</option>
-          <option>Auto Repair</option>
-          <option>IT Services</option>
-          <option>Plumbing</option>
-          <option>Electrical</option>
-          <option>Cleaning</option>
-          <option>Restaurant</option>
-          <option>Other</option>
-        </select>
+                {workspaceType === "Other" && (
+                  <input
+                    type="text"
+                    value={customWorkspaceType}
+                    onChange={(event) =>
+                      setCustomWorkspaceType(event.target.value)
+                    }
+                    placeholder="Specify Business Type"
+                    className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800"
+                  />
+                )}
 
-        {workspaceType === "Other" && (
-          <input
-            type="text"
-            value={customWorkspaceType}
-            onChange={(e) =>
-              setCustomWorkspaceType(e.target.value)
-            }
-            placeholder="Specify Business Type"
-            className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800"
-          />
+                <button
+                  onClick={createWorkspace}
+                  className="w-full rounded-lg bg-blue-600 py-3 text-white hover:bg-blue-700"
+                >
+                  Create Workspace
+                </button>
+              </div>
+            </div>
+          </div>
         )}
-
-        <button
-          onClick={() => {
-            if (!workspaceName.trim()) return;
-
-            const type =
-              workspaceType === "Other"
-                ? customWorkspaceType.trim()
-                : workspaceType;
-            if (!type) return;
-
-            addWorkspace({
-              id: crypto.randomUUID(),
-              name: workspaceName,
-              type,
-            });
-
-            setWorkspaceName("");
-            setWorkspaceType("Landscaping");
-            setCustomWorkspaceType("");
-            setNewWorkspaceOpen(false);
-          }}
-          className="w-full rounded-lg bg-blue-600 py-3 text-white hover:bg-blue-700"
-        >
-          Create Workspace
-        </button>
-      </div>
-    </div>
-  </div>
-)}
-
       </div>
     </div>
   );
@@ -5169,84 +5593,30 @@ import Link from "next/link";
 import { useState } from "react";
 
 const navItems = [
-  {
-    label: "Dashboard",
-    href: "/dashboard",
-    icon: "🏠",
-  },
-  {
-    label: "Jobs",
-    href: "/jobs",
-    icon: "✅",
-  },
-  {
-    label: "Clients",
-    href: "/clients",
-    icon: "🧑‍💼",
-  },
-  {
-    label: "Calendar",
-    href: "/calendar",
-    icon: "📅",
-  },
-  {
-    label: "Inventory",
-    href: "/inventory",
-    icon: "🧱",
-  },
-  {
-    label: "Financials",
-    href: "/financials",
-    icon: "💵",
-    
-  },
-      {
-    label: "Invoices",
-    href: "/invoices",
-    icon: "📄",
-  },
-  {
-    label: "Documents",
-    href: "/documents",
-    icon: "📁",
-  },
-    {
-    label: "Logistics",
-    href: "/logistics",
-    icon: "🛣️",
-  },
-  {
-    label: "Settings",
-    href: "/settings",
-    icon: "⚙️",
-  },
+  { label: "Dashboard", href: "/dashboard", icon: "🏠" },
+  { label: "Calendar", href: "/calendar", icon: "📅" },
+  { label: "Jobs", href: "/jobs", icon: "✅" },
+  { label: "Inventory", href: "/inventory", icon: "🧱" },
+  { label: "Financials", href: "/financials", icon: "💵" },
+  { label: "Invoices", href: "/invoices", icon: "📄" },
+  { label: "Clients", href: "/clients", icon: "🧑‍💼" },
+  { label: "Document Extraction", href: "/documents", icon: "📁" },
+  { label: "Logistics", href: "/logistics", icon: "🛣️" },
+  { label: "Settings", href: "/settings", icon: "⚙️" },
 ];
 
 export default function Sidebar() {
   const [collapsed, setCollapsed] = useState(true);
 
   return (
-    <aside
-      className={`min-h-screen bg-gray-900 text-white transition-all duration-300 ${
-        collapsed ? "w-20" : "w-64"
-      }`}
-    >
+    <aside className={`min-h-screen bg-gray-900 text-white transition-all duration-300 ${collapsed ? "w-20" : "w-64"}`}>
       <div className="flex h-full flex-col">
-        <div
-          className={`flex items-center border-b border-gray-800 p-4 ${
-            collapsed ? "justify-center" : "justify-between"
-          }`}
-        >
+        <div className={`flex items-center border-b border-gray-800 p-4 ${collapsed ? "justify-center" : "justify-between"}`}>
           {collapsed ? (
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-3xl font-light">
-              ⌖
-            </div>
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-3xl font-light">⌖</div>
           ) : (
             <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-3xl font-light">
-                ⌖
-              </div>
-
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-3xl font-light">⌖</div>
               <h1 className="text-2xl font-bold">Frontier</h1>
             </div>
           )}
@@ -5254,43 +5624,18 @@ export default function Sidebar() {
 
         <nav className="flex flex-col gap-1 p-2">
           {navItems.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              title={collapsed ? item.label : undefined}
-              className={`group relative flex items-center rounded-xl px-3 py-2.5 text-gray-300 hover:bg-blue-600 hover:text-white ${
-                collapsed ? "justify-center" : "gap-3"
-              }`}
-            >
+            <Link key={item.href} href={item.href} title={collapsed ? item.label : undefined} className={`group relative flex items-center rounded-xl px-3 py-2.5 text-gray-300 hover:bg-blue-600 hover:text-white ${collapsed ? "justify-center" : "gap-3"}`}>
               <span className="w-8 text-center text-2xl leading-none">{item.icon}</span>
-
-              {!collapsed && (
-                <span className="text-base font-medium">{item.label}</span>
-              )}
-
-              {collapsed && (
-                <span className="pointer-events-none absolute left-full z-50 ml-3 whitespace-nowrap rounded-lg bg-gray-800 px-3 py-2 text-sm text-white opacity-0 shadow-lg transition-opacity group-hover:opacity-100">
-                  {item.label}
-                </span>
-              )}
+              {!collapsed && <span className="text-base font-medium">{item.label}</span>}
+              {collapsed && <span className="pointer-events-none absolute left-full z-50 ml-3 whitespace-nowrap rounded-lg bg-gray-800 px-3 py-2 text-sm text-white opacity-0 shadow-lg transition-opacity group-hover:opacity-100">{item.label}</span>}
             </Link>
           ))}
         </nav>
 
         <div className="mt-auto mb-4 p-3">
-          <button
-            onClick={() => setCollapsed(!collapsed)}
-            className={`flex w-full items-center rounded-xl px-3 py-3 text-gray-300 hover:bg-gray-800 hover:text-white ${
-              collapsed ? "justify-center text-xl" : "gap-3"
-            }`}
-            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-            title={collapsed ? "Expand" : "Collapse"}
-          >
+          <button onClick={() => setCollapsed(!collapsed)} className={`flex w-full items-center rounded-xl px-3 py-3 text-gray-300 hover:bg-gray-800 hover:text-white ${collapsed ? "justify-center text-xl" : "gap-3"}`} aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"} title={collapsed ? "Expand" : "Collapse"}>
             <span className="text-xl">{collapsed ? "›" : "‹"}</span>
-
-            {!collapsed && (
-              <span className="text-base font-medium">Collapse</span>
-            )}
+            {!collapsed && <span className="text-base font-medium">Collapse</span>}
           </button>
         </div>
       </div>
@@ -5719,6 +6064,223 @@ export const expenses: Expense[] = [
     workspaceId: "properties",
   },
 ];
+```
+
+## lib\frontierClients.ts
+
+```typescript
+import { clients as defaultClients } from "@/lib/clients";
+import { formatCurrency } from "@/lib/frontierInvoices";
+
+export type ClientRow = {
+  id: string;
+  workspaceId: string;
+  name: string;
+  status: string;
+  balance: string;
+  email?: string;
+  phone?: string;
+  address?: string;
+  city?: string;
+  state?: string;
+  zip?: string;
+  notes?: string;
+};
+
+export const clientStatuses = ["Lead", "Active", "Inactive"] as const;
+export type ClientStatus = (typeof clientStatuses)[number];
+
+export function safeParseClients(value: string | null): ClientRow[] {
+  if (!value) return defaultClients;
+
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : defaultClients;
+  } catch {
+    return defaultClients;
+  }
+}
+
+export function loadClients() {
+  if (typeof window === "undefined") return defaultClients as ClientRow[];
+
+  return safeParseClients(localStorage.getItem("frontier-clients"));
+}
+
+export function saveClients(clients: ClientRow[]) {
+  localStorage.setItem("frontier-clients", JSON.stringify(clients));
+}
+
+export function formatClientBalance(value: string) {
+  const numericValue = Number(value.replace(/[$,]/g, ""));
+
+  if (Number.isNaN(numericValue)) {
+    return "$0";
+  }
+
+  return formatCurrency(numericValue).replace(".00", "");
+}
+
+export function normalizeName(value: string) {
+  return value.trim().toLowerCase();
+}
+```
+
+## lib\frontierInvoices.ts
+
+```typescript
+export const invoiceStatuses = ["Draft", "Sent", "Overdue", "Paid"] as const;
+export const discountTypes = ["None", "Percent", "Fixed"] as const;
+
+export type InvoiceStatus = (typeof invoiceStatuses)[number];
+export type DiscountType = (typeof discountTypes)[number];
+
+export type InvoiceLineItem = {
+  id: string;
+  description: string;
+  quantity: number;
+  unitPrice: string;
+};
+
+export type InvoiceRow = {
+  id: string;
+  workspaceId: string;
+  invoiceNumber: string;
+  invoiceDate: string;
+
+  jobId?: string;
+  jobName?: string;
+  sourceClientId?: string;
+
+  companyName: string;
+  companyAddress: string;
+  companyCity: string;
+  companyState: string;
+  companyZip: string;
+  companyPhone: string;
+  companyEmail: string;
+
+  billToName: string;
+  billToCompany: string;
+  billToAddress: string;
+  billToCity: string;
+  billToState: string;
+  billToZip: string;
+  billToPhone: string;
+  billToEmail: string;
+
+  lineItems: InvoiceLineItem[];
+
+  discountType: DiscountType;
+  discountValue: string;
+  taxRate: string;
+
+  footerMessage: string;
+  contactMessage: string;
+  status: InvoiceStatus;
+};
+
+export type InvoiceSetupDraft = Omit<
+  InvoiceRow,
+  "lineItems" | "discountType" | "discountValue" | "taxRate" | "status"
+>;
+
+export function moneyToNumber(value: string | number | null | undefined) {
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  if (!value) return 0;
+
+  return Number(value.replace(/[$,%\s,]/g, "")) || 0;
+}
+
+export function formatCurrency(value: number) {
+  return `$${value.toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
+export function formatMoneyNumber(value: number) {
+  return value.toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+export function getInvoiceClientName(invoice: Pick<InvoiceRow, "billToCompany" | "billToName">) {
+  return invoice.billToCompany || invoice.billToName || "—";
+}
+
+export function getLineTotal(item: InvoiceLineItem) {
+  return item.quantity * moneyToNumber(item.unitPrice);
+}
+
+export function getSubtotal(lineItems: InvoiceLineItem[]) {
+  return lineItems.reduce((total, item) => total + getLineTotal(item), 0);
+}
+
+export function getDiscountAmount(
+  subtotal: number,
+  discountType: DiscountType,
+  discountValue: string
+) {
+  const value = moneyToNumber(discountValue);
+
+  if (discountType === "Percent") {
+    return Math.min(subtotal * (value / 100), subtotal);
+  }
+
+  if (discountType === "Fixed") {
+    return Math.min(value, subtotal);
+  }
+
+  return 0;
+}
+
+export function getTaxAmount(afterDiscountSubtotal: number, taxRate: string) {
+  const rate = moneyToNumber(taxRate);
+  return afterDiscountSubtotal * (rate / 100);
+}
+
+export function getInvoiceTotals(invoice: InvoiceRow) {
+  const subtotal = getSubtotal(invoice.lineItems || []);
+  const discount = getDiscountAmount(
+    subtotal,
+    invoice.discountType || "None",
+    invoice.discountValue || "0"
+  );
+  const taxableSubtotal = Math.max(subtotal - discount, 0);
+  const tax = getTaxAmount(taxableSubtotal, invoice.taxRate || "0");
+  const total = taxableSubtotal + tax;
+
+  return {
+    subtotal,
+    discount,
+    taxableSubtotal,
+    tax,
+    total,
+  };
+}
+
+export function safeParseInvoices(value: string | null): InvoiceRow[] {
+  if (!value) return [];
+
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export function loadSavedInvoices() {
+  if (typeof window === "undefined") return [];
+
+  return safeParseInvoices(localStorage.getItem("frontier-invoices"));
+}
+
+export function saveSavedInvoices(invoices: InvoiceRow[]) {
+  localStorage.setItem("frontier-invoices", JSON.stringify(invoices));
+}
 ```
 
 ## lib\inventory.ts

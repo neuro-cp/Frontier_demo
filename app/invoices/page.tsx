@@ -4,109 +4,16 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 
 import { useWorkspace } from "@/components/WorkspaceContext";
-
-const invoiceStatuses = ["Draft", "Sent", "Overdue", "Paid"] as const;
-const discountTypes = ["None", "Percent", "Fixed"] as const;
-
-type InvoiceStatus = (typeof invoiceStatuses)[number];
-type DiscountType = (typeof discountTypes)[number];
-
-type InvoiceLineItem = {
-  id: string;
-  description: string;
-  quantity: number;
-  unitPrice: string;
-};
-
-type InvoiceRow = {
-  id: string;
-  workspaceId: string;
-  invoiceNumber: string;
-  invoiceDate: string;
-
-  companyName: string;
-  companyAddress: string;
-  companyCity: string;
-  companyState: string;
-  companyZip: string;
-  companyPhone: string;
-  companyEmail: string;
-
-  billToName: string;
-  billToCompany: string;
-  billToAddress: string;
-  billToCity: string;
-  billToState: string;
-  billToZip: string;
-  billToPhone: string;
-  billToEmail: string;
-
-  lineItems: InvoiceLineItem[];
-
-  discountType: DiscountType;
-  discountValue: string;
-  taxRate: string;
-
-  footerMessage: string;
-  contactMessage: string;
-  status: InvoiceStatus;
-};
-
-function moneyToNumber(value: string) {
-  return Number(value.replace(/[$,]/g, "")) || 0;
-}
-
-function formatMoney(value: number) {
-  return `$${value.toLocaleString(undefined, {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
-}
-
-function getLineTotal(item: InvoiceLineItem) {
-  return item.quantity * moneyToNumber(item.unitPrice);
-}
-
-function getSubtotal(lineItems: InvoiceLineItem[]) {
-  return lineItems.reduce((total, item) => total + getLineTotal(item), 0);
-}
-
-function getDiscountAmount(
-  subtotal: number,
-  discountType: DiscountType,
-  discountValue: string
-) {
-  const value = Number(discountValue) || 0;
-
-  if (discountType === "Percent") {
-    return Math.min(subtotal * (value / 100), subtotal);
-  }
-
-  if (discountType === "Fixed") {
-    return Math.min(value, subtotal);
-  }
-
-  return 0;
-}
-
-function getTaxAmount(afterDiscountSubtotal: number, taxRate: string) {
-  const rate = Number(taxRate) || 0;
-
-  return afterDiscountSubtotal * (rate / 100);
-}
-
-function getInvoiceTotal(invoice: InvoiceRow) {
-  const subtotal = getSubtotal(invoice.lineItems);
-  const discount = getDiscountAmount(
-    subtotal,
-    invoice.discountType,
-    invoice.discountValue
-  );
-  const taxableSubtotal = Math.max(subtotal - discount, 0);
-  const tax = getTaxAmount(taxableSubtotal, invoice.taxRate);
-
-  return taxableSubtotal + tax;
-}
+import {
+  formatCurrency,
+  getInvoiceClientName,
+  getInvoiceTotals,
+  InvoiceRow,
+  invoiceStatuses,
+  InvoiceStatus,
+  loadSavedInvoices,
+  saveSavedInvoices,
+} from "@/lib/frontierInvoices";
 
 export default function InvoicesPage() {
   const { activeWorkspace } = useWorkspace();
@@ -116,15 +23,7 @@ export default function InvoicesPage() {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
 
   useEffect(() => {
-    const savedInvoices = localStorage.getItem("frontier-invoices");
-
-    if (savedInvoices) {
-      try {
-        setInvoices(JSON.parse(savedInvoices));
-      } catch {
-        setInvoices([]);
-      }
-    }
+    setInvoices(loadSavedInvoices());
   }, []);
 
   const workspaceInvoices = invoices.filter(
@@ -133,11 +32,11 @@ export default function InvoicesPage() {
 
   const totalOutstanding = workspaceInvoices
     .filter((invoice) => invoice.status !== "Paid")
-    .reduce((total, invoice) => total + getInvoiceTotal(invoice), 0);
+    .reduce((total, invoice) => total + getInvoiceTotals(invoice).total, 0);
 
   function saveInvoices(updatedInvoices: InvoiceRow[]) {
     setInvoices(updatedInvoices);
-    localStorage.setItem("frontier-invoices", JSON.stringify(updatedInvoices));
+    saveSavedInvoices(updatedInvoices);
   }
 
   function toggleInvoice(id: string) {
@@ -150,12 +49,7 @@ export default function InvoicesPage() {
 
   function openDeleteModal() {
     if (selectedInvoices.length === 0) return;
-
     setShowDeleteModal(true);
-  }
-
-  function closeDeleteModal() {
-    setShowDeleteModal(false);
   }
 
   function removeSelectedInvoices() {
@@ -180,7 +74,6 @@ export default function InvoicesPage() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className="text-3xl font-bold">Invoices</h1>
-
           <p className="mt-2 text-gray-500 dark:text-gray-400">
             Create and manage invoices for {activeWorkspace.name}
           </p>
@@ -214,18 +107,14 @@ export default function InvoicesPage() {
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <div className="rounded-xl bg-white p-4 shadow dark:bg-gray-900">
-          <p className="text-sm text-gray-500 dark:text-gray-400">
-            Total Invoices
-          </p>
+          <p className="text-sm text-gray-500 dark:text-gray-400">Total Invoices</p>
           <p className="mt-1 text-2xl font-bold">{workspaceInvoices.length}</p>
         </div>
 
         <div className="rounded-xl bg-white p-4 shadow dark:bg-gray-900">
-          <p className="text-sm text-gray-500 dark:text-gray-400">
-            Outstanding
-          </p>
+          <p className="text-sm text-gray-500 dark:text-gray-400">Outstanding</p>
           <p className="mt-1 text-2xl font-bold">
-            {formatMoney(totalOutstanding)}
+            {formatCurrency(totalOutstanding)}
           </p>
         </div>
 
@@ -238,13 +127,14 @@ export default function InvoicesPage() {
       </div>
 
       <div className="overflow-x-auto rounded-lg bg-white shadow dark:bg-gray-900">
-        <table className="w-full min-w-[900px]">
+        <table className="w-full min-w-[1000px]">
           <thead className="bg-gray-100 dark:bg-gray-800">
             <tr className="text-left text-gray-700 dark:text-gray-300">
               <th className="w-12 p-4"></th>
               <th className="p-4">Invoice #</th>
               <th className="p-4">Date</th>
               <th className="p-4">Bill To</th>
+              <th className="p-4">Job</th>
               <th className="p-4">Status</th>
               <th className="p-4 text-right">Total</th>
             </tr>
@@ -276,9 +166,19 @@ export default function InvoicesPage() {
                   </td>
 
                   <td className="p-4">{invoice.invoiceDate}</td>
+                  <td className="p-4">{getInvoiceClientName(invoice)}</td>
 
                   <td className="p-4">
-                    {invoice.billToCompany || invoice.billToName || "—"}
+                    {invoice.jobId ? (
+                      <Link
+                        href={`/jobs/${invoice.jobId}`}
+                        className="text-blue-600 hover:underline dark:text-blue-400"
+                      >
+                        {invoice.jobName || "Open Job"}
+                      </Link>
+                    ) : (
+                      "—"
+                    )}
                   </td>
 
                   <td className="p-4">
@@ -299,14 +199,14 @@ export default function InvoicesPage() {
                   </td>
 
                   <td className="p-4 text-right font-medium">
-                    {formatMoney(getInvoiceTotal(invoice))}
+                    {formatCurrency(getInvoiceTotals(invoice).total)}
                   </td>
                 </tr>
               ))
             ) : (
               <tr>
                 <td
-                  colSpan={6}
+                  colSpan={7}
                   className="p-10 text-center text-lg text-gray-500 dark:text-gray-400"
                 >
                   No invoices found for {activeWorkspace.name}
@@ -336,7 +236,7 @@ export default function InvoicesPage() {
             <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
               <button
                 type="button"
-                onClick={closeDeleteModal}
+                onClick={() => setShowDeleteModal(false)}
                 className="rounded-lg border border-gray-300 px-4 py-2 hover:bg-gray-100 dark:border-gray-700 dark:hover:bg-gray-800"
               >
                 Cancel

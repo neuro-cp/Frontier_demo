@@ -1,95 +1,46 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 
 import { useWorkspace } from "@/components/WorkspaceContext";
 import { clients as defaultClients } from "@/lib/clients";
-
-type InvoiceSetupDraft = {
-  id: string;
-  workspaceId: string;
-  invoiceNumber: string;
-  invoiceDate: string;
-
-  companyName: string;
-  companyAddress: string;
-  companyCity: string;
-  companyState: string;
-  companyZip: string;
-  companyPhone: string;
-  companyEmail: string;
-
-  billToName: string;
-  billToCompany: string;
-  billToAddress: string;
-  billToCity: string;
-  billToState: string;
-  billToZip: string;
-  billToPhone: string;
-  billToEmail: string;
-
-  footerMessage: string;
-  contactMessage: string;
-};
-
-type ClientRow = {
-  id: string;
-  workspaceId: string;
-  name: string;
-  status: string;
-  balance: string;
-  email?: string;
-  phone?: string;
-  address?: string;
-  city?: string;
-  state?: string;
-  zip?: string;
-  notes?: string;
-};
+import { jobs as defaultJobs, Job } from "@/lib/jobs";
+import { ClientRow, loadClients } from "@/lib/frontierClients";
+import { InvoiceSetupDraft, loadSavedInvoices } from "@/lib/frontierInvoices";
 
 function getTodayDate() {
   return new Date().toISOString().slice(0, 10);
 }
 
 function getNextInvoiceNumber() {
-  const savedInvoices = localStorage.getItem("frontier-invoices");
+  const savedInvoices = loadSavedInvoices();
+  const nextNumber = savedInvoices.length + 1;
 
-  if (!savedInvoices) {
-    return "INV-001";
-  }
-
-  try {
-    const parsed = JSON.parse(savedInvoices) as { invoiceNumber?: string }[];
-    const nextNumber = parsed.length + 1;
-
-    return `INV-${String(nextNumber).padStart(3, "0")}`;
-  } catch {
-    return "INV-001";
-  }
+  return `INV-${String(nextNumber).padStart(3, "0")}`;
 }
 
 function formatPhone(value: string) {
   const digits = value.replace(/\D/g, "").slice(0, 10);
 
-  if (digits.length <= 3) {
-    return digits;
-  }
-
-  if (digits.length <= 6) {
-    return `(${digits.slice(0, 3)}) ${digits.slice(3)}`;
-  }
+  if (digits.length <= 3) return digits;
+  if (digits.length <= 6) return `(${digits.slice(0, 3)}) ${digits.slice(3)}`;
 
   return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
 }
 
-export default function NewInvoicePage() {
+function NewInvoiceContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const startingJobId = searchParams.get("jobId") || "";
   const { activeWorkspace } = useWorkspace();
 
   const [clientItems, setClientItems] = useState<ClientRow[]>(defaultClients);
+  const [jobItems, setJobItems] = useState<Job[]>(defaultJobs);
   const [selectedClientId, setSelectedClientId] = useState("new");
+  const [selectedJobId, setSelectedJobId] = useState("");
+  const [autoLoadedJobId, setAutoLoadedJobId] = useState("");
 
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [invoiceDate, setInvoiceDate] = useState(getTodayDate());
@@ -103,21 +54,19 @@ export default function NewInvoicePage() {
   const [billToPhone, setBillToPhone] = useState("");
   const [billToEmail, setBillToEmail] = useState("");
 
-  const [footerMessage, setFooterMessage] = useState(
-    "Thank you for your business!"
-  );
-  const [contactMessage, setContactMessage] = useState(
-    "Please contact us with any questions about this invoice."
-  );
+  const [footerMessage, setFooterMessage] = useState("Thank you for your business!");
+  const [contactMessage, setContactMessage] = useState("Please contact us with any questions about this invoice.");
 
   useEffect(() => {
-    const savedClients = localStorage.getItem("frontier-clients");
+    setClientItems(loadClients());
 
-    if (savedClients) {
+    const savedJobs = localStorage.getItem("frontier-jobs");
+
+    if (savedJobs) {
       try {
-        setClientItems(JSON.parse(savedClients));
+        setJobItems(JSON.parse(savedJobs));
       } catch {
-        setClientItems(defaultClients);
+        setJobItems(defaultJobs);
       }
     }
   }, []);
@@ -125,6 +74,14 @@ export default function NewInvoicePage() {
   const workspaceClients = clientItems.filter(
     (client) => client.workspaceId === activeWorkspace.id
   );
+
+  const activeWorkspaceClients = workspaceClients.filter(
+    (client) => client.status === "Active"
+  );
+
+  const workspaceJobs = jobItems
+    .filter((job) => job.workspaceId === activeWorkspace.id)
+    .sort((a, b) => a.name.localeCompare(b.name));
 
   const companyPlaceholder = {
     companyName: `${activeWorkspace.name} Company`,
@@ -154,9 +111,7 @@ export default function NewInvoicePage() {
       return;
     }
 
-    const selectedClient = workspaceClients.find(
-      (client) => client.id === clientId
-    );
+    const selectedClient = workspaceClients.find((client) => client.id === clientId);
 
     if (!selectedClient) return;
 
@@ -171,8 +126,46 @@ export default function NewInvoicePage() {
     setBillToEmail(selectedClient.email ?? "");
   }
 
+  function populateFromJob(jobId: string) {
+    if (!jobId) {
+      setSelectedJobId("");
+      return;
+    }
+
+    const selectedJob = workspaceJobs.find((job) => job.id === jobId);
+
+    if (!selectedJob) return;
+
+    setSelectedJobId(selectedJob.id);
+
+    const matchedClient = workspaceClients.find(
+      (client) =>
+        client.name.trim().toLowerCase() === selectedJob.client.trim().toLowerCase()
+    );
+
+    if (matchedClient) {
+      populateBillToFromClient(matchedClient.id);
+    } else {
+      setSelectedClientId("new");
+      setBillToName(selectedJob.client);
+    }
+  }
+
+  useEffect(() => {
+    if (!startingJobId || autoLoadedJobId === startingJobId) return;
+    if (workspaceJobs.length === 0) return;
+
+    populateFromJob(startingJobId);
+    setAutoLoadedJobId(startingJobId);
+  }, [startingJobId, autoLoadedJobId, workspaceJobs]);
+
+  function markManualBillToEdit() {
+    setSelectedClientId("new");
+  }
+
   function continueToBuilder() {
     const resolvedInvoiceNumber = invoiceNumber.trim() || getNextInvoiceNumber();
+    const attachedJob = workspaceJobs.find((job) => job.id === selectedJobId);
 
     if (!invoiceDate.trim()) return;
     if (!billToName.trim() && !billToCompany.trim()) return;
@@ -182,6 +175,10 @@ export default function NewInvoicePage() {
       workspaceId: activeWorkspace.id,
       invoiceNumber: resolvedInvoiceNumber,
       invoiceDate,
+
+      jobId: attachedJob?.id,
+      jobName: attachedJob?.name,
+      sourceClientId: selectedClientId !== "new" ? selectedClientId : undefined,
 
       ...companyPlaceholder,
 
@@ -211,7 +208,6 @@ export default function NewInvoicePage() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className="text-3xl font-bold">New Invoice</h1>
-
           <p className="mt-2 text-gray-500 dark:text-gray-400">
             Step 1: setup invoice details for {activeWorkspace.name}
           </p>
@@ -226,7 +222,23 @@ export default function NewInvoicePage() {
       </div>
 
       <div className="rounded-xl bg-white p-4 shadow dark:bg-gray-900 sm:p-6">
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-[2fr_1fr]">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_1fr_180px]">
+          <div>
+            <label className={labelClass}>Attach to Job</label>
+            <select
+              value={selectedJobId}
+              onChange={(event) => populateFromJob(event.target.value)}
+              className={`${inputClass} w-full bg-white`}
+            >
+              <option value="">No attached job</option>
+              {workspaceJobs.map((job) => (
+                <option key={job.id} value={job.id}>
+                  {job.name} — {job.client}
+                </option>
+              ))}
+            </select>
+          </div>
+
           <div>
             <label className={labelClass}>Invoice #</label>
             <input
@@ -252,7 +264,6 @@ export default function NewInvoicePage() {
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
         <section className="rounded-xl bg-white p-4 shadow dark:bg-gray-900 sm:p-6">
           <h2 className="text-xl font-bold">From</h2>
-
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
             Placeholder until company settings are connected.
           </p>
@@ -261,8 +272,8 @@ export default function NewInvoicePage() {
             <p className="font-semibold">{companyPlaceholder.companyName}</p>
             <p>{companyPlaceholder.companyAddress}</p>
             <p>
-              {companyPlaceholder.companyCity},{" "}
-              {companyPlaceholder.companyState} {companyPlaceholder.companyZip}
+              {companyPlaceholder.companyCity}, {companyPlaceholder.companyState}{" "}
+              {companyPlaceholder.companyZip}
             </p>
             <p className="mt-2">{companyPlaceholder.companyPhone}</p>
             <p>{companyPlaceholder.companyEmail}</p>
@@ -271,23 +282,25 @@ export default function NewInvoicePage() {
 
         <section className="rounded-xl bg-white p-4 shadow dark:bg-gray-900 sm:p-6">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <h2 className="text-xl font-bold">Bill To</h2>
-
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-              <select
-                value={selectedClientId}
-                onChange={(event) => populateBillToFromClient(event.target.value)}
-                className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-800"
-              >
-                <option value="new">New Client</option>
-
-                {workspaceClients.map((client) => (
-                  <option key={client.id} value={client.id}>
-                    {client.name}
-                  </option>
-                ))}
-              </select>
+            <div>
+              <h2 className="text-xl font-bold">Bill To</h2>
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                Active clients show in the dropdown. Manually typed matching leads are promoted to Active when saved.
+              </p>
             </div>
+
+            <select
+              value={selectedClientId}
+              onChange={(event) => populateBillToFromClient(event.target.value)}
+              className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-800"
+            >
+              <option value="new">New Client</option>
+              {activeWorkspaceClients.map((client) => (
+                <option key={client.id} value={client.id}>
+                  {client.name}
+                </option>
+              ))}
+            </select>
           </div>
 
           <div className="mt-4 space-y-4">
@@ -295,7 +308,7 @@ export default function NewInvoicePage() {
               <input
                 value={billToName}
                 onChange={(event) => {
-                  setSelectedClientId("new");
+                  markManualBillToEdit();
                   setBillToName(event.target.value);
                 }}
                 placeholder="Name"
@@ -305,7 +318,7 @@ export default function NewInvoicePage() {
               <input
                 value={billToCompany}
                 onChange={(event) => {
-                  setSelectedClientId("new");
+                  markManualBillToEdit();
                   setBillToCompany(event.target.value);
                 }}
                 placeholder="Company Name"
@@ -316,7 +329,7 @@ export default function NewInvoicePage() {
             <input
               value={billToAddress}
               onChange={(event) => {
-                setSelectedClientId("new");
+                markManualBillToEdit();
                 setBillToAddress(event.target.value);
               }}
               placeholder="Street Address"
@@ -327,7 +340,7 @@ export default function NewInvoicePage() {
               <input
                 value={billToCity}
                 onChange={(event) => {
-                  setSelectedClientId("new");
+                  markManualBillToEdit();
                   setBillToCity(event.target.value);
                 }}
                 placeholder="City"
@@ -337,7 +350,7 @@ export default function NewInvoicePage() {
               <input
                 value={billToState}
                 onChange={(event) => {
-                  setSelectedClientId("new");
+                  markManualBillToEdit();
                   setBillToState(event.target.value.toUpperCase());
                 }}
                 placeholder="State"
@@ -348,7 +361,7 @@ export default function NewInvoicePage() {
               <input
                 value={billToZip}
                 onChange={(event) => {
-                  setSelectedClientId("new");
+                  markManualBillToEdit();
                   setBillToZip(event.target.value);
                 }}
                 placeholder="ZIP"
@@ -363,7 +376,7 @@ export default function NewInvoicePage() {
                 inputMode="tel"
                 value={billToPhone}
                 onChange={(event) => {
-                  setSelectedClientId("new");
+                  markManualBillToEdit();
                   setBillToPhone(formatPhone(event.target.value));
                 }}
                 placeholder="Phone"
@@ -374,7 +387,7 @@ export default function NewInvoicePage() {
                 type="email"
                 value={billToEmail}
                 onChange={(event) => {
-                  setSelectedClientId("new");
+                  markManualBillToEdit();
                   setBillToEmail(event.target.value);
                 }}
                 placeholder="Email"
@@ -428,5 +441,19 @@ export default function NewInvoicePage() {
         </button>
       </div>
     </div>
+  );
+}
+
+export default function NewInvoicePage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="space-y-6 text-gray-950 dark:text-gray-100">
+          Loading invoice setup...
+        </div>
+      }
+    >
+      <NewInvoiceContent />
+    </Suspense>
   );
 }

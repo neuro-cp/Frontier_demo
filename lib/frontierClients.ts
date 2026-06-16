@@ -1,0 +1,55 @@
+import { clients as defaultClients } from "@/lib/clients";
+import { formatCurrency } from "@/lib/frontierInvoices";
+
+export type ClientRow = {
+  id: string;
+  workspaceId: string;
+  name: string;
+  status: string;
+  balance: string;
+  email?: string;
+  phone?: string;
+  address?: string;
+  city?: string;
+  state?: string;
+  zip?: string;
+  notes?: string;
+};
+
+export const clientStatuses = ["Lead", "Active", "Inactive"] as const;
+export type ClientStatus = (typeof clientStatuses)[number];
+
+export function safeParseClients(value: string | null): ClientRow[] {
+  if (!value) return defaultClients;
+
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : defaultClients;
+  } catch {
+    return defaultClients;
+  }
+}
+
+export function loadClients() {
+  if (typeof window === "undefined") return defaultClients as ClientRow[];
+
+  return safeParseClients(localStorage.getItem("frontier-clients"));
+}
+
+export function saveClients(clients: ClientRow[]) {
+  localStorage.setItem("frontier-clients", JSON.stringify(clients));
+}
+
+export function formatClientBalance(value: string) {
+  const numericValue = Number(value.replace(/[$,]/g, ""));
+
+  if (Number.isNaN(numericValue)) {
+    return "$0";
+  }
+
+  return formatCurrency(numericValue).replace(".00", "");
+}
+
+export function normalizeName(value: string) {
+  return value.trim().toLowerCase();
+}

@@ -4,23 +4,15 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 
 import { useWorkspace } from "@/components/WorkspaceContext";
-import { jobs as defaultJobs, JobMaterial, JobStatus } from "@/lib/jobs";
+import { jobs as defaultJobs, Job, JobMaterial, JobStatus } from "@/lib/jobs";
 import { clients as defaultClients } from "@/lib/clients";
-
-type ClientRow = {
-  id: string;
-  workspaceId: string;
-  name: string;
-  status: string;
-  balance: string;
-  email?: string;
-  phone?: string;
-  address?: string;
-  city?: string;
-  state?: string;
-  zip?: string;
-  notes?: string;
-};
+import { ClientRow } from "@/lib/frontierClients";
+import {
+  formatCurrency,
+  getInvoiceTotals,
+  InvoiceRow,
+  loadSavedInvoices,
+} from "@/lib/frontierInvoices";
 
 function getStatusColor(status: JobStatus) {
   switch (status) {
@@ -42,7 +34,8 @@ function getStatusColor(status: JobStatus) {
 export default function JobsPage() {
   const { activeWorkspace } = useWorkspace();
 
-  const [jobItems, setJobItems] = useState(defaultJobs);
+  const [jobItems, setJobItems] = useState<Job[]>(defaultJobs);
+  const [invoiceItems, setInvoiceItems] = useState<InvoiceRow[]>([]);
   const [selectedJobs, setSelectedJobs] = useState<string[]>([]);
   const [newJobOpen, setNewJobOpen] = useState(false);
 
@@ -59,6 +52,7 @@ export default function JobsPage() {
 
   useEffect(() => {
     const savedJobs = localStorage.getItem("frontier-jobs");
+    const savedClients = localStorage.getItem("frontier-clients");
 
     if (savedJobs) {
       try {
@@ -67,7 +61,6 @@ export default function JobsPage() {
         setJobItems(defaultJobs);
       }
     }
-    const savedClients = localStorage.getItem("frontier-clients");
 
     if (savedClients) {
       try {
@@ -76,29 +69,41 @@ export default function JobsPage() {
         setClientItems(defaultClients);
       }
     }
+
+    setInvoiceItems(loadSavedInvoices());
   }, []);
 
   const workspaceClients = clientItems.filter(
-    (client) => client.workspaceId === activeWorkspace.id
+    (clientItem) => clientItem.workspaceId === activeWorkspace.id
   );
 
   const workspaceJobs = jobItems.filter(
     (job) => job.workspaceId === activeWorkspace.id
   );
 
-  function getClientByName(clientName: string) {
-    return workspaceClients.find(
-      (client) =>
-        client.name.trim().toLowerCase() ===
-        clientName.trim().toLowerCase()
-    );
-  }
-  
   const allWorkspaceJobsSelected =
     workspaceJobs.length > 0 &&
     workspaceJobs.every((job) => selectedJobs.includes(job.id));
 
-  function saveJobs(updatedJobs: typeof defaultJobs) {
+  function getClientByName(clientName: string) {
+    return workspaceClients.find(
+      (clientItem) =>
+        clientItem.name.trim().toLowerCase() === clientName.trim().toLowerCase()
+    );
+  }
+
+  function getInvoicesForJob(jobId: string) {
+    return invoiceItems.filter((invoice) => invoice.jobId === jobId);
+  }
+
+  function getInvoiceTotalForJob(jobId: string) {
+    return getInvoicesForJob(jobId).reduce(
+      (total, invoice) => total + getInvoiceTotals(invoice).total,
+      0
+    );
+  }
+
+  function saveJobs(updatedJobs: Job[]) {
     setJobItems(updatedJobs);
     localStorage.setItem("frontier-jobs", JSON.stringify(updatedJobs));
   }
@@ -131,11 +136,8 @@ export default function JobsPage() {
   function toggleAllWorkspaceJobs() {
     if (allWorkspaceJobsSelected) {
       setSelectedJobs((current) =>
-        current.filter(
-          (jobId) => !workspaceJobs.some((job) => job.id === jobId)
-        )
+        current.filter((jobId) => !workspaceJobs.some((job) => job.id === jobId))
       );
-
       return;
     }
 
@@ -150,11 +152,7 @@ export default function JobsPage() {
   }
 
   function deleteSelectedJobs() {
-    const updatedJobs = jobItems.filter(
-      (job) => !selectedJobs.includes(job.id)
-    );
-
-    saveJobs(updatedJobs);
+    saveJobs(jobItems.filter((job) => !selectedJobs.includes(job.id)));
     setSelectedJobs([]);
   }
 
@@ -164,27 +162,17 @@ export default function JobsPage() {
     const quantity = Number(materialQuantity);
     if (Number.isNaN(quantity) || quantity <= 0) return;
 
-    setMaterials((current) => [
-      ...current,
-      {
-        name: materialName.trim(),
-        quantity,
-      },
-    ]);
-
+    setMaterials((current) => [...current, { name: materialName.trim(), quantity }]);
     setMaterialName("");
     setMaterialQuantity("");
   }
 
   function removeMaterial(indexToRemove: number) {
-    setMaterials((current) =>
-      current.filter((_, index) => index !== indexToRemove)
-    );
+    setMaterials((current) => current.filter((_, index) => index !== indexToRemove));
   }
 
   function createJob(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-
     if (!client.trim() || !jobName.trim()) return;
 
     const formattedValue = value.trim()
@@ -193,7 +181,7 @@ export default function JobsPage() {
         : `$${value.trim()}`
       : "$0";
 
-    const newJob = {
+    const newJob: Job = {
       id: crypto.randomUUID(),
       workspaceId: activeWorkspace.id,
       name: jobName.trim(),
@@ -212,8 +200,6 @@ export default function JobsPage() {
   return (
     <div className="space-y-6 text-gray-950 dark:text-gray-100">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-
-
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
@@ -244,20 +230,12 @@ export default function JobsPage() {
         <div className="rounded-lg bg-white p-6 shadow dark:bg-gray-900">
           <div className="mb-6 flex items-center justify-between">
             <h2 className="text-xl font-bold">Add New Job</h2>
-
-            <button
-              type="button"
-              onClick={closeNewJobBox}
-              className="text-2xl text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
-            >
-              ×
-            </button>
+            <button type="button" onClick={closeNewJobBox} className="text-2xl text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">×</button>
           </div>
 
           <form onSubmit={createJob} className="space-y-6">
             <div>
               <label className="mb-2 block text-sm font-medium">Client</label>
-
               <select
                 value={client}
                 onChange={(event) => setClient(event.target.value)}
@@ -265,20 +243,16 @@ export default function JobsPage() {
                 className="w-full rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800"
               >
                 <option value="">Select Client</option>
-
-                {workspaceClients.map((client) => (
-                  <option key={client.id} value={client.name}>
-                    {client.name}
+                {workspaceClients.map((clientItem) => (
+                  <option key={clientItem.id} value={clientItem.name}>
+                    {clientItem.name}
                   </option>
                 ))}
               </select>
             </div>
 
             <div>
-              <label className="mb-2 block text-sm font-medium">
-                Job Name
-              </label>
-
+              <label className="mb-2 block text-sm font-medium">Job Name</label>
               <input
                 type="text"
                 value={jobName}
@@ -291,12 +265,9 @@ export default function JobsPage() {
 
             <div>
               <label className="mb-2 block text-sm font-medium">Status</label>
-
               <select
                 value={status}
-                onChange={(event) =>
-                  setStatus(event.target.value as JobStatus)
-                }
+                onChange={(event) => setStatus(event.target.value as JobStatus)}
                 className="w-full rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800"
               >
                 <option>Lead</option>
@@ -308,10 +279,7 @@ export default function JobsPage() {
             </div>
 
             <div>
-              <label className="mb-2 block text-sm font-medium">
-                Scheduled Date
-              </label>
-
+              <label className="mb-2 block text-sm font-medium">Scheduled Date</label>
               <input
                 type="date"
                 value={date}
@@ -321,10 +289,7 @@ export default function JobsPage() {
             </div>
 
             <div>
-              <label className="mb-2 block text-sm font-medium">
-                Estimated Value
-              </label>
-
+              <label className="mb-2 block text-sm font-medium">Estimated Value</label>
               <input
                 type="number"
                 value={value}
@@ -336,7 +301,6 @@ export default function JobsPage() {
 
             <div className="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
               <h3 className="text-xl font-semibold">Materials</h3>
-
               <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-[1fr_160px_auto]">
                 <input
                   type="text"
@@ -345,22 +309,14 @@ export default function JobsPage() {
                   placeholder="Material name"
                   className="rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800"
                 />
-
                 <input
                   type="number"
                   value={materialQuantity}
-                  onChange={(event) =>
-                    setMaterialQuantity(event.target.value)
-                  }
+                  onChange={(event) => setMaterialQuantity(event.target.value)}
                   placeholder="Quantity"
                   className="rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800"
                 />
-
-                <button
-                  type="button"
-                  onClick={addMaterial}
-                  className="rounded-lg bg-blue-600 px-5 py-3 text-white hover:bg-blue-700"
-                >
+                <button type="button" onClick={addMaterial} className="rounded-lg bg-blue-600 px-5 py-3 text-white hover:bg-blue-700">
                   Add Material
                 </button>
               </div>
@@ -368,34 +324,19 @@ export default function JobsPage() {
               <div className="mt-4 space-y-2">
                 {materials.length > 0 ? (
                   materials.map((material, index) => (
-                    <div
-                      key={`${material.name}-${index}`}
-                      className="flex items-center justify-between rounded-lg bg-gray-100 p-3 dark:bg-gray-800"
-                    >
-                      <span>
-                        {material.quantity} × {material.name}
-                      </span>
-
-                      <button
-                        type="button"
-                        onClick={() => removeMaterial(index)}
-                        className="text-sm text-red-600 hover:underline dark:text-red-400"
-                      >
-                        Remove
-                      </button>
+                    <div key={`${material.name}-${index}`} className="flex items-center justify-between rounded-lg bg-gray-100 p-3 dark:bg-gray-800">
+                      <span>{material.quantity} × {material.name}</span>
+                      <button type="button" onClick={() => removeMaterial(index)} className="text-sm text-red-600 hover:underline dark:text-red-400">Remove</button>
                     </div>
                   ))
                 ) : (
-                  <p className="text-sm text-gray-500 dark:text-gray-400">
-                    No materials added yet.
-                  </p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">No materials added yet.</p>
                 )}
               </div>
             </div>
 
             <div>
               <label className="mb-2 block text-sm font-medium">Notes</label>
-
               <textarea
                 rows={5}
                 value={notes}
@@ -406,27 +347,15 @@ export default function JobsPage() {
             </div>
 
             <div className="flex gap-3">
-              <button
-                type="submit"
-                className="rounded-lg bg-blue-600 px-6 py-3 text-white hover:bg-blue-700"
-              >
-                Create Job
-              </button>
-
-              <button
-                type="button"
-                onClick={closeNewJobBox}
-                className="rounded-lg bg-red-600 px-6 py-3 text-white hover:bg-red-700"
-              >
-                Cancel
-              </button>
+              <button type="submit" className="rounded-lg bg-blue-600 px-6 py-3 text-white hover:bg-blue-700">Create Job</button>
+              <button type="button" onClick={closeNewJobBox} className="rounded-lg bg-red-600 px-6 py-3 text-white hover:bg-red-700">Cancel</button>
             </div>
           </form>
         </div>
       )}
 
       <div className="overflow-x-auto rounded-lg bg-white shadow dark:bg-gray-900">
-        <table className="min-w-[820px] w-full">
+        <table className="min-w-[980px] w-full">
           <thead className="bg-gray-100 dark:bg-gray-800">
             <tr className="text-left text-gray-700 dark:text-gray-300">
               <th className="w-12 p-4">
@@ -443,6 +372,7 @@ export default function JobsPage() {
               <th className="p-4">Status</th>
               <th className="p-4">Date</th>
               <th className="p-4 text-right">Value</th>
+              <th className="p-4 text-right">Invoice</th>
             </tr>
           </thead>
 
@@ -450,12 +380,12 @@ export default function JobsPage() {
             {workspaceJobs.length > 0 ? (
               workspaceJobs.map((job) => {
                 const matchedClient = getClientByName(job.client);
+                const jobInvoices = getInvoicesForJob(job.id);
+                const invoiceTotal = getInvoiceTotalForJob(job.id);
+                const firstInvoice = jobInvoices[0];
 
                 return (
-                  <tr
-                    key={job.id}
-                    className="border-t border-gray-200 dark:border-gray-700"
-                  >
+                  <tr key={job.id} className="border-t border-gray-200 dark:border-gray-700">
                     <td className="p-4">
                       <input
                         type="checkbox"
@@ -466,20 +396,14 @@ export default function JobsPage() {
                     </td>
 
                     <td className="p-4 font-medium">
-                      <Link
-                        href={`/jobs/${job.id}`}
-                        className="text-blue-600 hover:underline dark:text-blue-400"
-                      >
+                      <Link href={`/jobs/${job.id}`} className="text-blue-600 hover:underline dark:text-blue-400">
                         {job.name}
                       </Link>
                     </td>
 
                     <td className="p-4">
                       {matchedClient ? (
-                        <Link
-                          href={`/clients/${matchedClient.id}`}
-                          className="text-blue-600 hover:underline dark:text-blue-400"
-                        >
+                        <Link href={`/clients/${matchedClient.id}`} className="text-blue-600 hover:underline dark:text-blue-400">
                           {job.client}
                         </Link>
                       ) : (
@@ -488,27 +412,36 @@ export default function JobsPage() {
                     </td>
 
                     <td className="p-4">
-                      <span
-                        className={`rounded px-3 py-1 text-xs font-medium text-white ${getStatusColor(
-                          job.status
-                        )}`}
-                      >
+                      <span className={`rounded px-3 py-1 text-xs font-medium text-white ${getStatusColor(job.status)}`}>
                         {job.status}
                       </span>
                     </td>
 
                     <td className="p-4">{job.date || "—"}</td>
-
                     <td className="p-4 text-right font-medium">{job.value}</td>
+                    <td className="p-4 text-right">
+                      {firstInvoice ? (
+                        <div>
+                          <Link href={`/invoices/${firstInvoice.id}`} className="font-medium text-blue-600 hover:underline dark:text-blue-400">
+                            {firstInvoice.invoiceNumber}
+                          </Link>
+                          <div className="text-xs text-gray-500 dark:text-gray-400">
+                            {jobInvoices.length > 1 ? `${jobInvoices.length} invoices · ` : ""}
+                            {formatCurrency(invoiceTotal)}
+                          </div>
+                        </div>
+                      ) : (
+                        <Link href={`/invoices/new?jobId=${job.id}`} className="text-sm text-blue-600 hover:underline dark:text-blue-400">
+                          Create
+                        </Link>
+                      )}
+                    </td>
                   </tr>
                 );
               })
             ) : (
               <tr>
-                <td
-                  colSpan={6}
-                  className="p-10 text-center text-lg text-gray-500 dark:text-gray-400"
-                >
+                <td colSpan={7} className="p-10 text-center text-lg text-gray-500 dark:text-gray-400">
                   No jobs found for {activeWorkspace.name}
                 </td>
               </tr>

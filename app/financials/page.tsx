@@ -1,22 +1,28 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import Link from "next/link";
+
 import { useWorkspace } from "@/components/WorkspaceContext";
 import { invoices as defaultInvoices } from "@/lib/invoices";
-import { expenses as defaultExpenses } from "@/lib/expenses";
-import { clients } from "@/lib/clients";
+import { expenses as defaultExpenses, Expense } from "@/lib/expenses";
+import {
+  formatCurrency,
+  getInvoiceClientName,
+  getInvoiceTotals,
+  InvoiceRow,
+  InvoiceStatus,
+  invoiceStatuses,
+  loadSavedInvoices,
+  moneyToNumber,
+  saveSavedInvoices,
+} from "@/lib/frontierInvoices";
 
-const invoiceStatuses = ["Draft", "Sent", "Overdue", "Paid"] as const;
+type DefaultInvoice = (typeof defaultInvoices)[number];
 
-type InvoiceStatus = (typeof invoiceStatuses)[number];
-
-function moneyToNumber(value: string) {
-  return Number(value.replace(/[$,]/g, ""));
-}
-
-function formatMoney(value: number) {
-  return `$${value.toLocaleString()}`;
-}
+type FinancialInvoice =
+  | { source: "saved"; id: string; invoice: InvoiceRow }
+  | { source: "default"; id: string; invoice: DefaultInvoice };
 
 function SummaryCard({
   title,
@@ -41,53 +47,100 @@ function SummaryCard({
         {note && <p className="mt-3 text-green-600">{note}</p>}
       </div>
 
-      <div
-        className={`flex h-12 w-12 items-center justify-center rounded-xl text-2xl ${iconClass}`}
-      >
+      <div className={`flex h-12 w-12 items-center justify-center rounded-xl text-2xl ${iconClass}`}>
         {icon}
       </div>
     </div>
   );
 }
 
+function getFinancialInvoiceNumber(row: FinancialInvoice) {
+  return row.source === "saved" ? row.invoice.invoiceNumber : row.invoice.id;
+}
+
+function getFinancialInvoiceClient(row: FinancialInvoice) {
+  return row.source === "saved"
+    ? getInvoiceClientName(row.invoice)
+    : row.invoice.client;
+}
+
+function getFinancialInvoiceStatus(row: FinancialInvoice): InvoiceStatus {
+  return row.invoice.status as InvoiceStatus;
+}
+
+function getFinancialInvoiceTotal(row: FinancialInvoice) {
+  return row.source === "saved"
+    ? getInvoiceTotals(row.invoice).total
+    : moneyToNumber(row.invoice.amount);
+}
+
 export default function FinancialsPage() {
   const { activeWorkspace } = useWorkspace();
 
-  const [invoiceItems, setInvoiceItems] = useState(defaultInvoices);
-  const [expenseItems, setExpenseItems] = useState(defaultExpenses);
+  const [savedInvoices, setSavedInvoices] = useState<InvoiceRow[]>([]);
+  const [defaultInvoiceItems, setDefaultInvoiceItems] =
+    useState(defaultInvoices);
+  const [expenseItems, setExpenseItems] = useState<Expense[]>(defaultExpenses);
 
   const [selectedInvoices, setSelectedInvoices] = useState<string[]>([]);
   const [selectedExpenses, setSelectedExpenses] = useState<string[]>([]);
-
-  const [newInvoiceOpen, setNewInvoiceOpen] = useState(false);
   const [newExpenseOpen, setNewExpenseOpen] = useState(false);
-
-  const [invoiceClient, setInvoiceClient] = useState("");
-  const [invoiceStatus, setInvoiceStatus] = useState<InvoiceStatus>("Draft");
-  const [invoiceAmount, setInvoiceAmount] = useState("");
-  const [invoiceFileName, setInvoiceFileName] = useState("");
 
   const [expenseDescription, setExpenseDescription] = useState("");
   const [expenseCategory, setExpenseCategory] = useState("Materials");
   const [expenseAmount, setExpenseAmount] = useState("");
 
-  const workspaceInvoices = invoiceItems.filter(
-    (invoice) => invoice.workspaceId === activeWorkspace.id
-  );
+  useEffect(() => {
+    setSavedInvoices(loadSavedInvoices());
+
+    const savedExpenses = localStorage.getItem("frontier-expenses");
+
+    if (savedExpenses) {
+      try {
+        setExpenseItems(JSON.parse(savedExpenses));
+      } catch {
+        setExpenseItems(defaultExpenses);
+      }
+    }
+  }, []);
+
+  const generatedInvoiceRows: FinancialInvoice[] = savedInvoices
+    .filter((invoice) => invoice.workspaceId === activeWorkspace.id)
+    .map((invoice) => ({
+      source: "saved",
+      id: invoice.id,
+      invoice,
+    }));
+
+  const defaultInvoiceRows: FinancialInvoice[] = defaultInvoiceItems
+    .filter((invoice) => invoice.workspaceId === activeWorkspace.id)
+    .map((invoice) => ({
+      source: "default",
+      id: `default-${invoice.id}`,
+      invoice,
+    }));
+
+  const workspaceInvoices = [...generatedInvoiceRows, ...defaultInvoiceRows];
 
   const workspaceExpenses = expenseItems.filter(
     (expense) => expense.workspaceId === activeWorkspace.id
   );
 
-  const workspaceClients = clients.filter(
-    (client) => client.workspaceId === activeWorkspace.id
-  );
+  function saveSavedInvoiceItems(updatedInvoices: InvoiceRow[]) {
+    setSavedInvoices(updatedInvoices);
+    saveSavedInvoices(updatedInvoices);
+  }
 
-  function toggleInvoice(id: string) {
+  function saveExpenses(updatedExpenses: Expense[]) {
+    setExpenseItems(updatedExpenses);
+    localStorage.setItem("frontier-expenses", JSON.stringify(updatedExpenses));
+  }
+
+  function toggleInvoice(rowId: string) {
     setSelectedInvoices((current) =>
-      current.includes(id)
-        ? current.filter((invoiceId) => invoiceId !== id)
-        : [...current, id]
+      current.includes(rowId)
+        ? current.filter((invoiceId) => invoiceId !== rowId)
+        : [...current, rowId]
     );
   }
 
@@ -100,40 +153,53 @@ export default function FinancialsPage() {
   }
 
   function removeSelectedInvoices() {
-    setInvoiceItems((current) =>
-      current.filter((invoice) => !selectedInvoices.includes(invoice.id))
+    const selectedSavedInvoiceIds = selectedInvoices.filter(
+      (id) => !id.startsWith("default-")
+    );
+
+    if (selectedSavedInvoiceIds.length > 0) {
+      saveSavedInvoiceItems(
+        savedInvoices.filter(
+          (invoice) => !selectedSavedInvoiceIds.includes(invoice.id)
+        )
+      );
+    }
+
+    setDefaultInvoiceItems((current) =>
+      current.filter(
+        (invoice) => !selectedInvoices.includes(`default-${invoice.id}`)
+      )
     );
 
     setSelectedInvoices([]);
   }
 
   function removeSelectedExpenses() {
-    setExpenseItems((current) =>
-      current.filter(
+    saveExpenses(
+      expenseItems.filter(
         (expense) =>
-          !selectedExpenses.includes(
-            `${expense.workspaceId}-${expense.description}`
-          )
+          !selectedExpenses.includes(`${expense.workspaceId}-${expense.description}`)
       )
     );
 
     setSelectedExpenses([]);
   }
 
-  function updateInvoiceStatus(id: string, status: InvoiceStatus) {
-    setInvoiceItems((current) =>
+  function updateInvoiceStatus(row: FinancialInvoice, status: InvoiceStatus) {
+    if (row.source === "saved") {
+      saveSavedInvoiceItems(
+        savedInvoices.map((invoice) =>
+          invoice.id === row.invoice.id ? { ...invoice, status } : invoice
+        )
+      );
+      return;
+    }
+
+    setDefaultInvoiceItems((current) =>
       current.map((invoice) =>
-        invoice.id === id ? { ...invoice, status } : invoice
+        invoice.id === row.invoice.id ? { ...invoice, status } : invoice
       )
     );
-  }
-
-  function closeInvoiceModal() {
-    setNewInvoiceOpen(false);
-    setInvoiceClient("");
-    setInvoiceStatus("Draft");
-    setInvoiceAmount("");
-    setInvoiceFileName("");
   }
 
   function closeExpenseModal() {
@@ -143,44 +209,18 @@ export default function FinancialsPage() {
     setExpenseAmount("");
   }
 
-  function addInvoice() {
-    if (!invoiceClient.trim()) return;
-
-    const amount = Number(invoiceAmount);
-
-    if (Number.isNaN(amount) || amount <= 0) return;
-
-    const nextInvoiceNumber = invoiceItems.length + 1;
-    const nextInvoiceId = `INV-${String(nextInvoiceNumber).padStart(3, "0")}`;
-
-    setInvoiceItems((current) => [
-      ...current,
-      {
-        id: nextInvoiceId,
-        client: invoiceClient,
-        status: invoiceStatus,
-        amount: formatMoney(amount),
-        workspaceId: activeWorkspace.id,
-        supportingFile: invoiceFileName,
-      },
-    ]);
-
-    closeInvoiceModal();
-  }
-
   function addExpense() {
     if (!expenseDescription.trim()) return;
 
     const amount = Number(expenseAmount);
-
     if (Number.isNaN(amount) || amount <= 0) return;
 
-    setExpenseItems((current) => [
-      ...current,
+    saveExpenses([
+      ...expenseItems,
       {
         description: expenseDescription.trim(),
         category: expenseCategory,
-        amount: formatMoney(amount),
+        amount: formatCurrency(amount),
         workspaceId: activeWorkspace.id,
       },
     ]);
@@ -189,12 +229,12 @@ export default function FinancialsPage() {
   }
 
   const revenue = workspaceInvoices
-    .filter((invoice) => invoice.status === "Paid")
-    .reduce((total, invoice) => total + moneyToNumber(invoice.amount), 0);
+    .filter((row) => getFinancialInvoiceStatus(row) === "Paid")
+    .reduce((total, row) => total + getFinancialInvoiceTotal(row), 0);
 
   const outstanding = workspaceInvoices
-    .filter((invoice) => invoice.status !== "Paid")
-    .reduce((total, invoice) => total + moneyToNumber(invoice.amount), 0);
+    .filter((row) => getFinancialInvoiceStatus(row) !== "Paid")
+    .reduce((total, row) => total + getFinancialInvoiceTotal(row), 0);
 
   const totalExpenses = workspaceExpenses.reduce(
     (total, expense) => total + moneyToNumber(expense.amount),
@@ -205,11 +245,10 @@ export default function FinancialsPage() {
 
   return (
     <div className="space-y-8">
-
       <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
         <SummaryCard
           title="Revenue"
-          value={formatMoney(revenue)}
+          value={formatCurrency(revenue)}
           icon="$"
           iconClass="bg-green-100 text-green-600 dark:bg-green-900/40 dark:text-green-300"
           note="Paid invoices"
@@ -217,21 +256,21 @@ export default function FinancialsPage() {
 
         <SummaryCard
           title="Expenses"
-          value={formatMoney(totalExpenses)}
+          value={formatCurrency(totalExpenses)}
           icon="↘"
           iconClass="bg-red-100 text-red-600 dark:bg-red-900/40 dark:text-red-300"
         />
 
         <SummaryCard
           title="Outstanding"
-          value={formatMoney(outstanding)}
+          value={formatCurrency(outstanding)}
           icon="◷"
           iconClass="bg-orange-100 text-orange-600 dark:bg-orange-900/40 dark:text-orange-300"
         />
 
         <SummaryCard
           title="Profit"
-          value={formatMoney(profit)}
+          value={formatCurrency(profit)}
           icon="↗"
           iconClass="bg-blue-100 text-blue-600 dark:bg-blue-900/40 dark:text-blue-300"
         />
@@ -245,14 +284,15 @@ export default function FinancialsPage() {
             </h2>
 
             <div className="flex gap-2">
-              <button
-                onClick={() => setNewInvoiceOpen(true)}
+              <Link
+                href="/invoices/new"
                 className="rounded-lg bg-blue-600 px-3 py-2 text-sm text-white hover:bg-blue-700"
               >
-                + Add Invoice
-              </button>
+                + Create Invoice
+              </Link>
 
               <button
+                type="button"
                 onClick={removeSelectedInvoices}
                 disabled={selectedInvoices.length === 0}
                 className="rounded-lg bg-red-600 px-3 py-2 text-sm text-white disabled:opacity-50"
@@ -262,7 +302,7 @@ export default function FinancialsPage() {
             </div>
           </div>
 
-          <table className="min-w-[720px] w-full">
+          <table className="min-w-[820px] w-full">
             <thead>
               <tr className="border-b border-gray-200 text-left text-sm uppercase tracking-wide text-gray-500 dark:border-gray-800 dark:text-gray-400">
                 <th className="w-12 px-4 py-4"></th>
@@ -275,36 +315,42 @@ export default function FinancialsPage() {
 
             <tbody>
               {workspaceInvoices.length > 0 ? (
-                workspaceInvoices.map((invoice) => (
+                workspaceInvoices.map((row) => (
                   <tr
-                    key={invoice.id}
+                    key={row.id}
                     className="border-b border-gray-200 text-base last:border-b-0 dark:border-gray-800 lg:text-lg"
                   >
                     <td className="px-4 py-5 text-center">
                       <input
                         type="checkbox"
-                        checked={selectedInvoices.includes(invoice.id)}
-                        onChange={() => toggleInvoice(invoice.id)}
+                        checked={selectedInvoices.includes(row.id)}
+                        onChange={() => toggleInvoice(row.id)}
                         className="h-4 w-4"
                       />
                     </td>
 
                     <td className="px-6 py-5 font-medium text-gray-950 dark:text-gray-100">
-                      {invoice.id}
+                      {row.source === "saved" ? (
+                        <Link
+                          href={`/invoices/${row.invoice.id}`}
+                          className="text-blue-600 hover:underline dark:text-blue-400"
+                        >
+                          {getFinancialInvoiceNumber(row)}
+                        </Link>
+                      ) : (
+                        getFinancialInvoiceNumber(row)
+                      )}
                     </td>
 
                     <td className="px-6 py-5 text-gray-500 dark:text-gray-400">
-                      {invoice.client}
+                      {getFinancialInvoiceClient(row)}
                     </td>
 
                     <td className="px-6 py-5">
                       <select
-                        value={invoice.status}
+                        value={getFinancialInvoiceStatus(row)}
                         onChange={(event) =>
-                          updateInvoiceStatus(
-                            invoice.id,
-                            event.target.value as InvoiceStatus
-                          )
+                          updateInvoiceStatus(row, event.target.value as InvoiceStatus)
                         }
                         className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
                       >
@@ -315,16 +361,13 @@ export default function FinancialsPage() {
                     </td>
 
                     <td className="px-6 py-5 text-right font-medium text-gray-950 dark:text-gray-100">
-                      {invoice.amount}
+                      {formatCurrency(getFinancialInvoiceTotal(row))}
                     </td>
                   </tr>
                 ))
               ) : (
                 <tr>
-                  <td
-                    colSpan={5}
-                    className="px-6 py-12 text-center text-lg text-gray-500 dark:text-gray-400"
-                  >
+                  <td colSpan={5} className="px-6 py-12 text-center text-lg text-gray-500 dark:text-gray-400">
                     No invoices for {activeWorkspace.name}
                   </td>
                 </tr>
@@ -373,10 +416,7 @@ export default function FinancialsPage() {
                   const expenseId = `${expense.workspaceId}-${expense.description}`;
 
                   return (
-                    <tr
-                      key={expenseId}
-                      className="border-b border-gray-200 text-base last:border-b-0 dark:border-gray-800 lg:text-lg"
-                    >
+                    <tr key={expenseId} className="border-b border-gray-200 text-base last:border-b-0 dark:border-gray-800 lg:text-lg">
                       <td className="px-4 py-5 text-center">
                         <input
                           type="checkbox"
@@ -389,11 +429,9 @@ export default function FinancialsPage() {
                       <td className="px-6 py-5 font-medium text-gray-950 dark:text-gray-100">
                         {expense.description}
                       </td>
-
                       <td className="px-6 py-5 text-gray-500 dark:text-gray-400">
                         {expense.category}
                       </td>
-
                       <td className="px-6 py-5 text-right font-medium text-red-600 dark:text-red-400">
                         {expense.amount}
                       </td>
@@ -402,10 +440,7 @@ export default function FinancialsPage() {
                 })
               ) : (
                 <tr>
-                  <td
-                    colSpan={4}
-                    className="px-6 py-12 text-center text-lg text-gray-500 dark:text-gray-400"
-                  >
+                  <td colSpan={4} className="px-6 py-12 text-center text-lg text-gray-500 dark:text-gray-400">
                     No expenses for {activeWorkspace.name}
                   </td>
                 </tr>
@@ -415,95 +450,12 @@ export default function FinancialsPage() {
         </div>
       </div>
 
-      {newInvoiceOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4">
-          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl dark:bg-gray-900">
-            <div className="mb-6 flex items-center justify-between">
-              <h2 className="text-xl font-bold text-gray-950 dark:text-gray-100">
-                Add Invoice
-              </h2>
-
-              <button
-                onClick={closeInvoiceModal}
-                className="text-2xl text-gray-500"
-              >
-                ×
-              </button>
-            </div>
-
-            <div className="space-y-4">
-              <select
-                value={invoiceClient}
-                onChange={(event) => setInvoiceClient(event.target.value)}
-                className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800"
-              >
-                <option value="">Select Client</option>
-                {workspaceClients.map((client) => (
-                  <option key={client.id} value={client.name}>
-                    {client.name}
-                  </option>
-                ))}
-              </select>
-
-              <select
-                value={invoiceStatus}
-                onChange={(event) =>
-                  setInvoiceStatus(event.target.value as InvoiceStatus)
-                }
-                className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800"
-              >
-                {invoiceStatuses.map((status) => (
-                  <option key={status}>{status}</option>
-                ))}
-              </select>
-
-              <input
-                type="number"
-                value={invoiceAmount}
-                onChange={(event) => setInvoiceAmount(event.target.value)}
-                placeholder="Amount"
-                className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800"
-              />
-
-              <input
-                type="file"
-                onChange={(event) =>
-                  setInvoiceFileName(event.target.files?.[0]?.name ?? "")
-                }
-                className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800"
-              />
-
-              {invoiceFileName && (
-                <p className="text-sm text-gray-500 dark:text-gray-400">
-                  Attached: {invoiceFileName}
-                </p>
-              )}
-
-              <button
-                onClick={addInvoice}
-                className="w-full rounded-lg bg-blue-600 py-3 text-white hover:bg-blue-700"
-              >
-                Add Invoice
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {newExpenseOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4">
           <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl dark:bg-gray-900">
             <div className="mb-6 flex items-center justify-between">
-              <h2 className="text-xl font-bold text-gray-950 dark:text-gray-100">
-                Add Expense
-              </h2>
-
-              <button
-                onClick={closeExpenseModal}
-                className="text-2xl text-gray-500"
-              >
-                ×
-              </button>
+              <h2 className="text-xl font-bold text-gray-950 dark:text-gray-100">Add Expense</h2>
+              <button onClick={closeExpenseModal} className="text-2xl text-gray-500">×</button>
             </div>
 
             <div className="space-y-4">

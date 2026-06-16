@@ -4,94 +4,15 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 
-const invoiceStatuses = ["Draft", "Sent", "Overdue", "Paid"] as const;
-const discountTypes = ["None", "Percent", "Fixed"] as const;
-
-type InvoiceStatus = (typeof invoiceStatuses)[number];
-type DiscountType = (typeof discountTypes)[number];
-
-type InvoiceLineItem = {
-  id: string;
-  description: string;
-  quantity: number;
-  unitPrice: string;
-};
-
-type InvoiceRow = {
-  id: string;
-  workspaceId: string;
-  invoiceNumber: string;
-  invoiceDate: string;
-
-  companyName: string;
-  companyAddress: string;
-  companyCity: string;
-  companyState: string;
-  companyZip: string;
-  companyPhone: string;
-  companyEmail: string;
-
-  billToName: string;
-  billToCompany: string;
-  billToAddress: string;
-  billToCity: string;
-  billToState: string;
-  billToZip: string;
-  billToPhone: string;
-  billToEmail: string;
-
-  lineItems: InvoiceLineItem[];
-
-  discountType: DiscountType;
-  discountValue: string;
-  taxRate: string;
-
-  footerMessage: string;
-  contactMessage: string;
-  status: InvoiceStatus;
-};
-
-function moneyToNumber(value: string) {
-  return Number(value.replace(/[$,]/g, "")) || 0;
-}
-
-function formatMoney(value: number) {
-  return value.toLocaleString(undefined, {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-}
-
-function getLineTotal(item: InvoiceLineItem) {
-  return item.quantity * moneyToNumber(item.unitPrice);
-}
-
-function getSubtotal(lineItems: InvoiceLineItem[]) {
-  return lineItems.reduce((total, item) => total + getLineTotal(item), 0);
-}
-
-function getDiscountAmount(
-  subtotal: number,
-  discountType: DiscountType,
-  discountValue: string
-) {
-  const value = Number(discountValue) || 0;
-
-  if (discountType === "Percent") {
-    return Math.min(subtotal * (value / 100), subtotal);
-  }
-
-  if (discountType === "Fixed") {
-    return Math.min(value, subtotal);
-  }
-
-  return 0;
-}
-
-function getTaxAmount(afterDiscountSubtotal: number, taxRate: string) {
-  const rate = Number(taxRate) || 0;
-  return afterDiscountSubtotal * (rate / 100);
-}
+import {
+  formatMoneyNumber,
+  getInvoiceTotals,
+  getInvoiceClientName,
+  getLineTotal,
+  InvoiceRow,
+  loadSavedInvoices,
+  moneyToNumber,
+} from "@/lib/frontierInvoices";
 
 const borderColor = "#9ca3af";
 const headerBlue = "#dbeafe";
@@ -105,16 +26,7 @@ export default function InvoiceDetailPage() {
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
-    const savedInvoices = localStorage.getItem("frontier-invoices");
-
-    if (savedInvoices) {
-      try {
-        setInvoices(JSON.parse(savedInvoices));
-      } catch {
-        setInvoices([]);
-      }
-    }
-
+    setInvoices(loadSavedInvoices());
     setLoaded(true);
   }, []);
 
@@ -129,10 +41,7 @@ export default function InvoiceDetailPage() {
   if (!invoice) {
     return (
       <div className="space-y-4 text-gray-950 dark:text-gray-100">
-        <Link
-          href="/invoices"
-          className="text-blue-600 hover:underline dark:text-blue-400"
-        >
+        <Link href="/invoices" className="text-blue-600 hover:underline dark:text-blue-400">
           ← Back to Invoices
         </Link>
 
@@ -141,27 +50,14 @@ export default function InvoiceDetailPage() {
     );
   }
 
-  const subtotal = getSubtotal(invoice.lineItems);
-
-  const discount = getDiscountAmount(
-    subtotal,
-    invoice.discountType,
-    invoice.discountValue
-  );
-
-  const taxableSubtotal = Math.max(subtotal - discount, 0);
-  const tax = getTaxAmount(taxableSubtotal, invoice.taxRate);
-  const total = taxableSubtotal + tax;
-
-  const billToDisplay =
-    invoice.billToCompany || invoice.billToName || "Unnamed Client";
+  const totals = getInvoiceTotals(invoice);
+  const billToDisplay = getInvoiceClientName(invoice);
 
   const mailSubject = encodeURIComponent(`Invoice ${invoice.invoiceNumber}`);
-
   const mailBody = encodeURIComponent(
-    `Hello,\n\nPlease see invoice ${invoice.invoiceNumber} for $${formatMoney(
-      total
-    )}.\n\nThank you.`
+    `Hello,\n\nPlease see invoice ${invoice.invoiceNumber} for $${formatMoneyNumber(
+      totals.total
+    )}.\n\nPlease attach the saved PDF before sending.\n\nThank you.`
   );
 
   const gmailHref = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(
@@ -173,13 +69,13 @@ export default function InvoiceDetailPage() {
       id: item.id,
       description:
         item.quantity > 1
-          ? `${item.description} — ${item.quantity} × $${formatMoney(
+          ? `${item.description} — ${item.quantity} × $${formatMoneyNumber(
               moneyToNumber(item.unitPrice)
             )}`
           : item.description,
-      amount: formatMoney(getLineTotal(item)),
+      amount: formatMoneyNumber(getLineTotal(item)),
     })),
-    ...(discount > 0
+    ...(totals.discount > 0
       ? [
           {
             id: "discount",
@@ -187,16 +83,16 @@ export default function InvoiceDetailPage() {
               invoice.discountType === "Percent"
                 ? `Discount (${invoice.discountValue}%)`
                 : "Discount",
-            amount: `(${formatMoney(discount)})`,
+            amount: `(${formatMoneyNumber(totals.discount)})`,
           },
         ]
       : []),
-    ...(tax > 0
+    ...(totals.tax > 0
       ? [
           {
             id: "tax",
             description: `Tax (${invoice.taxRate}% after discount)`,
-            amount: formatMoney(tax),
+            amount: formatMoneyNumber(totals.tax),
           },
         ]
       : []),
@@ -206,20 +102,33 @@ export default function InvoiceDetailPage() {
     <div className="space-y-6 text-gray-950 dark:text-gray-100">
       <div className="print-hidden flex flex-col gap-4 print:hidden sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <Link
-            href="/invoices"
-            className="text-blue-600 hover:underline dark:text-blue-400"
-          >
+          <Link href="/invoices" className="text-blue-600 hover:underline dark:text-blue-400">
             ← Back to Invoices
           </Link>
 
           <h1 className="mt-3 text-3xl font-bold">
             Invoice {invoice.invoiceNumber}
           </h1>
+
+          {invoice.jobId && (
+            <Link
+              href={`/jobs/${invoice.jobId}`}
+              className="mt-2 inline-block text-sm text-blue-600 hover:underline dark:text-blue-400"
+            >
+              Linked job: {invoice.jobName || invoice.jobId}
+            </Link>
+          )}
         </div>
 
         <div className="flex flex-wrap gap-2">
-
+          <a
+            href={gmailHref}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="rounded-lg bg-blue-600 px-4 py-2 font-semibold text-white hover:bg-blue-700"
+          >
+            Send Email
+          </a>
 
           <button
             type="button"
@@ -254,47 +163,19 @@ export default function InvoiceDetailPage() {
                 borderLeft: `1px solid ${borderColor}`,
               }}
             >
-              <div
-                className="px-3 py-1 font-bold"
-                style={{
-                  background: headerBlue,
-                  borderRight: `1px solid ${borderColor}`,
-                  borderBottom: `1px solid ${borderColor}`,
-                }}
-              >
-                INVOICE #
-              </div>
-
-              <div
-                className="px-3 py-1 font-bold"
-                style={{
-                  background: headerBlue,
-                  borderRight: `1px solid ${borderColor}`,
-                  borderBottom: `1px solid ${borderColor}`,
-                }}
-              >
-                DATE
-              </div>
-
-              <div
-                className="px-3 py-1"
-                style={{
-                  borderRight: `1px solid ${borderColor}`,
-                  borderBottom: `1px solid ${borderColor}`,
-                }}
-              >
-                {invoice.invoiceNumber}
-              </div>
-
-              <div
-                className="px-3 py-1"
-                style={{
-                  borderRight: `1px solid ${borderColor}`,
-                  borderBottom: `1px solid ${borderColor}`,
-                }}
-              >
-                {invoice.invoiceDate}
-              </div>
+              {["INVOICE #", "DATE", invoice.invoiceNumber, invoice.invoiceDate].map((value, index) => (
+                <div
+                  key={`${value}-${index}`}
+                  className={`px-3 py-1 ${index < 2 ? "font-bold" : ""}`}
+                  style={{
+                    background: index < 2 ? headerBlue : undefined,
+                    borderRight: `1px solid ${borderColor}`,
+                    borderBottom: `1px solid ${borderColor}`,
+                  }}
+                >
+                  {value}
+                </div>
+              ))}
             </div>
           </div>
         </div>
@@ -302,10 +183,7 @@ export default function InvoiceDetailPage() {
         <div className="mt-10 max-w-sm text-sm leading-5">
           <div
             className="px-2 py-1 font-bold"
-            style={{
-              background: headerBlue,
-              border: `1px solid ${borderColor}`,
-            }}
+            style={{ background: headerBlue, border: `1px solid ${borderColor}` }}
           >
             BILL TO
           </div>
@@ -346,24 +224,16 @@ export default function InvoiceDetailPage() {
 
             <div
               className="px-3 py-2 text-right font-bold"
-              style={{
-                background: headerBlue,
-                borderBottom: `1px solid ${borderColor}`,
-              }}
+              style={{ background: headerBlue, borderBottom: `1px solid ${borderColor}` }}
             >
               AMOUNT
             </div>
 
             {displayRows.map((row) => (
-              <div
-                key={`${row.id}-description`}
-                className="contents"
-              >
+              <div key={`${row.id}-description`} className="contents invoice-row">
                 <div
                   className="px-3 py-1"
-                  style={{
-                    borderRight: `1px solid ${borderColor}`,
-                  }}
+                  style={{ borderRight: `1px solid ${borderColor}` }}
                 >
                   {row.description}
                 </div>
@@ -372,14 +242,12 @@ export default function InvoiceDetailPage() {
               </div>
             ))}
 
-            <div
-              style={{
-                minHeight: "224px",
-                borderRight: `1px solid ${borderColor}`,
-              }}
-            />
-
-            <div />
+            {displayRows.length < 8 && (
+              <>
+                <div style={{ minHeight: "224px", borderRight: `1px solid ${borderColor}` }} />
+                <div />
+              </>
+            )}
 
             <div
               className="px-3 py-3 text-center italic"
@@ -401,7 +269,7 @@ export default function InvoiceDetailPage() {
             >
               <div className="flex justify-between gap-3 font-bold">
                 <span>TOTAL</span>
-                <span>${formatMoney(total)}</span>
+                <span>${formatMoneyNumber(totals.total)}</span>
               </div>
             </div>
           </div>
@@ -412,7 +280,6 @@ export default function InvoiceDetailPage() {
             {invoice.contactMessage ||
               "If you have any questions about this invoice, please contact us."}
           </p>
-
           <p>
             {invoice.companyPhone}
             {invoice.companyPhone && invoice.companyEmail ? ", " : ""}

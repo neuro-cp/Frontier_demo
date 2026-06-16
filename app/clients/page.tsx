@@ -23,6 +23,8 @@ type ClientRow = {
 
 const clientStatuses = ["Lead", "Active", "Inactive"] as const;
 
+type ClientStatusPriority = "default" | (typeof clientStatuses)[number];
+
 function formatMoney(value: string) {
   const numericValue = Number(value.replace(/[$,]/g, ""));
 
@@ -33,11 +35,29 @@ function formatMoney(value: string) {
   return `$${numericValue.toLocaleString()}`;
 }
 
+function getStatusClasses(status: string) {
+  if (status === "Active") {
+    return "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300";
+  }
+
+  if (status === "Lead") {
+    return "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300";
+  }
+
+  if (status === "Inactive") {
+    return "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300";
+  }
+
+  return "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300";
+}
+
 export default function ClientsPage() {
   const { activeWorkspace } = useWorkspace();
 
   const [clientItems, setClientItems] = useState<ClientRow[]>(defaultClients);
   const [selectedClients, setSelectedClients] = useState<string[]>([]);
+  const [statusPriority, setStatusPriority] =
+    useState<ClientStatusPriority>("default");
 
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [newClientOpen, setNewClientOpen] = useState(false);
@@ -72,6 +92,22 @@ export default function ClientsPage() {
     (client) => client.workspaceId === activeWorkspace.id
   );
 
+  const sortedWorkspaceClients = [...workspaceClients].sort((a, b) => {
+    if (statusPriority === "default") {
+      return a.name.localeCompare(b.name);
+    }
+
+    if (a.status === statusPriority && b.status !== statusPriority) {
+      return -1;
+    }
+
+    if (a.status !== statusPriority && b.status === statusPriority) {
+      return 1;
+    }
+
+    return a.name.localeCompare(b.name);
+  });
+
   const allWorkspaceClientsSelected =
     workspaceClients.length > 0 &&
     workspaceClients.every((client) => selectedClients.includes(client.id));
@@ -79,6 +115,23 @@ export default function ClientsPage() {
   function saveClients(updatedClients: ClientRow[]) {
     setClientItems(updatedClients);
     localStorage.setItem("frontier-clients", JSON.stringify(updatedClients));
+  }
+
+  function cycleStatusPriority() {
+    setStatusPriority((current) => {
+      if (current === "default") return "Active";
+      if (current === "Active") return "Lead";
+      if (current === "Lead") return "Inactive";
+      return "default";
+    });
+  }
+
+  function getStatusSortLabel() {
+    if (statusPriority === "default") {
+      return "Default";
+    }
+
+    return `${statusPriority} first`;
   }
 
   function resetClientForm() {
@@ -222,8 +275,6 @@ export default function ClientsPage() {
   return (
     <div className="space-y-6 text-gray-950 dark:text-gray-100">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-
-
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
@@ -266,7 +317,25 @@ export default function ClientsPage() {
               </th>
 
               <th className="p-4 text-left">Name</th>
-              <th className="p-4 text-left">Status</th>
+
+              <th className="p-4 text-left">
+                <button
+                  type="button"
+                  onClick={cycleStatusPriority}
+                  className="flex items-center gap-1 hover:text-blue-600 dark:hover:text-blue-400"
+                  title="Cycle status priority"
+                >
+                  <span>Status</span>
+                  <span className="text-xs">
+                    {statusPriority === "default" ? "↕" : "↑"}
+                  </span>
+                </button>
+
+                <div className="mt-1 text-xs font-normal text-gray-500 dark:text-gray-400">
+                  {getStatusSortLabel()}
+                </div>
+              </th>
+
               <th className="p-4 text-left">Phone</th>
               <th className="p-4 text-left">Email</th>
               <th className="p-4 text-left">Address</th>
@@ -276,8 +345,8 @@ export default function ClientsPage() {
           </thead>
 
           <tbody>
-            {workspaceClients.length > 0 ? (
-              workspaceClients.map((client) => {
+            {sortedWorkspaceClients.length > 0 ? (
+              sortedWorkspaceClients.map((client) => {
                 const addressParts = [
                   client.address,
                   client.city,
@@ -308,7 +377,15 @@ export default function ClientsPage() {
                       </Link>
                     </td>
 
-                    <td className="p-4">{client.status}</td>
+                    <td className="p-4">
+                      <span
+                        className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${getStatusClasses(
+                          client.status
+                        )}`}
+                      >
+                        {client.status}
+                      </span>
+                    </td>
 
                     <td className="p-4">{client.phone || "—"}</td>
 
