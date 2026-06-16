@@ -4,6 +4,51 @@ import { useEffect, useState } from "react";
 import Sidebar from "./Sidebar";
 import { useWorkspace } from "@/components/WorkspaceContext";
 
+type WorkspaceDisplaySettings = {
+  workspaceId: string;
+  workspaceNickname?: string;
+  businessType?: string;
+  userDisplayName?: string;
+  userEmail?: string;
+};
+
+const businessTypes = [
+  "Landscaping",
+  "Tree Service",
+  "Lawn Care",
+  "Snow Removal",
+  "Property Management",
+  "Construction",
+  "Auto Repair",
+  "IT Services",
+  "Plumbing",
+  "Electrical",
+  "Cleaning",
+  "Restaurant",
+  "Property Maintenance",
+  "Other",
+];
+
+function loadWorkspaceSettings(workspaceId: string): WorkspaceDisplaySettings | null {
+  if (typeof window === "undefined") return null;
+
+  const saved = localStorage.getItem("frontier-settings");
+  if (!saved) return null;
+
+  try {
+    const parsed = JSON.parse(saved);
+    if (!Array.isArray(parsed)) return null;
+
+    return (
+      parsed.find(
+        (item: WorkspaceDisplaySettings) => item.workspaceId === workspaceId
+      ) ?? null
+    );
+  } catch {
+    return null;
+  }
+}
+
 export default function AppShell({
   children,
 }: {
@@ -16,6 +61,8 @@ export default function AppShell({
   const [workspaceName, setWorkspaceName] = useState("");
   const [workspaceType, setWorkspaceType] = useState("Landscaping");
   const [customWorkspaceType, setCustomWorkspaceType] = useState("");
+  const [displaySettings, setDisplaySettings] =
+    useState<WorkspaceDisplaySettings | null>(null);
 
   const {
     workspaces,
@@ -33,6 +80,37 @@ export default function AppShell({
     }
   }, []);
 
+  useEffect(() => {
+    function refreshDisplaySettings() {
+      setDisplaySettings(loadWorkspaceSettings(activeWorkspace.id));
+    }
+
+    refreshDisplaySettings();
+
+    window.addEventListener("storage", refreshDisplaySettings);
+    window.addEventListener("frontier-settings-updated", refreshDisplaySettings);
+
+    return () => {
+      window.removeEventListener("storage", refreshDisplaySettings);
+      window.removeEventListener(
+        "frontier-settings-updated",
+        refreshDisplaySettings
+      );
+    };
+  }, [activeWorkspace.id]);
+
+  const displayedWorkspaceName =
+    displaySettings?.workspaceNickname?.trim() || activeWorkspace.name;
+
+  const displayedWorkspaceType =
+    displaySettings?.businessType?.trim() || activeWorkspace.type;
+
+  const displayedUserName =
+    displaySettings?.userDisplayName?.trim() || "Nicholas Thompson";
+
+  const displayedUserEmail =
+    displaySettings?.userEmail?.trim() || "thomp3ns@gmail.com";
+
   function toggleDarkMode() {
     const nextMode = !darkMode;
 
@@ -47,6 +125,55 @@ export default function AppShell({
     }
   }
 
+  function resetNewWorkspaceForm() {
+    setWorkspaceName("");
+    setWorkspaceType("Landscaping");
+    setCustomWorkspaceType("");
+  }
+
+  function closeNewWorkspaceModal() {
+    setNewWorkspaceOpen(false);
+    setWorkspaceOpen(false);
+    setUserOpen(false);
+    resetNewWorkspaceForm();
+  }
+
+  function createWorkspace() {
+    if (!workspaceName.trim()) return;
+
+    const resolvedType =
+      workspaceType === "Other" ? customWorkspaceType.trim() : workspaceType;
+
+    if (!resolvedType) return;
+
+    addWorkspace({
+      id: crypto.randomUUID(),
+      name: workspaceName.trim(),
+      type: resolvedType,
+    });
+
+    resetNewWorkspaceForm();
+    setNewWorkspaceOpen(false);
+  }
+
+  function getWorkspaceDisplayName(workspace: {
+    id: string;
+    name: string;
+    type: string;
+  }) {
+    const saved = loadWorkspaceSettings(workspace.id);
+    return saved?.workspaceNickname?.trim() || workspace.name;
+  }
+
+  function getWorkspaceDisplayType(workspace: {
+    id: string;
+    name: string;
+    type: string;
+  }) {
+    const saved = loadWorkspaceSettings(workspace.id);
+    return saved?.businessType?.trim() || workspace.type;
+  }
+
   return (
     <div className="flex h-screen w-full overflow-hidden bg-gray-100 text-gray-950 dark:bg-gray-950 dark:text-gray-100">
       <Sidebar />
@@ -59,19 +186,15 @@ export default function AppShell({
                 setWorkspaceOpen(!workspaceOpen);
                 setUserOpen(false);
               }}
-              className="flex items-center gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3 shadow-sm hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:hover:bg-gray-800"
+              className="flex max-w-[52vw] items-center gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3 shadow-sm hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:hover:bg-gray-800 sm:max-w-none"
             >
-              <span className="text-blue-600">
-                ▤
+              <span className="text-blue-600">▤</span>
+
+              <span className="truncate font-semibold">
+                {displayedWorkspaceName}
               </span>
 
-              <span className="font-semibold">
-                {activeWorkspace.name}
-              </span>
-
-              <span className="text-gray-500">
-                ⌄
-              </span>
+              <span className="text-gray-500">⌄</span>
             </button>
 
             {workspaceOpen && (
@@ -93,17 +216,15 @@ export default function AppShell({
                         : ""
                     }`}
                   >
-                    <span className="mt-1 text-xl">
-                      ▤
-                    </span>
+                    <span className="mt-1 text-xl">▤</span>
 
-                    <span>
-                      <span className="block font-semibold">
-                        {workspace.name}
+                    <span className="min-w-0">
+                      <span className="block truncate font-semibold">
+                        {getWorkspaceDisplayName(workspace)}
                       </span>
 
-                      <span className="block text-sm text-gray-500 dark:text-gray-400">
-                        {workspace.type}
+                      <span className="block truncate text-sm text-gray-500 dark:text-gray-400">
+                        {getWorkspaceDisplayType(workspace)}
                       </span>
                     </span>
                   </button>
@@ -116,13 +237,9 @@ export default function AppShell({
                   }}
                   className="flex w-full items-center gap-4 border-t border-gray-200 px-4 py-4 text-left hover:bg-gray-100 dark:border-gray-700 dark:hover:bg-gray-800"
                 >
-                  <span className="text-xl">
-                    +
-                  </span>
+                  <span className="text-xl">+</span>
 
-                  <span className="font-medium">
-                    New Workspace
-                  </span>
+                  <span className="font-medium">New Workspace</span>
                 </button>
               </div>
             )}
@@ -149,29 +266,32 @@ export default function AppShell({
                   ♙
                 </span>
 
-                <span className="hidden font-semibold md:block">
-                  Nicholas Thompson
+                <span className="hidden max-w-48 truncate font-semibold md:block">
+                  {displayedUserName}
                 </span>
 
-                <span className="text-gray-500">
-                  ⌄
-                </span>
+                <span className="text-gray-500">⌄</span>
               </button>
 
               {userOpen && (
                 <div className="absolute right-0 top-14 z-50 w-72 max-w-[90vw] overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-900">
-                  <div className="border-b border-gray-200 px-4 py-4 font-semibold dark:border-gray-700">
-                    thomp3ns@gmail.com
+                  <div className="border-b border-gray-200 px-4 py-4 dark:border-gray-700">
+                    <div className="font-semibold">{displayedUserName}</div>
+                    <div className="mt-1 break-all text-sm text-gray-500 dark:text-gray-400">
+                      {displayedUserEmail}
+                    </div>
+                  </div>
+
+                  <div className="border-b border-gray-200 px-4 py-3 text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
+                    {displayedWorkspaceName}
+                    <br />
+                    {displayedWorkspaceType}
                   </div>
 
                   <button className="flex w-full items-center gap-4 px-4 py-4 text-left hover:bg-gray-100 dark:hover:bg-gray-800">
-                    <span className="text-xl">
-                      ↪
-                    </span>
+                    <span className="text-xl">↪</span>
 
-                    <span className="font-medium">
-                      Sign Out
-                    </span>
+                    <span className="font-medium">Sign Out</span>
                   </button>
                 </div>
               )}
@@ -182,102 +302,62 @@ export default function AppShell({
         <main className="min-h-0 min-w-0 flex-1 overflow-y-auto p-3 sm:p-4 lg:p-6">
           {children}
         </main>
-        
+
         {newWorkspaceOpen && (
-  <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4">
-    <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl dark:bg-gray-900">
-      <div className="mb-6 flex items-center justify-between">
-        <h2 className="text-xl font-bold">
-          New Workspace
-        </h2>
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4">
+            <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl dark:bg-gray-900">
+              <div className="mb-6 flex items-center justify-between">
+                <h2 className="text-xl font-bold">New Workspace</h2>
 
-        <button
-          onClick={() => {
-            setNewWorkspaceOpen(false);
-            setWorkspaceOpen(false);
-            setUserOpen(false);
-            setWorkspaceName("");
-            setWorkspaceType("Landscaping");
-            setCustomWorkspaceType("");
-          }}
+                <button
+                  onClick={closeNewWorkspaceModal}
+                  className="text-2xl text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+                >
+                  ×
+                </button>
+              </div>
 
-          className="text-2xl text-gray-500"
-        >
-          ×
-        </button>
-      </div>
+              <div className="space-y-4">
+                <input
+                  type="text"
+                  value={workspaceName}
+                  onChange={(event) => setWorkspaceName(event.target.value)}
+                  placeholder="Workspace Name"
+                  className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800"
+                />
 
-      <div className="space-y-4">
-        <input
-          type="text"
-          value={workspaceName}
-          onChange={(e) => setWorkspaceName(e.target.value)}
-          placeholder="Workspace Name"
-          className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800"
-        />
+                <select
+                  value={workspaceType}
+                  onChange={(event) => setWorkspaceType(event.target.value)}
+                  className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800"
+                >
+                  {businessTypes.map((type) => (
+                    <option key={type}>{type}</option>
+                  ))}
+                </select>
 
-        <select
-          value={workspaceType}
-          onChange={(e) => setWorkspaceType(e.target.value)}
-          className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800"
-        >
-          <option>Landscaping</option>
-          <option>Tree Service</option>
-          <option>Lawn Care</option>
-          <option>Snow Removal</option>
-          <option>Property Management</option>
-          <option>Construction</option>
-          <option>Auto Repair</option>
-          <option>IT Services</option>
-          <option>Plumbing</option>
-          <option>Electrical</option>
-          <option>Cleaning</option>
-          <option>Restaurant</option>
-          <option>Other</option>
-        </select>
+                {workspaceType === "Other" && (
+                  <input
+                    type="text"
+                    value={customWorkspaceType}
+                    onChange={(event) =>
+                      setCustomWorkspaceType(event.target.value)
+                    }
+                    placeholder="Specify Business Type"
+                    className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800"
+                  />
+                )}
 
-        {workspaceType === "Other" && (
-          <input
-            type="text"
-            value={customWorkspaceType}
-            onChange={(e) =>
-              setCustomWorkspaceType(e.target.value)
-            }
-            placeholder="Specify Business Type"
-            className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800"
-          />
+                <button
+                  onClick={createWorkspace}
+                  className="w-full rounded-lg bg-blue-600 py-3 text-white hover:bg-blue-700"
+                >
+                  Create Workspace
+                </button>
+              </div>
+            </div>
+          </div>
         )}
-
-        <button
-          onClick={() => {
-            if (!workspaceName.trim()) return;
-
-            const type =
-              workspaceType === "Other"
-                ? customWorkspaceType.trim()
-                : workspaceType;
-            if (!type) return;
-
-            addWorkspace({
-              id: crypto.randomUUID(),
-              name: workspaceName,
-              type,
-            });
-
-            setWorkspaceName("");
-            setWorkspaceType("Landscaping");
-            setCustomWorkspaceType("");
-            setNewWorkspaceOpen(false);
-          }}
-          className="w-full rounded-lg bg-blue-600 py-3 text-white hover:bg-blue-700"
-        >
-          Create Workspace
-        </button>
-      </div>
-    </div>
-  </div>
-)}
-
       </div>
     </div>
   );
