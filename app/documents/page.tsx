@@ -33,7 +33,7 @@ type JobLike = {
   client?: string;
 };
 
-function loadStoredDocuments() {
+function loadStoredDocuments(): StoredDocument[] {
   if (typeof window === "undefined") return [];
 
   const saved = localStorage.getItem("frontier-documents");
@@ -79,6 +79,10 @@ function loadStoredJobs(): JobLike[] {
   }
 }
 
+function getJobDisplayName(job: JobLike) {
+  return job.jobName || job.name || "Untitled job";
+}
+
 export default function DocumentsPage() {
   const { activeWorkspace } = useWorkspace();
 
@@ -112,6 +116,23 @@ export default function DocumentsPage() {
     (job) => job.workspaceId === activeWorkspace.id
   );
 
+  const selectedClient = workspaceClients.find(
+    (client) => client.id === clientId
+  );
+
+  const jobsForSelectedClient = selectedClient
+    ? workspaceJobs.filter((job) => {
+        if (job.clientId) {
+          return job.clientId === selectedClient.id;
+        }
+
+        return (
+          (job.client ?? "").trim().toLowerCase() ===
+          selectedClient.name.trim().toLowerCase()
+        );
+      })
+    : [];
+
   function resetUploadForm() {
     setDocumentName("");
     setDetectedType("Pending");
@@ -124,6 +145,11 @@ export default function DocumentsPage() {
   function closeUploadModal() {
     setIsUploadOpen(false);
     resetUploadForm();
+  }
+
+  function handleClientChange(nextClientId: string) {
+    setClientId(nextClientId);
+    setJobId("");
   }
 
   function saveUploadPlaceholder() {
@@ -169,13 +195,14 @@ export default function DocumentsPage() {
     if (!documentJobId) return "—";
 
     const job = jobs.find((item) => item.id === documentJobId);
-    return job?.jobName || job?.name || "Unknown job";
+    return job ? getJobDisplayName(job) : "Unknown job";
   }
 
   return (
     <div className="space-y-8">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <button
+          type="button"
           onClick={() => setIsUploadOpen(true)}
           className="w-full rounded-lg bg-blue-600 px-6 py-3 text-center font-semibold text-white shadow hover:bg-blue-700 sm:w-auto"
         >
@@ -267,6 +294,7 @@ export default function DocumentsPage() {
               </h2>
 
               <button
+                type="button"
                 onClick={closeUploadModal}
                 className="text-2xl text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
               >
@@ -330,7 +358,7 @@ export default function DocumentsPage() {
 
                   <select
                     value={clientId}
-                    onChange={(event) => setClientId(event.target.value)}
+                    onChange={(event) => handleClientChange(event.target.value)}
                     className="w-full rounded-lg border border-gray-200 bg-white px-4 py-3 text-base text-gray-950 outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 sm:text-lg"
                   >
                     <option value="">No client</option>
@@ -350,15 +378,28 @@ export default function DocumentsPage() {
                   <select
                     value={jobId}
                     onChange={(event) => setJobId(event.target.value)}
-                    className="w-full rounded-lg border border-gray-200 bg-white px-4 py-3 text-base text-gray-950 outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 sm:text-lg"
+                    disabled={!clientId}
+                    className="w-full rounded-lg border border-gray-200 bg-white px-4 py-3 text-base text-gray-950 outline-none disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-400 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:disabled:bg-gray-950 dark:disabled:text-gray-600"
                   >
                     <option value="">No job</option>
-                    {workspaceJobs.map((job) => (
+                    {jobsForSelectedClient.map((job) => (
                       <option key={job.id} value={job.id}>
-                        {job.jobName || job.name || "Untitled job"}
+                        {getJobDisplayName(job)}
                       </option>
                     ))}
                   </select>
+
+                  {!clientId && (
+                    <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
+                      Select a client first to show linked jobs.
+                    </p>
+                  )}
+
+                  {clientId && jobsForSelectedClient.length === 0 && (
+                    <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
+                      No jobs found for the selected client.
+                    </p>
+                  )}
                 </div>
               </div>
 

@@ -82,13 +82,15 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const savedTheme = localStorage.getItem("frontier-theme");
 
-    if (savedTheme === "dark") {
-      setDarkMode(true);
-      document.documentElement.classList.add("dark");
-    } else {
+    if (savedTheme === "light") {
       setDarkMode(false);
       document.documentElement.classList.remove("dark");
+      return;
     }
+
+    setDarkMode(true);
+    document.documentElement.classList.add("dark");
+    localStorage.setItem("frontier-theme", "dark");
   }, []);
 
   useEffect(() => {
