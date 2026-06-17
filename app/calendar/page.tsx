@@ -58,7 +58,10 @@ export default function CalendarPage() {
   const [clientEvents, setClientEvents] = useStoredJsonState<
     ClientCalendarEvent[]
   >(storageKeys.clientCalendarEvents, []);
-  const [currentMonth, setCurrentMonth] = useState(new Date(2026, 5, 1));
+  const [currentMonth, setCurrentMonth] = useState(() => {
+    const today = new Date();
+    return new Date(today.getFullYear(), today.getMonth(), 1);
+  });
 
   const [clientEventOpen, setClientEventOpen] = useState(false);
   const [clientEventClientId, setClientEventClientId] = useState("");

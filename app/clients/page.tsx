@@ -6,6 +6,8 @@ import Link from "next/link";
 import { useWorkspace } from "@/components/WorkspaceContext";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
 import { clients as defaultClients } from "@/lib/clients";
+import { InvoiceRow } from "@/lib/frontierInvoices";
+import { Job, jobs as defaultJobs } from "@/lib/jobs";
 
 type ClientRow = {
   id: string;
@@ -20,6 +22,22 @@ type ClientRow = {
   state?: string;
   zip?: string;
   notes?: string;
+};
+
+type ClientLinkedJob = Job & {
+  clientId?: string;
+};
+
+type StoredDocument = {
+  id: string;
+  workspaceId: string;
+  clientId: string;
+};
+
+type ClientCalendarEvent = {
+  id: string;
+  workspaceId: string;
+  clientId: string;
 };
 
 const clientStatuses = ["Lead", "Active", "Inactive"] as const;
@@ -52,12 +70,51 @@ function getStatusClasses(status: string) {
   return "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300";
 }
 
+function normalizeName(value: string) {
+  return value.trim().toLowerCase();
+}
+
+function isJobLinkedToClient(job: ClientLinkedJob, client: ClientRow) {
+  if (job.workspaceId !== client.workspaceId) return false;
+  if (job.clientId) return job.clientId === client.id;
+
+  return normalizeName(job.client) === normalizeName(client.name);
+}
+
+function isInvoiceLinkedToClient(invoice: InvoiceRow, client: ClientRow) {
+  if (invoice.workspaceId !== client.workspaceId) return false;
+  if (invoice.sourceClientId) return invoice.sourceClientId === client.id;
+
+  const clientName = normalizeName(client.name);
+
+  return (
+    normalizeName(invoice.billToName ?? "") === clientName ||
+    normalizeName(invoice.billToCompany ?? "") === clientName
+  );
+}
+
 export default function ClientsPage() {
   const { activeWorkspace } = useWorkspace();
 
   const [clientItems, setClientItems] = useStoredJsonState<ClientRow[]>(
     storageKeys.clients,
     defaultClients
+  );
+  const [jobItems] = useStoredJsonState<ClientLinkedJob[]>(
+    storageKeys.jobs,
+    defaultJobs as ClientLinkedJob[]
+  );
+  const [invoiceItems] = useStoredJsonState<InvoiceRow[]>(
+    storageKeys.invoices,
+    []
+  );
+  const [documentItems] = useStoredJsonState<StoredDocument[]>(
+    storageKeys.documents,
+    []
+  );
+  const [clientEventItems] = useStoredJsonState<ClientCalendarEvent[]>(
+    storageKeys.clientCalendarEvents,
+    []
   );
   const [selectedClients, setSelectedClients] = useState<string[]>([]);
   const [statusPriority, setStatusPriority] =
@@ -103,6 +160,44 @@ export default function ClientsPage() {
   const allWorkspaceClientsSelected =
     workspaceClients.length > 0 &&
     workspaceClients.every((client) => selectedClients.includes(client.id));
+
+  const selectedClientRows = workspaceClients.filter((client) =>
+    selectedClients.includes(client.id)
+  );
+
+  const deleteDependencyWarnings = selectedClientRows
+    .map((client) => {
+      const jobs = jobItems.filter((job) =>
+        isJobLinkedToClient(job, client)
+      ).length;
+      const invoices = invoiceItems.filter((invoice) =>
+        isInvoiceLinkedToClient(invoice, client)
+      ).length;
+      const documents = documentItems.filter(
+        (document) =>
+          document.workspaceId === client.workspaceId &&
+          document.clientId === client.id
+      ).length;
+      const events = clientEventItems.filter(
+        (event) =>
+          event.workspaceId === client.workspaceId && event.clientId === client.id
+      ).length;
+
+      return {
+        client,
+        jobs,
+        invoices,
+        documents,
+        events,
+        total: jobs + invoices + documents + events,
+      };
+    })
+    .filter((warning) => warning.total > 0);
+
+  const totalOrphanedItems = deleteDependencyWarnings.reduce(
+    (total, warning) => total + warning.total,
+    0
+  );
 
   function saveClients(updatedClients: ClientRow[]) {
     setClientItems(updatedClients);
@@ -621,6 +716,42 @@ export default function ClientsPage() {
             <p className="mt-4 text-gray-600 dark:text-gray-400">
               Are you sure you want to remove the selected client(s)?
             </p>
+
+            {deleteDependencyWarnings.length > 0 && (
+              <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+                <div className="font-semibold">
+                  This will leave linked records orphaned.
+                </div>
+
+                <p className="mt-1">
+                  Deletion is still allowed, but these records will no longer
+                  have an active client:
+                </p>
+
+                <div className="mt-3 space-y-2">
+                  {deleteDependencyWarnings.map((warning) => (
+                    <div
+                      key={warning.client.id}
+                      className="rounded-md bg-white/70 p-3 dark:bg-gray-900/60"
+                    >
+                      <div className="font-semibold">
+                        {warning.client.name}
+                      </div>
+
+                      <div className="mt-1 text-xs">
+                        {warning.jobs} job(s), {warning.invoices} invoice(s),{" "}
+                        {warning.documents} document(s), {warning.events}{" "}
+                        calendar event(s)
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="mt-3 font-semibold">
+                  {totalOrphanedItems} linked record(s) affected.
+                </div>
+              </div>
+            )}
 
             <div className="mt-6 flex justify-end gap-3">
               <button

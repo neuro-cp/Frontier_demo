@@ -16,7 +16,14 @@ function getTodayDate() {
 }
 
 function getNextInvoiceNumber(savedInvoices: InvoiceRow[]) {
-  const nextNumber = savedInvoices.length + 1;
+  const highestExistingNumber = savedInvoices.reduce((highest, invoice) => {
+    const match = invoice.invoiceNumber.match(/^INV-(\d+)$/i);
+    if (!match) return highest;
+
+    return Math.max(highest, Number(match[1]));
+  }, 0);
+
+  const nextNumber = highestExistingNumber + 1;
 
   return `INV-${String(nextNumber).padStart(3, "0")}`;
 }

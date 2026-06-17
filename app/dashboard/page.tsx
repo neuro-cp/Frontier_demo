@@ -6,9 +6,15 @@ import StatCard from "../../components/Statcard";
 import { useWorkspace } from "@/components/WorkspaceContext";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
 import { jobs as defaultJobs } from "@/lib/jobs";
-import { clients } from "@/lib/clients";
-import { invoices } from "@/lib/invoices";
-import { inventory } from "@/lib/inventory";
+import { clients as defaultClients } from "@/lib/clients";
+import { expenses as defaultExpenses, Expense } from "@/lib/expenses";
+import { getInvoiceTotals, InvoiceRow } from "@/lib/frontierInvoices";
+import { inventory as defaultInventory } from "@/lib/inventory";
+
+type DashboardInventoryItem = {
+  workspaceId: string;
+  warning: boolean;
+};
 
 function moneyToNumber(value: string) {
   return Number(value.replace(/[$,]/g, ""));
@@ -22,8 +28,21 @@ export default function DashboardPage() {
   const { activeWorkspace } = useWorkspace();
 
   const [jobItems] = useStoredJsonState(storageKeys.jobs, defaultJobs);
+  const [clientItems] = useStoredJsonState(storageKeys.clients, defaultClients);
+  const [invoiceItems] = useStoredJsonState<InvoiceRow[]>(
+    storageKeys.invoices,
+    []
+  );
+  const [inventoryItems] = useStoredJsonState<DashboardInventoryItem[]>(
+    storageKeys.inventory,
+    defaultInventory
+  );
+  const [expenseItems] = useStoredJsonState<Expense[]>(
+    storageKeys.expenses,
+    defaultExpenses
+  );
 
-  const workspaceClients = clients.filter(
+  const workspaceClients = clientItems.filter(
     (client) => client.workspaceId === activeWorkspace.id
   );
 
@@ -31,12 +50,16 @@ export default function DashboardPage() {
     (job) => job.workspaceId === activeWorkspace.id
   );
 
-  const workspaceInvoices = invoices.filter(
+  const workspaceInvoices = invoiceItems.filter(
     (invoice) => invoice.workspaceId === activeWorkspace.id
   );
 
-  const workspaceInventory = inventory.filter(
+  const workspaceInventory = inventoryItems.filter(
     (item) => item.workspaceId === activeWorkspace.id
+  );
+
+  const workspaceExpenses = expenseItems.filter(
+    (expense) => expense.workspaceId === activeWorkspace.id
   );
 
   const activeClients = workspaceClients.length;
@@ -51,7 +74,12 @@ export default function DashboardPage() {
 
   const outstandingInvoices = workspaceInvoices
     .filter((invoice) => invoice.status !== "Paid")
-    .reduce((total, invoice) => total + moneyToNumber(invoice.amount), 0);
+    .reduce((total, invoice) => total + getInvoiceTotals(invoice).total, 0);
+
+  const totalExpenses = workspaceExpenses.reduce(
+    (total, expense) => total + moneyToNumber(expense.amount),
+    0
+  );
 
   const inventoryAlerts = workspaceInventory.filter(
     (item) => item.warning
@@ -64,6 +92,7 @@ export default function DashboardPage() {
     `- ${scheduledJobs} scheduled job(s)`,
     `- ${inventoryAlerts} inventory alert(s)`,
     `- ${workspaceInvoices.length} invoice(s) in system`,
+    `- ${formatMoney(totalExpenses)} tracked expense(s)`,
   ];
 
   return (
