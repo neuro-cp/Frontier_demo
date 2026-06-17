@@ -2,8 +2,6 @@
 
 import { useCallback, useMemo, useSyncExternalStore } from "react";
 
-import { clients as defaultClients } from "@/lib/clients";
-
 export const storageKeys = {
   activeWorkspace: "frontier-active-workspace",
   clientCalendarEvents: "frontier-client-calendar-events",
@@ -44,10 +42,9 @@ function repairLegacyJobClientIds(snapshot: string) {
     const jobs = JSON.parse(snapshot) as StoredJobForMigration[];
     const savedClients = window.localStorage.getItem(storageKeys.clients);
     const storedClients = savedClients ? JSON.parse(savedClients) : [];
-    const clients =
-      Array.isArray(storedClients) && storedClients.length > 0
-        ? (storedClients as StoredClientForMigration[])
-        : (defaultClients as StoredClientForMigration[]);
+    const clients = Array.isArray(storedClients)
+      ? (storedClients as StoredClientForMigration[])
+      : [];
 
     if (!Array.isArray(jobs)) return snapshot;
 
