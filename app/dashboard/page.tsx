@@ -5,11 +5,10 @@ import Link from "next/link";
 import StatCard from "../../components/Statcard";
 import { useWorkspace } from "@/components/WorkspaceContext";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
-import { jobs as defaultJobs } from "@/lib/jobs";
-import { clients as defaultClients } from "@/lib/clients";
-import { expenses as defaultExpenses, Expense } from "@/lib/expenses";
+import type { Job } from "@/lib/jobs";
+import type { ClientRow } from "@/lib/frontierClients";
+import type { Expense } from "@/lib/expenses";
 import { getInvoiceTotals, InvoiceRow } from "@/lib/frontierInvoices";
-import { inventory as defaultInventory } from "@/lib/inventory";
 
 type DashboardInventoryItem = {
   workspaceId: string;
@@ -27,19 +26,22 @@ function formatMoney(value: number) {
 export default function DashboardPage() {
   const { activeWorkspace } = useWorkspace();
 
-  const [jobItems] = useStoredJsonState(storageKeys.jobs, defaultJobs);
-  const [clientItems] = useStoredJsonState(storageKeys.clients, defaultClients);
+  const [jobItems] = useStoredJsonState<Job[]>(storageKeys.jobs, []);
+  const [clientItems] = useStoredJsonState<ClientRow[]>(
+    storageKeys.clients,
+    []
+  );
   const [invoiceItems] = useStoredJsonState<InvoiceRow[]>(
     storageKeys.invoices,
     []
   );
   const [inventoryItems] = useStoredJsonState<DashboardInventoryItem[]>(
     storageKeys.inventory,
-    defaultInventory
+    []
   );
   const [expenseItems] = useStoredJsonState<Expense[]>(
     storageKeys.expenses,
-    defaultExpenses
+    []
   );
 
   const workspaceClients = clientItems.filter(

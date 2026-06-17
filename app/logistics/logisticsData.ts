@@ -12,31 +12,34 @@ export type LogisticsLocation = {
   zip: string;
   latitude: number;
   longitude: number;
+  coordinateSource: "saved" | "temporary";
 };
 
-const demoCoordinatesByClientId: Record<
-  string,
-  { latitude: number; longitude: number }
-> = {
-  "1": { latitude: 42.6886, longitude: -83.1359 },
-  "2": { latitude: 42.6658, longitude: -83.1141 },
-  "3": { latitude: 42.6698, longitude: -83.1517 },
-  "4": { latitude: 42.6518, longitude: -83.1436 },
-  "5": { latitude: 42.6816, longitude: -83.1952 },
-  "6": { latitude: 42.6417, longitude: -83.1508 },
-
-  "7": { latitude: 42.6358, longitude: -83.1418 },
-  "8": { latitude: 42.6802, longitude: -83.1348 },
-  "9": { latitude: 42.6512, longitude: -83.1942 },
-  "10": { latitude: 42.6807, longitude: -83.1496 },
-  "11": { latitude: 42.6328, longitude: -83.1337 },
-
-  "12": { latitude: 42.6611, longitude: -83.1249 },
-  "13": { latitude: 42.6802, longitude: -83.1348 },
-  "14": { latitude: 42.6816, longitude: -83.1952 },
-  "15": { latitude: 42.6923, longitude: -83.1237 },
-  "16": { latitude: 42.6525, longitude: -83.1946 },
+export type MissingCoordinateClient = {
+  id: string;
+  name: string;
 };
+
+function hasClientAddress(client: ClientRow) {
+  return Boolean(
+    client.address?.trim() ||
+      client.city?.trim() ||
+      client.state?.trim() ||
+      client.zip?.trim()
+  );
+}
+
+function getTemporaryCoordinates(index: number) {
+  const baseLatitude = 42.6584;
+  const baseLongitude = -83.1498;
+  const row = Math.floor(index / 5);
+  const column = index % 5;
+
+  return {
+    latitude: baseLatitude + (row - 1) * 0.012,
+    longitude: baseLongitude + (column - 2) * 0.014,
+  };
+}
 
 export function getClientFullAddress(location: LogisticsLocation) {
   return [location.address, location.city, location.state, location.zip]
@@ -48,13 +51,23 @@ export function buildLogisticsLocations(
   clients: ClientRow[]
 ): LogisticsLocation[] {
   return clients
-    .map((client) => {
-      const fallbackCoordinates = demoCoordinatesByClientId[client.id];
+    .map((client, index) => {
+      const hasSavedCoordinates =
+        typeof client.latitude === "number" &&
+        typeof client.longitude === "number";
+      const fallbackCoordinates = hasClientAddress(client)
+        ? getTemporaryCoordinates(index)
+        : undefined;
+      const latitude = hasSavedCoordinates
+        ? client.latitude
+        : fallbackCoordinates?.latitude;
+      const longitude = hasSavedCoordinates
+        ? client.longitude
+        : fallbackCoordinates?.longitude;
 
-      const latitude = client.latitude ?? fallbackCoordinates?.latitude;
-      const longitude = client.longitude ?? fallbackCoordinates?.longitude;
-
-      if (!latitude || !longitude) return null;
+      if (typeof latitude !== "number" || typeof longitude !== "number") {
+        return null;
+      }
 
       return {
         id: client.id,
@@ -68,7 +81,24 @@ export function buildLogisticsLocations(
         zip: client.zip ?? "",
         latitude,
         longitude,
+        coordinateSource: hasSavedCoordinates ? "saved" : "temporary",
       };
     })
     .filter((location): location is LogisticsLocation => Boolean(location));
+}
+
+export function getMissingCoordinateClients(
+  clients: ClientRow[]
+): MissingCoordinateClient[] {
+  return clients
+    .filter(
+      (client) =>
+        typeof client.latitude !== "number" &&
+        typeof client.longitude !== "number" &&
+        !hasClientAddress(client)
+    )
+    .map((client) => ({
+      id: client.id,
+      name: client.name,
+    }));
 }

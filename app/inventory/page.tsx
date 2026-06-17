@@ -3,8 +3,7 @@
 import { useState } from "react";
 import { useWorkspace } from "@/components/WorkspaceContext";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
-import { inventory as defaultInventory } from "@/lib/inventory";
-import { jobs as defaultJobs } from "@/lib/jobs";
+import type { Job } from "@/lib/jobs";
 
 type InventoryRow = {
   name: string;
@@ -20,9 +19,9 @@ export default function InventoryPage() {
 
   const [inventoryItems, setInventoryItems] = useStoredJsonState<InventoryRow[]>(
     storageKeys.inventory,
-    defaultInventory
+    []
   );
-  const [jobItems] = useStoredJsonState(storageKeys.jobs, defaultJobs);
+  const [jobItems] = useStoredJsonState<Job[]>(storageKeys.jobs, []);
   const [selectedItems, setSelectedItems] = useState<string[]>([]);
 
   const [newItemOpen, setNewItemOpen] = useState(false);

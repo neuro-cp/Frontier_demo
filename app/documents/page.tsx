@@ -3,8 +3,6 @@
 import { useState } from "react";
 import { useWorkspace } from "@/components/WorkspaceContext";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
-import { clients as defaultClients } from "@/lib/clients";
-import { jobs as defaultJobs } from "@/lib/jobs";
 
 type StoredDocument = {
   id: string;
@@ -48,11 +46,11 @@ export default function DocumentsPage() {
   );
   const [clients] = useStoredJsonState<ClientLike[]>(
     storageKeys.clients,
-    defaultClients as ClientLike[]
+    []
   );
   const [jobs] = useStoredJsonState<JobLike[]>(
     storageKeys.jobs,
-    defaultJobs as JobLike[]
+    []
   );
 
   const [documentName, setDocumentName] = useState("");

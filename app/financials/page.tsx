@@ -5,8 +5,7 @@ import Link from "next/link";
 
 import { useWorkspace } from "@/components/WorkspaceContext";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
-import { invoices as defaultInvoices } from "@/lib/invoices";
-import { expenses as defaultExpenses, Expense } from "@/lib/expenses";
+import type { Expense } from "@/lib/expenses";
 import {
   formatCurrency,
   getInvoiceClientName,
@@ -17,11 +16,7 @@ import {
   moneyToNumber,
 } from "@/lib/frontierInvoices";
 
-type DefaultInvoice = (typeof defaultInvoices)[number];
-
-type FinancialInvoice =
-  | { source: "saved"; id: string; invoice: InvoiceRow }
-  | { source: "default"; id: string; invoice: DefaultInvoice };
+type FinancialInvoice = { id: string; invoice: InvoiceRow };
 
 function SummaryCard({
   title,
@@ -54,13 +49,11 @@ function SummaryCard({
 }
 
 function getFinancialInvoiceNumber(row: FinancialInvoice) {
-  return row.source === "saved" ? row.invoice.invoiceNumber : row.invoice.id;
+  return row.invoice.invoiceNumber;
 }
 
 function getFinancialInvoiceClient(row: FinancialInvoice) {
-  return row.source === "saved"
-    ? getInvoiceClientName(row.invoice)
-    : row.invoice.client;
+  return getInvoiceClientName(row.invoice);
 }
 
 function getFinancialInvoiceStatus(row: FinancialInvoice): InvoiceStatus {
@@ -68,9 +61,7 @@ function getFinancialInvoiceStatus(row: FinancialInvoice): InvoiceStatus {
 }
 
 function getFinancialInvoiceTotal(row: FinancialInvoice) {
-  return row.source === "saved"
-    ? getInvoiceTotals(row.invoice).total
-    : moneyToNumber(row.invoice.amount);
+  return getInvoiceTotals(row.invoice).total;
 }
 
 export default function FinancialsPage() {
@@ -80,11 +71,9 @@ export default function FinancialsPage() {
     storageKeys.invoices,
     []
   );
-  const [defaultInvoiceItems, setDefaultInvoiceItems] =
-    useState(defaultInvoices);
   const [expenseItems, setExpenseItems] = useStoredJsonState<Expense[]>(
     storageKeys.expenses,
-    defaultExpenses
+    []
   );
 
   const [selectedInvoices, setSelectedInvoices] = useState<string[]>([]);
@@ -98,20 +87,11 @@ export default function FinancialsPage() {
   const generatedInvoiceRows: FinancialInvoice[] = savedInvoices
     .filter((invoice) => invoice.workspaceId === activeWorkspace.id)
     .map((invoice) => ({
-      source: "saved",
       id: invoice.id,
       invoice,
     }));
 
-  const defaultInvoiceRows: FinancialInvoice[] = defaultInvoiceItems
-    .filter((invoice) => invoice.workspaceId === activeWorkspace.id)
-    .map((invoice) => ({
-      source: "default",
-      id: `default-${invoice.id}`,
-      invoice,
-    }));
-
-  const workspaceInvoices = [...generatedInvoiceRows, ...defaultInvoiceRows];
+  const workspaceInvoices = generatedInvoiceRows;
 
   const workspaceExpenses = expenseItems.filter(
     (expense) => expense.workspaceId === activeWorkspace.id
@@ -142,22 +122,8 @@ export default function FinancialsPage() {
   }
 
   function removeSelectedInvoices() {
-    const selectedSavedInvoiceIds = selectedInvoices.filter(
-      (id) => !id.startsWith("default-")
-    );
-
-    if (selectedSavedInvoiceIds.length > 0) {
-      saveSavedInvoiceItems(
-        savedInvoices.filter(
-          (invoice) => !selectedSavedInvoiceIds.includes(invoice.id)
-        )
-      );
-    }
-
-    setDefaultInvoiceItems((current) =>
-      current.filter(
-        (invoice) => !selectedInvoices.includes(`default-${invoice.id}`)
-      )
+    saveSavedInvoiceItems(
+      savedInvoices.filter((invoice) => !selectedInvoices.includes(invoice.id))
     );
 
     setSelectedInvoices([]);
@@ -175,17 +141,8 @@ export default function FinancialsPage() {
   }
 
   function updateInvoiceStatus(row: FinancialInvoice, status: InvoiceStatus) {
-    if (row.source === "saved") {
-      saveSavedInvoiceItems(
-        savedInvoices.map((invoice) =>
-          invoice.id === row.invoice.id ? { ...invoice, status } : invoice
-        )
-      );
-      return;
-    }
-
-    setDefaultInvoiceItems((current) =>
-      current.map((invoice) =>
+    saveSavedInvoiceItems(
+      savedInvoices.map((invoice) =>
         invoice.id === row.invoice.id ? { ...invoice, status } : invoice
       )
     );
@@ -319,16 +276,12 @@ export default function FinancialsPage() {
                     </td>
 
                     <td className="px-6 py-5 font-medium text-gray-950 dark:text-gray-100">
-                      {row.source === "saved" ? (
-                        <Link
-                          href={`/invoices/${row.invoice.id}`}
-                          className="text-blue-600 hover:underline dark:text-blue-400"
-                        >
-                          {getFinancialInvoiceNumber(row)}
-                        </Link>
-                      ) : (
-                        getFinancialInvoiceNumber(row)
-                      )}
+                      <Link
+                        href={`/invoices/${row.invoice.id}`}
+                        className="text-blue-600 hover:underline dark:text-blue-400"
+                      >
+                        {getFinancialInvoiceNumber(row)}
+                      </Link>
                     </td>
 
                     <td className="px-6 py-5 text-gray-500 dark:text-gray-400">

@@ -5,11 +5,11 @@ import { useMemo, useState } from "react";
 
 import { useWorkspace } from "@/components/WorkspaceContext";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
-import { clients as defaultClients } from "@/lib/clients";
 import { ClientRow } from "@/lib/frontierClients";
 import {
   buildLogisticsLocations,
   getClientFullAddress,
+  getMissingCoordinateClients,
   LogisticsLocation,
 } from "./logisticsData";
 
@@ -26,7 +26,7 @@ export default function LogisticsPage() {
   const [selectedLocationIds, setSelectedLocationIds] = useState<string[]>([]);
   const [clients] = useStoredJsonState<ClientRow[]>(
     storageKeys.clients,
-    defaultClients
+    []
   );
 
   const workspaceClients = useMemo(() => {
@@ -47,6 +47,10 @@ export default function LogisticsPage() {
     return buildLogisticsLocations(filteredClients).sort((a, b) =>
       a.name.localeCompare(b.name)
     );
+  }, [filteredClients]);
+
+  const missingCoordinateClients = useMemo(() => {
+    return getMissingCoordinateClients(filteredClients);
   }, [filteredClients]);
 
   const selectedLocations = useMemo(() => {
@@ -152,6 +156,19 @@ export default function LogisticsPage() {
               </div>
             )}
           </div>
+
+          {missingCoordinateClients.length > 0 && (
+            <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+              <div className="font-semibold">Missing coordinates</div>
+              <p className="mt-1">
+                Add an address or saved coordinates for these clients to show
+                them on the map:
+              </p>
+              <div className="mt-2">
+                {missingCoordinateClients.map((client) => client.name).join(", ")}
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="space-y-6">
@@ -213,6 +230,12 @@ export default function LogisticsPage() {
                           <p className="mt-1 line-clamp-2 text-sm text-gray-500 dark:text-gray-400">
                             {getClientFullAddress(location)}
                           </p>
+
+                          {location.coordinateSource === "temporary" && (
+                            <p className="mt-1 text-xs text-amber-600 dark:text-amber-300">
+                              Temporary map position
+                            </p>
+                          )}
                         </div>
 
                         <span

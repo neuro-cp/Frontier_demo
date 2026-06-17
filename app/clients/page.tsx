@@ -5,9 +5,8 @@ import Link from "next/link";
 
 import { useWorkspace } from "@/components/WorkspaceContext";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
-import { clients as defaultClients } from "@/lib/clients";
 import { InvoiceRow } from "@/lib/frontierInvoices";
-import { Job, jobs as defaultJobs } from "@/lib/jobs";
+import type { Job } from "@/lib/jobs";
 
 type ClientRow = {
   id: string;
@@ -98,11 +97,11 @@ export default function ClientsPage() {
 
   const [clientItems, setClientItems] = useStoredJsonState<ClientRow[]>(
     storageKeys.clients,
-    defaultClients
+    []
   );
   const [jobItems] = useStoredJsonState<ClientLinkedJob[]>(
     storageKeys.jobs,
-    defaultJobs as ClientLinkedJob[]
+    []
   );
   const [invoiceItems] = useStoredJsonState<InvoiceRow[]>(
     storageKeys.invoices,

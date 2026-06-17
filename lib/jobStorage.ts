@@ -1,10 +1,10 @@
 import { readStoredJson, storageKeys, writeStoredJson } from "@/lib/clientStorage";
-import { jobs as defaultJobs } from "@/lib/jobs";
+import type { Job } from "@/lib/jobs";
 
 export function getStoredJobs() {
-  return readStoredJson(storageKeys.jobs, defaultJobs);
+  return readStoredJson(storageKeys.jobs, [] as Job[]);
 }
 
-export function saveStoredJobs(jobs: typeof defaultJobs) {
+export function saveStoredJobs(jobs: Job[]) {
   writeStoredJson(storageKeys.jobs, jobs);
 }

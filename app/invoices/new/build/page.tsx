@@ -11,7 +11,6 @@ import {
   storageKeys,
   useStoredJsonState,
 } from "@/lib/clientStorage";
-import { clients as defaultClients } from "@/lib/clients";
 
 
 type InvoiceStatus = "Draft" | "Sent" | "Overdue" | "Paid";
@@ -143,7 +142,7 @@ export default function InvoiceBuilderPage() {
   );
   const [savedClients, setSavedClients] = useStoredJsonState<ClientRow[]>(
     storageKeys.clients,
-    defaultClients as ClientRow[]
+    []
   );
 
   const [draft] = useState<InvoiceSetupDraft>(() => {

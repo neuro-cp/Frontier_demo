@@ -5,8 +5,7 @@ import Link from "next/link";
 
 import { useWorkspace } from "@/components/WorkspaceContext";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
-import { jobs as defaultJobs, Job, JobMaterial, JobStatus } from "@/lib/jobs";
-import { clients as defaultClients } from "@/lib/clients";
+import type { Job, JobMaterial, JobStatus } from "@/lib/jobs";
 import { ClientRow } from "@/lib/frontierClients";
 import {
   formatCurrency,
@@ -36,7 +35,7 @@ export default function JobsPage() {
 
   const [jobItems, setJobItems] = useStoredJsonState<Job[]>(
     storageKeys.jobs,
-    defaultJobs
+    []
   );
   const [invoiceItems] = useStoredJsonState<InvoiceRow[]>(
     storageKeys.invoices,
@@ -53,7 +52,7 @@ export default function JobsPage() {
   const [notes, setNotes] = useState("");
   const [clientItems] = useStoredJsonState<ClientRow[]>(
     storageKeys.clients,
-    defaultClients
+    []
   );
   const [materialName, setMaterialName] = useState("");
   const [materialQuantity, setMaterialQuantity] = useState("");

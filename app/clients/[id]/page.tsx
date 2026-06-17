@@ -5,8 +5,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
-import { clients as defaultClients } from "@/lib/clients";
-import { jobs as defaultJobs, Job } from "@/lib/jobs";
+import type { Job } from "@/lib/jobs";
 import { ClientRow } from "@/lib/frontierClients";
 import {
   formatCurrency,
@@ -20,9 +19,9 @@ export default function ClientPage() {
 
   const [clients] = useStoredJsonState<ClientRow[]>(
     storageKeys.clients,
-    defaultClients
+    []
   );
-  const [jobs] = useStoredJsonState<Job[]>(storageKeys.jobs, defaultJobs);
+  const [jobs] = useStoredJsonState<Job[]>(storageKeys.jobs, []);
   const [invoices] = useStoredJsonState<InvoiceRow[]>(
     storageKeys.invoices,
     []

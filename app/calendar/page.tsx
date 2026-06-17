@@ -3,8 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 
-import { jobs as defaultJobs } from "@/lib/jobs";
-import { clients as defaultClients } from "@/lib/clients";
+import type { Job } from "@/lib/jobs";
 import { useWorkspace } from "@/components/WorkspaceContext";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
 import { ClientRow } from "@/lib/frontierClients";
@@ -50,10 +49,10 @@ export default function CalendarPage() {
   const { activeWorkspace } = useWorkspace();
 
   const [view, setView] = useState("month");
-  const [jobItems] = useStoredJsonState(storageKeys.jobs, defaultJobs);
+  const [jobItems] = useStoredJsonState<Job[]>(storageKeys.jobs, []);
   const [clientItems] = useStoredJsonState<ClientRow[]>(
     storageKeys.clients,
-    defaultClients
+    []
   );
   const [clientEvents, setClientEvents] = useStoredJsonState<
     ClientCalendarEvent[]

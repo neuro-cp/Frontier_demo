@@ -55,7 +55,6 @@
   📄 frontierClients.ts
   📄 frontierInvoices.ts
   📄 inventory.ts
-  📄 invoices.ts
   📄 jobs.ts
   📄 jobStorage.ts
 📄 next-env.d.ts
@@ -94,8 +93,7 @@ This version has breaking changes — APIs, conventions, and file structure may 
 import { useState } from "react";
 import Link from "next/link";
 
-import { jobs as defaultJobs } from "@/lib/jobs";
-import { clients as defaultClients } from "@/lib/clients";
+import type { Job } from "@/lib/jobs";
 import { useWorkspace } from "@/components/WorkspaceContext";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
 import { ClientRow } from "@/lib/frontierClients";
@@ -141,10 +139,10 @@ export default function CalendarPage() {
   const { activeWorkspace } = useWorkspace();
 
   const [view, setView] = useState("month");
-  const [jobItems] = useStoredJsonState(storageKeys.jobs, defaultJobs);
+  const [jobItems] = useStoredJsonState<Job[]>(storageKeys.jobs, []);
   const [clientItems] = useStoredJsonState<ClientRow[]>(
     storageKeys.clients,
-    defaultClients
+    []
   );
   const [clientEvents, setClientEvents] = useStoredJsonState<
     ClientCalendarEvent[]
@@ -225,6 +223,11 @@ export default function CalendarPage() {
     closeClientEventModal();
   }
 
+  function getClientEventDisplayName(event: ClientCalendarEvent) {
+    const client = workspaceClients.find((item) => item.id === event.clientId);
+    return client?.name ?? event.clientName;
+  }
+
   const currentMonthJobs = workspaceJobs.filter((job) => {
     const jobDate = new Date(`${job.date}T00:00:00`);
     return jobDate.getFullYear() === monthYear && jobDate.getMonth() === monthIndex;
@@ -284,7 +287,7 @@ export default function CalendarPage() {
                         <Link key={job.id} href={`/jobs/${job.id}`} className={`mt-1 block rounded px-2 py-1 text-xs font-medium text-white hover:opacity-90 ${getJobColor(job.status)}`}>{job.name}</Link>
                       ))}
                       {dayClientEvents.map((event) => (
-                        <Link key={event.id} href={`/clients/${event.clientId}`} className="mt-1 block rounded bg-teal-600 px-2 py-1 text-xs font-medium text-white hover:opacity-90">{event.title}: {event.clientName}</Link>
+                        <Link key={event.id} href={`/clients/${event.clientId}`} className="mt-1 block rounded bg-teal-600 px-2 py-1 text-xs font-medium text-white hover:opacity-90">{event.title}: {getClientEventDisplayName(event)}</Link>
                       ))}
                     </div>
                   );
@@ -308,7 +311,7 @@ export default function CalendarPage() {
                 ) : (
                   <Link key={`client-${item.event.id}`} href={`/clients/${item.event.clientId}`} className="block rounded-xl border border-teal-200 p-4 hover:bg-teal-50 dark:border-teal-900 dark:hover:bg-teal-950/30">
                     <div className="font-semibold text-teal-700 dark:text-teal-300">{item.event.title}</div>
-                    <div className="text-sm text-gray-500 dark:text-gray-400">{item.event.clientName} - {item.event.date}</div>
+                    <div className="text-sm text-gray-500 dark:text-gray-400">{getClientEventDisplayName(item.event)} - {item.event.date}</div>
                   </Link>
                 )
               )
@@ -353,8 +356,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
-import { clients as defaultClients } from "@/lib/clients";
-import { jobs as defaultJobs, Job } from "@/lib/jobs";
+import type { Job } from "@/lib/jobs";
 import { ClientRow } from "@/lib/frontierClients";
 import {
   formatCurrency,
@@ -368,9 +370,9 @@ export default function ClientPage() {
 
   const [clients] = useStoredJsonState<ClientRow[]>(
     storageKeys.clients,
-    defaultClients
+    []
   );
-  const [jobs] = useStoredJsonState<Job[]>(storageKeys.jobs, defaultJobs);
+  const [jobs] = useStoredJsonState<Job[]>(storageKeys.jobs, []);
   const [invoices] = useStoredJsonState<InvoiceRow[]>(
     storageKeys.invoices,
     []
@@ -498,9 +500,8 @@ import Link from "next/link";
 
 import { useWorkspace } from "@/components/WorkspaceContext";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
-import { clients as defaultClients } from "@/lib/clients";
 import { InvoiceRow } from "@/lib/frontierInvoices";
-import { Job, jobs as defaultJobs } from "@/lib/jobs";
+import type { Job } from "@/lib/jobs";
 
 type ClientRow = {
   id: string;
@@ -591,11 +592,11 @@ export default function ClientsPage() {
 
   const [clientItems, setClientItems] = useStoredJsonState<ClientRow[]>(
     storageKeys.clients,
-    defaultClients
+    []
   );
   const [jobItems] = useStoredJsonState<ClientLinkedJob[]>(
     storageKeys.jobs,
-    defaultJobs as ClientLinkedJob[]
+    []
   );
   const [invoiceItems] = useStoredJsonState<InvoiceRow[]>(
     storageKeys.invoices,
@@ -1281,11 +1282,10 @@ import Link from "next/link";
 import StatCard from "../../components/Statcard";
 import { useWorkspace } from "@/components/WorkspaceContext";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
-import { jobs as defaultJobs } from "@/lib/jobs";
-import { clients as defaultClients } from "@/lib/clients";
-import { expenses as defaultExpenses, Expense } from "@/lib/expenses";
+import type { Job } from "@/lib/jobs";
+import type { ClientRow } from "@/lib/frontierClients";
+import type { Expense } from "@/lib/expenses";
 import { getInvoiceTotals, InvoiceRow } from "@/lib/frontierInvoices";
-import { inventory as defaultInventory } from "@/lib/inventory";
 
 type DashboardInventoryItem = {
   workspaceId: string;
@@ -1303,19 +1303,22 @@ function formatMoney(value: number) {
 export default function DashboardPage() {
   const { activeWorkspace } = useWorkspace();
 
-  const [jobItems] = useStoredJsonState(storageKeys.jobs, defaultJobs);
-  const [clientItems] = useStoredJsonState(storageKeys.clients, defaultClients);
+  const [jobItems] = useStoredJsonState<Job[]>(storageKeys.jobs, []);
+  const [clientItems] = useStoredJsonState<ClientRow[]>(
+    storageKeys.clients,
+    []
+  );
   const [invoiceItems] = useStoredJsonState<InvoiceRow[]>(
     storageKeys.invoices,
     []
   );
   const [inventoryItems] = useStoredJsonState<DashboardInventoryItem[]>(
     storageKeys.inventory,
-    defaultInventory
+    []
   );
   const [expenseItems] = useStoredJsonState<Expense[]>(
     storageKeys.expenses,
-    defaultExpenses
+    []
   );
 
   const workspaceClients = clientItems.filter(
@@ -1467,8 +1470,6 @@ export default function DashboardPage() {
 import { useState } from "react";
 import { useWorkspace } from "@/components/WorkspaceContext";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
-import { clients as defaultClients } from "@/lib/clients";
-import { jobs as defaultJobs } from "@/lib/jobs";
 
 type StoredDocument = {
   id: string;
@@ -1512,11 +1513,11 @@ export default function DocumentsPage() {
   );
   const [clients] = useStoredJsonState<ClientLike[]>(
     storageKeys.clients,
-    defaultClients as ClientLike[]
+    []
   );
   const [jobs] = useStoredJsonState<JobLike[]>(
     storageKeys.jobs,
-    defaultJobs as JobLike[]
+    []
   );
 
   const [documentName, setDocumentName] = useState("");
@@ -1887,8 +1888,7 @@ import Link from "next/link";
 
 import { useWorkspace } from "@/components/WorkspaceContext";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
-import { invoices as defaultInvoices } from "@/lib/invoices";
-import { expenses as defaultExpenses, Expense } from "@/lib/expenses";
+import type { Expense } from "@/lib/expenses";
 import {
   formatCurrency,
   getInvoiceClientName,
@@ -1899,11 +1899,7 @@ import {
   moneyToNumber,
 } from "@/lib/frontierInvoices";
 
-type DefaultInvoice = (typeof defaultInvoices)[number];
-
-type FinancialInvoice =
-  | { source: "saved"; id: string; invoice: InvoiceRow }
-  | { source: "default"; id: string; invoice: DefaultInvoice };
+type FinancialInvoice = { id: string; invoice: InvoiceRow };
 
 function SummaryCard({
   title,
@@ -1936,13 +1932,11 @@ function SummaryCard({
 }
 
 function getFinancialInvoiceNumber(row: FinancialInvoice) {
-  return row.source === "saved" ? row.invoice.invoiceNumber : row.invoice.id;
+  return row.invoice.invoiceNumber;
 }
 
 function getFinancialInvoiceClient(row: FinancialInvoice) {
-  return row.source === "saved"
-    ? getInvoiceClientName(row.invoice)
-    : row.invoice.client;
+  return getInvoiceClientName(row.invoice);
 }
 
 function getFinancialInvoiceStatus(row: FinancialInvoice): InvoiceStatus {
@@ -1950,9 +1944,7 @@ function getFinancialInvoiceStatus(row: FinancialInvoice): InvoiceStatus {
 }
 
 function getFinancialInvoiceTotal(row: FinancialInvoice) {
-  return row.source === "saved"
-    ? getInvoiceTotals(row.invoice).total
-    : moneyToNumber(row.invoice.amount);
+  return getInvoiceTotals(row.invoice).total;
 }
 
 export default function FinancialsPage() {
@@ -1962,11 +1954,9 @@ export default function FinancialsPage() {
     storageKeys.invoices,
     []
   );
-  const [defaultInvoiceItems, setDefaultInvoiceItems] =
-    useState(defaultInvoices);
   const [expenseItems, setExpenseItems] = useStoredJsonState<Expense[]>(
     storageKeys.expenses,
-    defaultExpenses
+    []
   );
 
   const [selectedInvoices, setSelectedInvoices] = useState<string[]>([]);
@@ -1980,20 +1970,11 @@ export default function FinancialsPage() {
   const generatedInvoiceRows: FinancialInvoice[] = savedInvoices
     .filter((invoice) => invoice.workspaceId === activeWorkspace.id)
     .map((invoice) => ({
-      source: "saved",
       id: invoice.id,
       invoice,
     }));
 
-  const defaultInvoiceRows: FinancialInvoice[] = defaultInvoiceItems
-    .filter((invoice) => invoice.workspaceId === activeWorkspace.id)
-    .map((invoice) => ({
-      source: "default",
-      id: `default-${invoice.id}`,
-      invoice,
-    }));
-
-  const workspaceInvoices = [...generatedInvoiceRows, ...defaultInvoiceRows];
+  const workspaceInvoices = generatedInvoiceRows;
 
   const workspaceExpenses = expenseItems.filter(
     (expense) => expense.workspaceId === activeWorkspace.id
@@ -2024,22 +2005,8 @@ export default function FinancialsPage() {
   }
 
   function removeSelectedInvoices() {
-    const selectedSavedInvoiceIds = selectedInvoices.filter(
-      (id) => !id.startsWith("default-")
-    );
-
-    if (selectedSavedInvoiceIds.length > 0) {
-      saveSavedInvoiceItems(
-        savedInvoices.filter(
-          (invoice) => !selectedSavedInvoiceIds.includes(invoice.id)
-        )
-      );
-    }
-
-    setDefaultInvoiceItems((current) =>
-      current.filter(
-        (invoice) => !selectedInvoices.includes(`default-${invoice.id}`)
-      )
+    saveSavedInvoiceItems(
+      savedInvoices.filter((invoice) => !selectedInvoices.includes(invoice.id))
     );
 
     setSelectedInvoices([]);
@@ -2057,17 +2024,8 @@ export default function FinancialsPage() {
   }
 
   function updateInvoiceStatus(row: FinancialInvoice, status: InvoiceStatus) {
-    if (row.source === "saved") {
-      saveSavedInvoiceItems(
-        savedInvoices.map((invoice) =>
-          invoice.id === row.invoice.id ? { ...invoice, status } : invoice
-        )
-      );
-      return;
-    }
-
-    setDefaultInvoiceItems((current) =>
-      current.map((invoice) =>
+    saveSavedInvoiceItems(
+      savedInvoices.map((invoice) =>
         invoice.id === row.invoice.id ? { ...invoice, status } : invoice
       )
     );
@@ -2201,16 +2159,12 @@ export default function FinancialsPage() {
                     </td>
 
                     <td className="px-6 py-5 font-medium text-gray-950 dark:text-gray-100">
-                      {row.source === "saved" ? (
-                        <Link
-                          href={`/invoices/${row.invoice.id}`}
-                          className="text-blue-600 hover:underline dark:text-blue-400"
-                        >
-                          {getFinancialInvoiceNumber(row)}
-                        </Link>
-                      ) : (
-                        getFinancialInvoiceNumber(row)
-                      )}
+                      <Link
+                        href={`/invoices/${row.invoice.id}`}
+                        className="text-blue-600 hover:underline dark:text-blue-400"
+                      >
+                        {getFinancialInvoiceNumber(row)}
+                      </Link>
                     </td>
 
                     <td className="px-6 py-5 text-gray-500 dark:text-gray-400">
@@ -2474,8 +2428,7 @@ html.dark body {
 import { useState } from "react";
 import { useWorkspace } from "@/components/WorkspaceContext";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
-import { inventory as defaultInventory } from "@/lib/inventory";
-import { jobs as defaultJobs } from "@/lib/jobs";
+import type { Job } from "@/lib/jobs";
 
 type InventoryRow = {
   name: string;
@@ -2491,9 +2444,9 @@ export default function InventoryPage() {
 
   const [inventoryItems, setInventoryItems] = useStoredJsonState<InventoryRow[]>(
     storageKeys.inventory,
-    defaultInventory
+    []
   );
-  const [jobItems] = useStoredJsonState(storageKeys.jobs, defaultJobs);
+  const [jobItems] = useStoredJsonState<Job[]>(storageKeys.jobs, []);
   const [selectedItems, setSelectedItems] = useState<string[]>([]);
 
   const [newItemOpen, setNewItemOpen] = useState(false);
@@ -3063,8 +3016,7 @@ import Link from "next/link";
 
 import { useWorkspace } from "@/components/WorkspaceContext";
 import { storageKeys, useStoredJsonState, writeStoredJson } from "@/lib/clientStorage";
-import { clients as defaultClients } from "@/lib/clients";
-import { jobs as defaultJobs, Job } from "@/lib/jobs";
+import type { Job } from "@/lib/jobs";
 import { ClientRow } from "@/lib/frontierClients";
 import { InvoiceRow, InvoiceSetupDraft } from "@/lib/frontierInvoices";
 
@@ -3102,9 +3054,9 @@ function NewInvoiceContent() {
 
   const [clientItems] = useStoredJsonState<ClientRow[]>(
     storageKeys.clients,
-    defaultClients
+    []
   );
-  const [jobItems] = useStoredJsonState<Job[]>(storageKeys.jobs, defaultJobs);
+  const [jobItems] = useStoredJsonState<Job[]>(storageKeys.jobs, []);
   const [savedInvoices] = useStoredJsonState<InvoiceRow[]>(
     storageKeys.invoices,
     []
@@ -3804,9 +3756,8 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
-import { clients as defaultClients } from "@/lib/clients";
 import { ClientRow } from "@/lib/frontierClients";
-import { jobs as defaultJobs, Job, JobMaterial, JobStatus } from "@/lib/jobs";
+import type { Job, JobMaterial, JobStatus } from "@/lib/jobs";
 import {
   formatCurrency,
   getInvoiceTotals,
@@ -3838,11 +3789,11 @@ export default function JobPage() {
 
   const [jobItems, setJobItems] = useStoredJsonState<Job[]>(
     storageKeys.jobs,
-    defaultJobs
+    []
   );
   const [clientItems] = useStoredJsonState<ClientRow[]>(
     storageKeys.clients,
-    defaultClients
+    []
   );
   const [invoiceItems] = useStoredJsonState<InvoiceRow[]>(
     storageKeys.invoices,
@@ -4138,8 +4089,7 @@ import Link from "next/link";
 
 import { useWorkspace } from "@/components/WorkspaceContext";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
-import { jobs as defaultJobs, Job, JobMaterial, JobStatus } from "@/lib/jobs";
-import { clients as defaultClients } from "@/lib/clients";
+import type { Job, JobMaterial, JobStatus } from "@/lib/jobs";
 import { ClientRow } from "@/lib/frontierClients";
 import {
   formatCurrency,
@@ -4169,7 +4119,7 @@ export default function JobsPage() {
 
   const [jobItems, setJobItems] = useStoredJsonState<Job[]>(
     storageKeys.jobs,
-    defaultJobs
+    []
   );
   const [invoiceItems] = useStoredJsonState<InvoiceRow[]>(
     storageKeys.invoices,
@@ -4186,7 +4136,7 @@ export default function JobsPage() {
   const [notes, setNotes] = useState("");
   const [clientItems] = useStoredJsonState<ClientRow[]>(
     storageKeys.clients,
-    defaultClients
+    []
   );
   const [materialName, setMaterialName] = useState("");
   const [materialQuantity, setMaterialQuantity] = useState("");
@@ -4829,7 +4779,6 @@ import { useMemo, useState } from "react";
 
 import { useWorkspace } from "@/components/WorkspaceContext";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
-import { clients as defaultClients } from "@/lib/clients";
 import { ClientRow } from "@/lib/frontierClients";
 import {
   buildLogisticsLocations,
@@ -4850,7 +4799,7 @@ export default function LogisticsPage() {
   const [selectedLocationIds, setSelectedLocationIds] = useState<string[]>([]);
   const [clients] = useStoredJsonState<ClientRow[]>(
     storageKeys.clients,
-    defaultClients
+    []
   );
 
   const workspaceClients = useMemo(() => {
@@ -6734,6 +6683,8 @@ export const clients = [
 
 import { useCallback, useMemo, useSyncExternalStore } from "react";
 
+import { clients as defaultClients } from "@/lib/clients";
+
 export const storageKeys = {
   activeWorkspace: "frontier-active-workspace",
   clientCalendarEvents: "frontier-client-calendar-events",
@@ -6751,8 +6702,68 @@ export const storageKeys = {
 
 type StoredStateSetter<T> = T | ((current: T) => T);
 
+type StoredClientForMigration = {
+  id: string;
+  workspaceId: string;
+  name: string;
+};
+
+type StoredJobForMigration = {
+  client?: string;
+  clientId?: string;
+  workspaceId?: string;
+};
+
 function getStorageEventName(key: string) {
   return `frontier-storage:${key}`;
+}
+
+function repairLegacyJobClientIds(snapshot: string) {
+  if (typeof window === "undefined") return snapshot;
+
+  try {
+    const jobs = JSON.parse(snapshot) as StoredJobForMigration[];
+    const savedClients = window.localStorage.getItem(storageKeys.clients);
+    const storedClients = savedClients ? JSON.parse(savedClients) : [];
+    const clients =
+      Array.isArray(storedClients) && storedClients.length > 0
+        ? (storedClients as StoredClientForMigration[])
+        : (defaultClients as StoredClientForMigration[]);
+
+    if (!Array.isArray(jobs)) return snapshot;
+
+    let changed = false;
+    const repairedJobs = jobs.map((job) => {
+      if (job.clientId || !job.client?.trim() || !job.workspaceId) return job;
+
+      const matchingClient = clients.find(
+        (client) =>
+          client.workspaceId === job.workspaceId &&
+          client.name.trim().toLowerCase() === job.client?.trim().toLowerCase()
+      );
+
+      if (!matchingClient) return job;
+
+      changed = true;
+      return { ...job, clientId: matchingClient.id };
+    });
+
+    if (!changed) return snapshot;
+
+    const repairedSnapshot = JSON.stringify(repairedJobs);
+    queueMicrotask(() => {
+      window.localStorage.setItem(storageKeys.jobs, repairedSnapshot);
+      window.dispatchEvent(new Event(getStorageEventName(storageKeys.jobs)));
+    });
+
+    return repairedSnapshot;
+  } catch {
+    return snapshot;
+  }
+}
+
+function maybeRepairStoredJsonSnapshot(key: string, snapshot: string) {
+  return key === storageKeys.jobs ? repairLegacyJobClientIds(snapshot) : snapshot;
 }
 
 export function readStoredJson<T>(key: string, fallback: T): T {
@@ -6762,7 +6773,7 @@ export function readStoredJson<T>(key: string, fallback: T): T {
   if (!saved) return fallback;
 
   try {
-    return JSON.parse(saved) as T;
+    return JSON.parse(maybeRepairStoredJsonSnapshot(key, saved)) as T;
   } catch {
     return fallback;
   }
@@ -6796,7 +6807,8 @@ export function useStoredJsonState<T>(
 
   const getSnapshot = useCallback(() => {
     if (typeof window === "undefined") return fallbackSnapshot;
-    return window.localStorage.getItem(key) ?? fallbackSnapshot;
+    const saved = window.localStorage.getItem(key) ?? fallbackSnapshot;
+    return maybeRepairStoredJsonSnapshot(key, saved);
   }, [fallbackSnapshot, key]);
 
   const subscribe = useCallback(
@@ -6990,7 +7002,6 @@ export const expenses: Expense[] = [
 ## lib\frontierClients.ts
 
 ```typescript
-import { clients as defaultClients } from "@/lib/clients";
 import { readStoredJson, storageKeys, writeStoredJson } from "@/lib/clientStorage";
 import { formatCurrency } from "@/lib/frontierInvoices";
 
@@ -7015,18 +7026,18 @@ export const clientStatuses = ["Lead", "Active", "Inactive"] as const;
 export type ClientStatus = (typeof clientStatuses)[number];
 
 export function safeParseClients(value: string | null): ClientRow[] {
-  if (!value) return defaultClients;
+  if (!value) return [];
 
   try {
     const parsed = JSON.parse(value);
-    return Array.isArray(parsed) ? parsed : defaultClients;
+    return Array.isArray(parsed) ? parsed : [];
   } catch {
-    return defaultClients;
+    return [];
   }
 }
 
 export function loadClients() {
-  return readStoredJson(storageKeys.clients, defaultClients as ClientRow[]);
+  return readStoredJson(storageKeys.clients, [] as ClientRow[]);
 }
 
 export function saveClients(clients: ClientRow[]) {
@@ -7335,92 +7346,6 @@ export const inventory: InventoryItem[] = [
 ];
 ```
 
-## lib\invoices.ts
-
-```typescript
-export type Invoice = {
-  id: string;
-  client: string;
-  status: "Draft" | "Sent" | "Overdue" | "Paid";
-  amount: string;
-  workspaceId: string;
-};
-
-export const invoices: Invoice[] = [
-  // LANDSCAPING
-
-  {
-    id: "INV-001",
-    client: "Acme HOA",
-    status: "Paid",
-    amount: "$850",
-    workspaceId: "landscaping",
-  },
-  {
-    id: "INV-005",
-    client: "John Smith",
-    status: "Sent",
-    amount: "$450",
-    workspaceId: "landscaping",
-  },
-  {
-    id: "INV-006",
-    client: "Johnson Residence",
-    status: "Overdue",
-    amount: "$800",
-    workspaceId: "landscaping",
-  },
-
-  // SNOW REMOVAL
-
-  {
-    id: "INV-002",
-    client: "Winter Ridge Condos",
-    status: "Overdue",
-    amount: "$2,400",
-    workspaceId: "snow-removal",
-  },
-  {
-    id: "INV-007",
-    client: "Rochester Community Church",
-    status: "Sent",
-    amount: "$3,500",
-    workspaceId: "snow-removal",
-  },
-  {
-    id: "INV-008",
-    client: "North Plaza",
-    status: "Paid",
-    amount: "$2,400",
-    workspaceId: "snow-removal",
-  },
-
-  // PROPERTIES
-
-  {
-    id: "INV-003",
-    client: "Johnson Commercial",
-    status: "Paid",
-    amount: "$3,200",
-    workspaceId: "properties",
-  },
-  {
-    id: "INV-004",
-    client: "Green Valley HOA",
-    status: "Sent",
-    amount: "$1,200",
-    workspaceId: "properties",
-  },
-  {
-    id: "INV-009",
-    client: "Sunset Strip Mall",
-    status: "Draft",
-    amount: "$8,500",
-    workspaceId: "properties",
-  },
-];
-```
-
 ## lib\jobs.ts
 
 ```typescript
@@ -7707,13 +7632,13 @@ export const jobs: Job[] = [
 
 ```typescript
 import { readStoredJson, storageKeys, writeStoredJson } from "@/lib/clientStorage";
-import { jobs as defaultJobs } from "@/lib/jobs";
+import type { Job } from "@/lib/jobs";
 
 export function getStoredJobs() {
-  return readStoredJson(storageKeys.jobs, defaultJobs);
+  return readStoredJson(storageKeys.jobs, [] as Job[]);
 }
 
-export function saveStoredJobs(jobs: typeof defaultJobs) {
+export function saveStoredJobs(jobs: Job[]) {
   writeStoredJson(storageKeys.jobs, jobs);
 }
 ```
@@ -7723,7 +7648,7 @@ export function saveStoredJobs(jobs: typeof defaultJobs) {
 ```typescript
 /// <reference types="next" />
 /// <reference types="next/image-types/global" />
-import "./.next/types/routes.d.ts";
+import "./.next/dev/types/routes.d.ts";
 
 // NOTE: This file should not be edited
 // see https://nextjs.org/docs/app/api-reference/config/typescript for more information.

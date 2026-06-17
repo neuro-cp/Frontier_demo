@@ -1,4 +1,3 @@
-import { clients as defaultClients } from "@/lib/clients";
 import { readStoredJson, storageKeys, writeStoredJson } from "@/lib/clientStorage";
 import { formatCurrency } from "@/lib/frontierInvoices";
 
@@ -23,18 +22,18 @@ export const clientStatuses = ["Lead", "Active", "Inactive"] as const;
 export type ClientStatus = (typeof clientStatuses)[number];
 
 export function safeParseClients(value: string | null): ClientRow[] {
-  if (!value) return defaultClients;
+  if (!value) return [];
 
   try {
     const parsed = JSON.parse(value);
-    return Array.isArray(parsed) ? parsed : defaultClients;
+    return Array.isArray(parsed) ? parsed : [];
   } catch {
-    return defaultClients;
+    return [];
   }
 }
 
 export function loadClients() {
-  return readStoredJson(storageKeys.clients, defaultClients as ClientRow[]);
+  return readStoredJson(storageKeys.clients, [] as ClientRow[]);
 }
 
 export function saveClients(clients: ClientRow[]) {
