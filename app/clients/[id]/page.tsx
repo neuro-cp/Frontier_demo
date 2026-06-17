@@ -1,33 +1,99 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 
+import { useAuthSession } from "@/components/AuthSessionProvider";
+import { useWorkspace } from "@/components/WorkspaceContext";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
 import type { Job } from "@/lib/jobTypes";
 import type { ClientRow } from "@/lib/clientTypes";
+import { createClientsRepository } from "@/lib/db/clients";
 import {
   formatCurrency,
   getInvoiceTotals,
   InvoiceRow,
 } from "@/lib/frontierInvoices";
+import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 
 export default function ClientPage() {
   const params = useParams();
   const id = String(params.id);
+  const { activeWorkspace } = useWorkspace();
+  const { isSupabaseConfigured, user } = useAuthSession();
+  const isDatabaseMode = Boolean(isSupabaseConfigured && user);
 
-  const [clients] = useStoredJsonState<ClientRow[]>(
+  const [localClients, setLocalClients] = useStoredJsonState<ClientRow[]>(
     storageKeys.clients,
     []
   );
+  const [databaseClient, setDatabaseClient] = useState<ClientRow | null>(null);
+  const [isLoadingClient, setIsLoadingClient] = useState(false);
+  const [clientLoadError, setClientLoadError] = useState<string | null>(null);
   const [jobs] = useStoredJsonState<Job[]>(storageKeys.jobs, []);
   const [invoices] = useStoredJsonState<InvoiceRow[]>(
     storageKeys.invoices,
     []
   );
 
-  const client = clients.find((clientItem) => clientItem.id === id);
+  const supabase = useMemo(
+    () => (isDatabaseMode ? createBrowserSupabaseClient() : null),
+    [isDatabaseMode]
+  );
+  const clientsRepository = useMemo(
+    () =>
+      createClientsRepository({
+        isSignedIn: isDatabaseMode,
+        supabase,
+        localClients,
+        setLocalClients,
+      }),
+    [isDatabaseMode, localClients, setLocalClients, supabase]
+  );
+
+  useEffect(() => {
+    if (!isDatabaseMode) {
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadClient() {
+      setIsLoadingClient(true);
+      const loadedClient = await clientsRepository.getClientById(
+        id,
+        activeWorkspace.id
+      );
+
+      if (!cancelled) {
+        setDatabaseClient(loadedClient);
+        setClientLoadError(null);
+      }
+    }
+
+    loadClient()
+      .catch((error) => {
+        console.error("Unable to load client.", error);
+
+        if (!cancelled) {
+          setClientLoadError("Unable to load client.");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsLoadingClient(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeWorkspace.id, clientsRepository, id, isDatabaseMode]);
+
+  const client = isDatabaseMode
+    ? databaseClient
+    : localClients.find((clientItem) => clientItem.id === id);
 
   const clientJobs = useMemo(() => {
     if (!client) return [];
@@ -57,11 +123,25 @@ export default function ClientPage() {
     0
   );
 
+  if (isLoadingClient) {
+    return (
+      <div className="space-y-4 text-gray-950 dark:text-gray-100">
+        <Link href="/clients" className="text-blue-600 hover:underline dark:text-blue-400">- Back to Clients</Link>
+        <h1 className="text-3xl font-bold">Loading client...</h1>
+      </div>
+    );
+  }
+
   if (!client) {
     return (
       <div className="space-y-4 text-gray-950 dark:text-gray-100">
         <Link href="/clients" className="text-blue-600 hover:underline dark:text-blue-400">- Back to Clients</Link>
         <h1 className="text-3xl font-bold">Client not found</h1>
+        {clientLoadError && (
+          <p className="text-sm text-red-600 dark:text-red-400">
+            {clientLoadError}
+          </p>
+        )}
       </div>
     );
   }

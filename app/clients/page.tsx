@@ -1,27 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
+import { useAuthSession } from "@/components/AuthSessionProvider";
 import { useWorkspace } from "@/components/WorkspaceContext";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
+import type { ClientRow } from "@/lib/clientTypes";
+import { createClientsRepository } from "@/lib/db/clients";
 import { InvoiceRow } from "@/lib/frontierInvoices";
 import type { Job } from "@/lib/jobTypes";
-
-type ClientRow = {
-  id: string;
-  workspaceId: string;
-  name: string;
-  status: string;
-  balance: string;
-  email?: string;
-  phone?: string;
-  address?: string;
-  city?: string;
-  state?: string;
-  zip?: string;
-  notes?: string;
-};
+import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 
 type ClientLinkedJob = Job & {
   clientId?: string;
@@ -96,11 +85,15 @@ function isInvoiceLinkedToClient(invoice: InvoiceRow, client: ClientRow) {
 
 export default function ClientsPage() {
   const { activeWorkspace } = useWorkspace();
+  const { isSupabaseConfigured, user } = useAuthSession();
+  const isDatabaseMode = Boolean(isSupabaseConfigured && user);
 
-  const [clientItems, setClientItems] = useStoredJsonState<ClientRow[]>(
+  const [localClientItems, setLocalClientItems] = useStoredJsonState<ClientRow[]>(
     storageKeys.clients,
     []
   );
+  const [databaseClientItems, setDatabaseClientItems] = useState<ClientRow[]>([]);
+  const [clientLoadError, setClientLoadError] = useState<string | null>(null);
   const [jobItems] = useStoredJsonState<ClientLinkedJob[]>(
     storageKeys.jobs,
     []
@@ -137,6 +130,51 @@ export default function ClientsPage() {
   const [clientState, setClientState] = useState("");
   const [clientZip, setClientZip] = useState("");
   const [clientNotes, setClientNotes] = useState("");
+
+  const supabase = useMemo(
+    () => (isDatabaseMode ? createBrowserSupabaseClient() : null),
+    [isDatabaseMode]
+  );
+  const clientsRepository = useMemo(
+    () =>
+      createClientsRepository({
+        isSignedIn: isDatabaseMode,
+        supabase,
+        localClients: localClientItems,
+        setLocalClients: setLocalClientItems,
+      }),
+    [isDatabaseMode, localClientItems, setLocalClientItems, supabase]
+  );
+  const clientItems = isDatabaseMode ? databaseClientItems : localClientItems;
+
+  useEffect(() => {
+    if (!isDatabaseMode) {
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadClients() {
+      const clients = await clientsRepository.getClients(activeWorkspace.id);
+
+      if (!cancelled) {
+        setDatabaseClientItems(clients);
+        setClientLoadError(null);
+      }
+    }
+
+    loadClients().catch((error) => {
+      console.error("Unable to load clients.", error);
+
+      if (!cancelled) {
+        setClientLoadError("Unable to load clients.");
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeWorkspace.id, clientsRepository, isDatabaseMode]);
 
   const workspaceClients = clientItems.filter(
     (client) => client.workspaceId === activeWorkspace.id
@@ -199,10 +237,6 @@ export default function ClientsPage() {
     (total, warning) => total + warning.total,
     0
   );
-
-  function saveClients(updatedClients: ClientRow[]) {
-    setClientItems(updatedClients);
-  }
 
   function cycleStatusPriority() {
     setStatusPriority((current) => {
@@ -280,7 +314,7 @@ export default function ClientsPage() {
     );
   }
 
-  function addClient() {
+  async function addClient() {
     if (!clientName.trim()) return;
     if (clientNameAlreadyExists(clientName)) return;
 
@@ -299,7 +333,14 @@ export default function ClientsPage() {
       notes: clientNotes.trim(),
     };
 
-    saveClients([...clientItems, newClient]);
+    const createdClient = await clientsRepository.createClient(newClient);
+
+    if (!createdClient) return;
+
+    if (isDatabaseMode) {
+      setDatabaseClientItems((current) => [...current, createdClient]);
+    }
+
     closeClientModals();
   }
 
@@ -322,40 +363,69 @@ export default function ClientsPage() {
     setEditClientOpen(true);
   }
 
-  function saveEditedClient() {
+  async function saveEditedClient() {
     if (!editingClientId) return;
     if (!clientName.trim()) return;
     if (clientNameAlreadyExists(clientName, editingClientId)) return;
 
-    const updatedClients = clientItems.map((client) =>
-      client.id === editingClientId
-        ? {
-            ...client,
-            name: clientName.trim(),
-            status: clientStatus,
-            balance: formatMoney(clientBalance || "0"),
-            email: clientEmail.trim(),
-            phone: clientPhone.trim(),
-            address: clientAddress.trim(),
-            city: clientCity.trim(),
-            state: clientState.trim(),
-            zip: clientZip.trim(),
-            notes: clientNotes.trim(),
-          }
-        : client
+    const existingClient = clientItems.find(
+      (client) => client.id === editingClientId
     );
 
-    saveClients(updatedClients);
+    if (!existingClient) return;
+
+    const updatedClient = {
+      ...existingClient,
+      name: clientName.trim(),
+      status: clientStatus,
+      balance: formatMoney(clientBalance || "0"),
+      email: clientEmail.trim(),
+      phone: clientPhone.trim(),
+      address: clientAddress.trim(),
+      city: clientCity.trim(),
+      state: clientState.trim(),
+      zip: clientZip.trim(),
+      notes: clientNotes.trim(),
+    };
+
+    const savedClient = await clientsRepository.updateClient(updatedClient);
+
+    if (!savedClient) return;
+
+    if (isDatabaseMode) {
+      setDatabaseClientItems((current) =>
+        current.map((client) =>
+          client.id === savedClient.id ? savedClient : client
+        )
+      );
+    }
+
     closeClientModals();
   }
 
-  function removeSelectedClients() {
-    const updatedClients = clientItems.filter(
-      (client) => !selectedClients.includes(client.id)
+  async function removeSelectedClients() {
+    const deleteResults = await Promise.all(
+      selectedClientRows.map(async (client) => ({
+        id: client.id,
+        deleted: await clientsRepository.deleteClient(
+          client.id,
+          client.workspaceId
+        ),
+      }))
     );
+    const deletedClientIds = deleteResults
+      .filter((result) => result.deleted)
+      .map((result) => result.id);
 
-    saveClients(updatedClients);
-    setSelectedClients([]);
+    if (isDatabaseMode) {
+      setDatabaseClientItems((current) =>
+        current.filter((client) => !deletedClientIds.includes(client.id))
+      );
+    }
+
+    setSelectedClients((current) =>
+      current.filter((clientId) => !deletedClientIds.includes(clientId))
+    );
     setShowDeleteModal(false);
   }
 
@@ -386,6 +456,12 @@ export default function ClientsPage() {
         <div className="rounded-lg bg-gray-900 p-4 text-white">
           {selectedClients.length} client
           {selectedClients.length === 1 ? "" : "s"} selected
+        </div>
+      )}
+
+      {clientLoadError && (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
+          {clientLoadError}
         </div>
       )}
 
