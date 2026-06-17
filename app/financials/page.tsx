@@ -1,11 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
+import { useAuthSession } from "@/components/AuthSessionProvider";
 import { useWorkspace } from "@/components/WorkspaceContext";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
-import type { Expense } from "@/lib/expenseTypes";
+import { createExpensesRepository, type ExpenseRow } from "@/lib/db/expenses";
+import { createInvoicesRepository } from "@/lib/db/invoices";
 import {
   formatCurrency,
   getInvoiceClientName,
@@ -15,6 +17,7 @@ import {
   invoiceStatuses,
   moneyToNumber,
 } from "@/lib/frontierInvoices";
+import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 
 type FinancialInvoice = { id: string; invoice: InvoiceRow };
 
@@ -66,15 +69,19 @@ function getFinancialInvoiceTotal(row: FinancialInvoice) {
 
 export default function FinancialsPage() {
   const { activeWorkspace } = useWorkspace();
+  const { isSupabaseConfigured, user } = useAuthSession();
+  const isDatabaseMode = Boolean(isSupabaseConfigured && user);
 
-  const [savedInvoices, setSavedInvoices] = useStoredJsonState<InvoiceRow[]>(
+  const [localInvoices, setLocalInvoices] = useStoredJsonState<InvoiceRow[]>(
     storageKeys.invoices,
     []
   );
-  const [expenseItems, setExpenseItems] = useStoredJsonState<Expense[]>(
+  const [localExpenses, setLocalExpenses] = useStoredJsonState<ExpenseRow[]>(
     storageKeys.expenses,
     []
   );
+  const [dbInvoices, setDbInvoices] = useState<InvoiceRow[]>([]);
+  const [dbExpenses, setDbExpenses] = useState<ExpenseRow[]>([]);
 
   const [selectedInvoices, setSelectedInvoices] = useState<string[]>([]);
   const [selectedExpenses, setSelectedExpenses] = useState<string[]>([]);
@@ -83,6 +90,21 @@ export default function FinancialsPage() {
   const [expenseDescription, setExpenseDescription] = useState("");
   const [expenseCategory, setExpenseCategory] = useState("Materials");
   const [expenseAmount, setExpenseAmount] = useState("");
+
+  const supabase = useMemo(() => (isDatabaseMode ? createBrowserSupabaseClient() : null), [isDatabaseMode]);
+  const invoicesRepo = useMemo(() => createInvoicesRepository({ isSignedIn: isDatabaseMode, supabase, localInvoices, setLocalInvoices }), [isDatabaseMode, localInvoices, setLocalInvoices, supabase]);
+  const expensesRepo = useMemo(() => createExpensesRepository({ isSignedIn: isDatabaseMode, supabase, localExpenses, setLocalExpenses }), [isDatabaseMode, localExpenses, setLocalExpenses, supabase]);
+  const savedInvoices = isDatabaseMode ? dbInvoices : localInvoices;
+  const expenseItems = isDatabaseMode ? dbExpenses : localExpenses;
+
+  useEffect(() => {
+    if (!isDatabaseMode) return;
+    let cancelled = false;
+    Promise.all([invoicesRepo.getInvoices(activeWorkspace.id), expensesRepo.getExpenses(activeWorkspace.id)]).then(([invoices, expenses]) => {
+      if (!cancelled) { setDbInvoices(invoices); setDbExpenses(expenses); }
+    });
+    return () => { cancelled = true; };
+  }, [activeWorkspace.id, expensesRepo, invoicesRepo, isDatabaseMode]);
 
   const generatedInvoiceRows: FinancialInvoice[] = savedInvoices
     .filter((invoice) => invoice.workspaceId === activeWorkspace.id)
@@ -98,11 +120,8 @@ export default function FinancialsPage() {
   );
 
   function saveSavedInvoiceItems(updatedInvoices: InvoiceRow[]) {
-    setSavedInvoices(updatedInvoices);
-  }
-
-  function saveExpenses(updatedExpenses: Expense[]) {
-    setExpenseItems(updatedExpenses);
+    if (isDatabaseMode) setDbInvoices(updatedInvoices);
+    else setLocalInvoices(updatedInvoices);
   }
 
   function toggleInvoice(rowId: string) {
@@ -129,23 +148,19 @@ export default function FinancialsPage() {
     setSelectedInvoices([]);
   }
 
-  function removeSelectedExpenses() {
-    saveExpenses(
-      expenseItems.filter(
-        (expense) =>
-          !selectedExpenses.includes(`${expense.workspaceId}-${expense.description}`)
-      )
-    );
-
+  async function removeSelectedExpenses() {
+    const selected = workspaceExpenses.filter((expense) => selectedExpenses.includes(expense.id ?? `${expense.workspaceId}-${expense.description}`));
+    const deleted = await Promise.all(selected.map((expense) => expensesRepo.deleteExpense(expense)));
+    const deletedIds = selected.filter((_, i) => deleted[i]).map((e) => e.id ?? `${e.workspaceId}-${e.description}`);
+    if (isDatabaseMode) setDbExpenses((current) => current.filter((expense) => !deletedIds.includes(expense.id ?? `${expense.workspaceId}-${expense.description}`)));
     setSelectedExpenses([]);
   }
 
-  function updateInvoiceStatus(row: FinancialInvoice, status: InvoiceStatus) {
-    saveSavedInvoiceItems(
-      savedInvoices.map((invoice) =>
-        invoice.id === row.invoice.id ? { ...invoice, status } : invoice
-      )
-    );
+  async function updateInvoiceStatus(row: FinancialInvoice, status: InvoiceStatus) {
+    const updated = { ...row.invoice, status };
+    const saved = await invoicesRepo.updateInvoice(updated);
+    if (!saved) return;
+    saveSavedInvoiceItems(savedInvoices.map((invoice) => invoice.id === saved.id ? saved : invoice));
   }
 
   function closeExpenseModal() {
@@ -155,21 +170,15 @@ export default function FinancialsPage() {
     setExpenseAmount("");
   }
 
-  function addExpense() {
+  async function addExpense() {
     if (!expenseDescription.trim()) return;
 
     const amount = Number(expenseAmount);
     if (Number.isNaN(amount) || amount <= 0) return;
 
-    saveExpenses([
-      ...expenseItems,
-      {
-        description: expenseDescription.trim(),
-        category: expenseCategory,
-        amount: formatCurrency(amount),
-        workspaceId: activeWorkspace.id,
-      },
-    ]);
+    const created = await expensesRepo.createExpense({ description: expenseDescription.trim(), category: expenseCategory, amount: formatCurrency(amount), workspaceId: activeWorkspace.id });
+    if (!created) return;
+    if (isDatabaseMode) setDbExpenses((current) => [created, ...current]);
 
     closeExpenseModal();
   }
@@ -355,7 +364,7 @@ export default function FinancialsPage() {
             <tbody>
               {workspaceExpenses.length > 0 ? (
                 workspaceExpenses.map((expense) => {
-                  const expenseId = `${expense.workspaceId}-${expense.description}`;
+                  const expenseId = expense.id ?? `${expense.workspaceId}-${expense.description}`;
 
                   return (
                     <tr key={expenseId} className="border-b border-gray-200 text-base last:border-b-0 dark:border-gray-800 lg:text-lg">

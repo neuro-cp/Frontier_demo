@@ -1,17 +1,21 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 
+import { useAuthSession } from "@/components/AuthSessionProvider";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
 import type { ClientRow } from "@/lib/clientTypes";
+import { createClientsRepository } from "@/lib/db/clients";
+import { createJobsRepository } from "@/lib/db/jobs";
 import type { Job, JobMaterial, JobStatus } from "@/lib/jobTypes";
 import {
   formatCurrency,
   getInvoiceTotals,
   InvoiceRow,
 } from "@/lib/frontierInvoices";
+import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 
 const jobStatuses: JobStatus[] = ["Lead", "Quoted", "Scheduled", "Completed", "Paid"];
 
@@ -35,15 +39,19 @@ function getStatusClasses(status: string) {
 export default function JobPage() {
   const params = useParams();
   const id = String(params.id);
+  const { isSupabaseConfigured, user } = useAuthSession();
+  const isDatabaseMode = Boolean(isSupabaseConfigured && user);
 
-  const [jobItems, setJobItems] = useStoredJsonState<Job[]>(
+  const [localJobItems, setLocalJobItems] = useStoredJsonState<Job[]>(
     storageKeys.jobs,
     []
   );
-  const [clientItems] = useStoredJsonState<ClientRow[]>(
+  const [localClientItems, setLocalClientItems] = useStoredJsonState<ClientRow[]>(
     storageKeys.clients,
     []
   );
+  const [databaseJob, setDatabaseJob] = useState<Job | null>(null);
+  const [databaseClients, setDatabaseClients] = useState<ClientRow[]>([]);
   const [invoiceItems] = useStoredJsonState<InvoiceRow[]>(
     storageKeys.invoices,
     []
@@ -61,7 +69,22 @@ export default function JobPage() {
   const [editMaterialName, setEditMaterialName] = useState("");
   const [editMaterialQuantity, setEditMaterialQuantity] = useState("");
 
-  const job = jobItems.find((item) => item.id === id);
+  const supabase = useMemo(() => (isDatabaseMode ? createBrowserSupabaseClient() : null), [isDatabaseMode]);
+  const jobsRepository = useMemo(() => createJobsRepository({ isSignedIn: isDatabaseMode, supabase, localJobs: localJobItems, setLocalJobs: setLocalJobItems }), [isDatabaseMode, localJobItems, setLocalJobItems, supabase]);
+  const clientsRepository = useMemo(() => createClientsRepository({ isSignedIn: isDatabaseMode, supabase, localClients: localClientItems, setLocalClients: setLocalClientItems }), [isDatabaseMode, localClientItems, setLocalClientItems, supabase]);
+  const job = isDatabaseMode ? databaseJob : localJobItems.find((item) => item.id === id);
+  const clientItems = isDatabaseMode ? databaseClients : localClientItems;
+
+  useEffect(() => {
+    if (!isDatabaseMode) return;
+    let cancelled = false;
+    jobsRepository.getJobById(id).then(async (loadedJob) => {
+      if (cancelled) return;
+      setDatabaseJob(loadedJob);
+      if (loadedJob) setDatabaseClients(await clientsRepository.getClients(loadedJob.workspaceId));
+    });
+    return () => { cancelled = true; };
+  }, [clientsRepository, id, isDatabaseMode, jobsRepository]);
   const workspaceClients = job
     ? clientItems.filter((client) => client.workspaceId === job.workspaceId)
     : [];
@@ -124,7 +147,7 @@ export default function JobPage() {
     setEditMaterials((current) => current.filter((_, index) => index !== indexToRemove));
   }
 
-  function saveEditedJob() {
+  async function saveEditedJob() {
     if (!job) return;
     if (!editName.trim() || !editClientId) return;
 
@@ -140,23 +163,21 @@ export default function JobPage() {
         : `$${editValue.trim()}`
       : "$0";
 
-    const updatedJobs = jobItems.map((item) =>
-      item.id === job.id
-        ? {
-            ...item,
-            name: editName.trim(),
-            clientId: selectedClient.id,
-            client: selectedClient.name,
-            status: editStatus,
-            date: editDate,
-            value: formattedValue,
-            notes: editNotes,
-            materials: editMaterials,
-          }
-        : item
-    );
+    const updatedJob: Job = {
+      ...job,
+      name: editName.trim(),
+      clientId: selectedClient.id,
+      client: selectedClient.name,
+      status: editStatus,
+      date: editDate,
+      value: formattedValue,
+      notes: editNotes,
+      materials: editMaterials,
+    };
 
-    setJobItems(updatedJobs);
+    const saved = await jobsRepository.updateJob(job.id, updatedJob);
+    if (!saved) return;
+    if (isDatabaseMode) setDatabaseJob(saved);
     setEditOpen(false);
   }
 

@@ -1,17 +1,21 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
+import { useAuthSession } from "@/components/AuthSessionProvider";
 import { useWorkspace } from "@/components/WorkspaceContext";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
 import type { Job, JobMaterial, JobStatus } from "@/lib/jobTypes";
 import type { ClientRow } from "@/lib/clientTypes";
+import { createClientsRepository } from "@/lib/db/clients";
+import { createJobsRepository } from "@/lib/db/jobs";
 import {
   formatCurrency,
   getInvoiceTotals,
   InvoiceRow,
 } from "@/lib/frontierInvoices";
+import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 
 function getStatusColor(status: JobStatus) {
   switch (status) {
@@ -32,11 +36,14 @@ function getStatusColor(status: JobStatus) {
 
 export default function JobsPage() {
   const { activeWorkspace } = useWorkspace();
+  const { isSupabaseConfigured, user } = useAuthSession();
+  const isDatabaseMode = Boolean(isSupabaseConfigured && user);
 
-  const [jobItems, setJobItems] = useStoredJsonState<Job[]>(
+  const [localJobItems, setLocalJobItems] = useStoredJsonState<Job[]>(
     storageKeys.jobs,
     []
   );
+  const [databaseJobItems, setDatabaseJobItems] = useState<Job[]>([]);
   const [invoiceItems] = useStoredJsonState<InvoiceRow[]>(
     storageKeys.invoices,
     []
@@ -50,13 +57,35 @@ export default function JobsPage() {
   const [value, setValue] = useState("");
   const [date, setDate] = useState("");
   const [notes, setNotes] = useState("");
-  const [clientItems] = useStoredJsonState<ClientRow[]>(
+  const [localClientItems, setLocalClientItems] = useStoredJsonState<ClientRow[]>(
     storageKeys.clients,
     []
   );
+  const [databaseClientItems, setDatabaseClientItems] = useState<ClientRow[]>([]);
   const [materialName, setMaterialName] = useState("");
   const [materialQuantity, setMaterialQuantity] = useState("");
   const [materials, setMaterials] = useState<JobMaterial[]>([]);
+
+  const supabase = useMemo(() => (isDatabaseMode ? createBrowserSupabaseClient() : null), [isDatabaseMode]);
+  const jobsRepository = useMemo(() => createJobsRepository({ isSignedIn: isDatabaseMode, supabase, localJobs: localJobItems, setLocalJobs: setLocalJobItems }), [isDatabaseMode, localJobItems, setLocalJobItems, supabase]);
+  const clientsRepository = useMemo(() => createClientsRepository({ isSignedIn: isDatabaseMode, supabase, localClients: localClientItems, setLocalClients: setLocalClientItems }), [isDatabaseMode, localClientItems, setLocalClientItems, supabase]);
+  const jobItems = isDatabaseMode ? databaseJobItems : localJobItems;
+  const clientItems = isDatabaseMode ? databaseClientItems : localClientItems;
+
+  useEffect(() => {
+    if (!isDatabaseMode) return;
+    let cancelled = false;
+    Promise.all([
+      jobsRepository.getJobs(activeWorkspace.id),
+      clientsRepository.getClients(activeWorkspace.id),
+    ]).then(([jobs, clients]) => {
+      if (!cancelled) {
+        setDatabaseJobItems(jobs);
+        setDatabaseClientItems(clients);
+      }
+    });
+    return () => { cancelled = true; };
+  }, [activeWorkspace.id, clientsRepository, isDatabaseMode, jobsRepository]);
 
   const workspaceClients = clientItems.filter(
     (clientItem) => clientItem.workspaceId === activeWorkspace.id
@@ -94,10 +123,6 @@ export default function JobsPage() {
       (total, invoice) => total + getInvoiceTotals(invoice).total,
       0
     );
-  }
-
-  function saveJobs(updatedJobs: Job[]) {
-    setJobItems(updatedJobs);
   }
 
   function resetForm() {
@@ -143,8 +168,10 @@ export default function JobsPage() {
     });
   }
 
-  function deleteSelectedJobs() {
-    saveJobs(jobItems.filter((job) => !selectedJobs.includes(job.id)));
+  async function deleteSelectedJobs() {
+    const deleted = await Promise.all(selectedJobs.map((id) => jobsRepository.deleteJob(id)));
+    const deletedIds = selectedJobs.filter((_, i) => deleted[i]);
+    if (isDatabaseMode) setDatabaseJobItems((c) => c.filter((j) => !deletedIds.includes(j.id)));
     setSelectedJobs([]);
   }
 
@@ -163,7 +190,7 @@ export default function JobsPage() {
     setMaterials((current) => current.filter((_, index) => index !== indexToRemove));
   }
 
-  function createJob(event: React.FormEvent<HTMLFormElement>) {
+  async function createJob(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!clientId || !jobName.trim()) return;
 
@@ -192,7 +219,9 @@ export default function JobsPage() {
       notes,
     };
 
-    saveJobs([...jobItems, newJob]);
+    const created = await jobsRepository.createJob(newJob);
+    if (!created) return;
+    if (isDatabaseMode) setDatabaseJobItems((c) => [...c, created]);
     closeNewJobBox();
   }
 

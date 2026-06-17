@@ -3,6 +3,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { ClientRow } from "@/lib/clientTypes";
+import { centsToMoneyString, moneyStringToCents } from "@/lib/db/money";
 
 type StoredStateSetter<T> = T | ((current: T) => T);
 
@@ -46,29 +47,6 @@ type ClientDatabaseWrite = {
   latitude?: number | null;
   longitude?: number | null;
 };
-
-function moneyStringToCents(value: string | number | null | undefined) {
-  if (typeof value === "number") {
-    return Number.isFinite(value) ? Math.round(value * 100) : 0;
-  }
-
-  if (!value) return 0;
-
-  const numericValue = Number(value.replace(/[$,%\s,]/g, ""));
-  return Number.isFinite(numericValue) ? Math.round(numericValue * 100) : 0;
-}
-
-function centsToMoneyString(value: number | null | undefined) {
-  const cents = Number.isFinite(value) ? value ?? 0 : 0;
-  const amount = cents / 100;
-
-  return amount.toLocaleString(undefined, {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: cents % 100 === 0 ? 0 : 2,
-    maximumFractionDigits: 2,
-  });
-}
 
 function emptyToNull(value: string | undefined) {
   const trimmedValue = value?.trim() ?? "";

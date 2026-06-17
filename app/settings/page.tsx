@@ -4,14 +4,18 @@ import { useState } from "react";
 import { useWorkspace } from "@/components/WorkspaceContext";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
 import { defaultBusinessTypes } from "@/lib/workspaceOptions";
+import DataMigrationSettings from "./DataMigrationSettings";
 import PermissionsSettings from "./PermissionsSettings";
+import StorageSettings from "./StorageSettings";
 
 type SettingsTab =
   | "business"
   | "invoice"
   | "tax"
   | "workspace"
-  | "permissions";
+  | "permissions"
+  | "migration"
+  | "storage";
 
 type WorkspaceSettings = {
   workspaceId: string;
@@ -234,6 +238,12 @@ function SettingsWorkspacePanel({
           className={tabClass("permissions")}
         >
           Permissions
+        </button>
+        <button onClick={() => setTab("migration")} className={tabClass("migration")}>
+          Data Migration
+        </button>
+        <button onClick={() => setTab("storage")} className={tabClass("storage")}>
+          Storage
         </button>
       </div>
 
@@ -554,10 +564,15 @@ function SettingsWorkspacePanel({
 
       {tab === "permissions" && (
         <PermissionsSettings
+          activeWorkspaceId={activeWorkspaceId}
           activeWorkspaceName={activeWorkspaceName}
           setSavedNotice={showSavedNotice}
         />
       )}
+
+      {tab === "migration" && <DataMigrationSettings />}
+
+      {tab === "storage" && <StorageSettings workspaceId={activeWorkspaceId} />}
     </div>
   );
 }

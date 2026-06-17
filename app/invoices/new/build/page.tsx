@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
+import { useAuthSession } from "@/components/AuthSessionProvider";
 import { useWorkspace } from "@/components/WorkspaceContext";
 import {
   readStoredJson,
@@ -11,6 +12,11 @@ import {
   storageKeys,
   useStoredJsonState,
 } from "@/lib/clientStorage";
+import { createClientsRepository } from "@/lib/db/clients";
+import { createInvoicesRepository } from "@/lib/db/invoices";
+import type { ClientRow as SharedClientRow } from "@/lib/clientTypes";
+import type { InvoiceRow as SharedInvoiceRow } from "@/lib/frontierInvoices";
+import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 
 
 type InvoiceStatus = "Draft" | "Sent" | "Overdue" | "Paid";
@@ -136,6 +142,8 @@ function getFallbackDraft(activeWorkspace: { id: string; name: string }) {
 export default function InvoiceBuilderPage() {
   const router = useRouter();
   const { activeWorkspace } = useWorkspace();
+  const { isSupabaseConfigured, user } = useAuthSession();
+  const isDatabaseMode = Boolean(isSupabaseConfigured && user);
   const [savedInvoices, setSavedInvoices] = useStoredJsonState<InvoiceRow[]>(
     storageKeys.invoices,
     []
@@ -144,6 +152,9 @@ export default function InvoiceBuilderPage() {
     storageKeys.clients,
     []
   );
+  const supabase = useMemo(() => (isDatabaseMode ? createBrowserSupabaseClient() : null), [isDatabaseMode]);
+  const invoicesRepo = useMemo(() => createInvoicesRepository({ isSignedIn: isDatabaseMode, supabase, localInvoices: savedInvoices as unknown as SharedInvoiceRow[], setLocalInvoices: setSavedInvoices as unknown as (value: SharedInvoiceRow[] | ((current: SharedInvoiceRow[]) => SharedInvoiceRow[])) => void }), [isDatabaseMode, savedInvoices, setSavedInvoices, supabase]);
+  const clientsRepo = useMemo(() => createClientsRepository({ isSignedIn: isDatabaseMode, supabase, localClients: savedClients as SharedClientRow[], setLocalClients: setSavedClients as unknown as (value: SharedClientRow[] | ((current: SharedClientRow[]) => SharedClientRow[])) => void }), [isDatabaseMode, savedClients, setSavedClients, supabase]);
 
   const [draft] = useState<InvoiceSetupDraft>(() => {
     return (
@@ -214,7 +225,7 @@ export default function InvoiceBuilderPage() {
     );
   }
 
-  function upsertClientFromInvoice(invoice: InvoiceRow) {
+  async function upsertClientFromInvoice(invoice: InvoiceRow) {
     const existingClients = savedClients;
     const existingClientId = cleanText(invoice.sourceClientId);
 
@@ -243,7 +254,8 @@ export default function InvoiceBuilderPage() {
           : client
       );
 
-      setSavedClients(updatedClients);
+      if (!isDatabaseMode) setSavedClients(updatedClients);
+      else await clientsRepo.updateClient(updatedClients.find((client) => client.id === matchingClientById.id) as SharedClientRow);
       return matchingClientById.id;
     }
 
@@ -275,7 +287,8 @@ export default function InvoiceBuilderPage() {
           : client
       );
 
-      setSavedClients(updatedClients);
+      if (!isDatabaseMode) setSavedClients(updatedClients);
+      else await clientsRepo.updateClient(updatedClients.find((client) => client.id === matchingClient.id) as SharedClientRow);
       return matchingClient.id;
     }
 
@@ -294,11 +307,12 @@ export default function InvoiceBuilderPage() {
       notes: `Created from ${invoice.invoiceNumber}`,
     };
 
-    setSavedClients([...existingClients, newClient]);
+    await clientsRepo.createClient(newClient as SharedClientRow);
+    if (!isDatabaseMode) setSavedClients([...existingClients, newClient]);
     return newClient.id;
   }
 
-  function saveInvoice() {
+  async function saveInvoice() {
     if (!draft) return;
 
     const validLineItems = lineItems.filter(
@@ -360,7 +374,7 @@ export default function InvoiceBuilderPage() {
       contactMessage: draft.contactMessage ?? "",
     };
 
-    const resolvedClientId = upsertClientFromInvoice(invoiceBeforeClientUpdate);
+    const resolvedClientId = await upsertClientFromInvoice(invoiceBeforeClientUpdate);
 
     const savedInvoice: InvoiceRow = {
       ...invoiceBeforeClientUpdate,
@@ -372,7 +386,9 @@ export default function InvoiceBuilderPage() {
       savedInvoice,
     ];
 
-    setSavedInvoices(updatedInvoices);
+    const saved = await invoicesRepo.createInvoice(savedInvoice as unknown as SharedInvoiceRow);
+    if (!saved) return;
+    if (!isDatabaseMode) setSavedInvoices(updatedInvoices);
     removeStoredValue(storageKeys.invoiceDraft);
     router.push(`/invoices/${savedInvoice.id}`);
   }

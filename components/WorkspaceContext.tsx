@@ -126,6 +126,12 @@ export function WorkspaceProvider({
 
       if (profileError) throw profileError;
 
+      const { error: inviteError } = await supabase.rpc(
+        "accept_workspace_invites_for_current_user"
+      );
+
+      if (inviteError) throw inviteError;
+
       const { data: membershipRows, error: membershipError } = await supabase
         .from("workspace_members")
         .select("workspace_id, workspaces(id, name, type)")

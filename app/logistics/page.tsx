@@ -1,11 +1,15 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
+import { useAuthSession } from "@/components/AuthSessionProvider";
 import { useWorkspace } from "@/components/WorkspaceContext";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
 import type { ClientRow } from "@/lib/clientTypes";
+import { createClientsRepository } from "@/lib/db/clients";
+import { createRoutesRepository, type RoutePlan } from "@/lib/db/routes";
+import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import {
   buildLogisticsLocations,
   getClientFullAddress,
@@ -21,13 +25,31 @@ const clientStatuses = ["All", "Lead", "Active", "Inactive"];
 
 export default function LogisticsPage() {
   const { activeWorkspace } = useWorkspace();
+  const { isSupabaseConfigured, user } = useAuthSession();
+  const isDatabaseMode = Boolean(isSupabaseConfigured && user);
 
   const [selectedStatus, setSelectedStatus] = useState("All");
   const [selectedLocationIds, setSelectedLocationIds] = useState<string[]>([]);
-  const [clients] = useStoredJsonState<ClientRow[]>(
+  const [localClients, setLocalClients] = useStoredJsonState<ClientRow[]>(
     storageKeys.clients,
     []
   );
+  const [databaseClients, setDatabaseClients] = useState<ClientRow[]>([]);
+  const [routes, setRoutes] = useState<RoutePlan[]>([]);
+
+  const supabase = useMemo(() => (isDatabaseMode ? createBrowserSupabaseClient() : null), [isDatabaseMode]);
+  const clientsRepo = useMemo(() => createClientsRepository({ isSignedIn: isDatabaseMode, supabase, localClients, setLocalClients }), [isDatabaseMode, localClients, setLocalClients, supabase]);
+  const routesRepo = useMemo(() => createRoutesRepository({ isSignedIn: isDatabaseMode, supabase }), [isDatabaseMode, supabase]);
+  const clients = isDatabaseMode ? databaseClients : localClients;
+
+  useEffect(() => {
+    if (!isDatabaseMode) return;
+    let cancelled = false;
+    Promise.all([clientsRepo.getClients(activeWorkspace.id), routesRepo.getRoutes(activeWorkspace.id)]).then(([loadedClients, loadedRoutes]) => {
+      if (!cancelled) { setDatabaseClients(loadedClients); setRoutes(loadedRoutes); }
+    });
+    return () => { cancelled = true; };
+  }, [activeWorkspace.id, clientsRepo, isDatabaseMode, routesRepo]);
 
   const workspaceClients = useMemo(() => {
     return clients.filter(
@@ -107,6 +129,25 @@ export default function LogisticsPage() {
   }
 
   const googleMapsUrl = buildGoogleMapsUrl(selectedLocations);
+
+  async function saveRoute() {
+    if (!isDatabaseMode || selectedLocations.length === 0) return;
+    const route: RoutePlan = {
+      id: crypto.randomUUID(),
+      workspaceId: activeWorkspace.id,
+      name: `Route ${new Date().toLocaleDateString()}`,
+      googleMapsUrl,
+      stops: selectedLocations.map((location, index) => ({
+        clientId: location.id,
+        stopOrder: index + 1,
+        latitude: location.latitude,
+        longitude: location.longitude,
+        addressSnapshot: getClientFullAddress(location),
+      })),
+    };
+    const created = await routesRepo.createRoute(route);
+    if (created) setRoutes((current) => [created, ...current]);
+  }
 
   return (
     <div className="space-y-8">
@@ -198,7 +239,24 @@ export default function LogisticsPage() {
               >
                 Clear Route
               </button>
+
+              {isDatabaseMode && (
+                <button
+                  type="button"
+                  onClick={saveRoute}
+                  disabled={selectedLocations.length === 0}
+                  className="w-full rounded-lg border border-green-600 px-4 py-2 text-sm font-semibold text-green-700 hover:bg-green-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-green-300 dark:hover:bg-green-950/30 sm:w-auto"
+                >
+                  Save Route
+                </button>
+              )}
             </div>
+
+            {routes.length > 0 && (
+              <div className="mt-4 rounded-lg bg-gray-50 p-3 text-sm text-gray-600 dark:bg-gray-800 dark:text-gray-300">
+                {routes.length} saved route{routes.length === 1 ? "" : "s"}
+              </div>
+            )}
 
             <div className="mt-6 space-y-3">
               {visibleLocations.length > 0 ? (

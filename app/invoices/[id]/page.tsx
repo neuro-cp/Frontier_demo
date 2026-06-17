@@ -1,10 +1,12 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 
+import { useAuthSession } from "@/components/AuthSessionProvider";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
+import { createInvoicesRepository } from "@/lib/db/invoices";
 import {
   formatMoneyNumber,
   getInvoiceTotals,
@@ -13,6 +15,7 @@ import {
   InvoiceRow,
   moneyToNumber,
 } from "@/lib/frontierInvoices";
+import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 
 const borderColor = "#9ca3af";
 const headerBlue = "#dbeafe";
@@ -21,15 +24,28 @@ const amountColumnWidth = "144px";
 export default function InvoiceDetailPage() {
   const params = useParams();
   const invoiceId = String(params.id);
+  const { isSupabaseConfigured, user } = useAuthSession();
+  const isDatabaseMode = Boolean(isSupabaseConfigured && user);
 
-  const [invoices] = useStoredJsonState<InvoiceRow[]>(
+  const [localInvoices, setLocalInvoices] = useStoredJsonState<InvoiceRow[]>(
     storageKeys.invoices,
     []
   );
+  const [databaseInvoice, setDatabaseInvoice] = useState<InvoiceRow | null>(null);
+
+  const supabase = useMemo(() => (isDatabaseMode ? createBrowserSupabaseClient() : null), [isDatabaseMode]);
+  const invoicesRepo = useMemo(() => createInvoicesRepository({ isSignedIn: isDatabaseMode, supabase, localInvoices, setLocalInvoices }), [isDatabaseMode, localInvoices, setLocalInvoices, supabase]);
 
   const invoice = useMemo(() => {
-    return invoices.find((item) => item.id === invoiceId);
-  }, [invoices, invoiceId]);
+    return isDatabaseMode ? databaseInvoice : localInvoices.find((item) => item.id === invoiceId);
+  }, [databaseInvoice, invoiceId, isDatabaseMode, localInvoices]);
+
+  useEffect(() => {
+    if (!isDatabaseMode) return;
+    let cancelled = false;
+    invoicesRepo.getInvoiceById(invoiceId).then((item) => { if (!cancelled) setDatabaseInvoice(item); });
+    return () => { cancelled = true; };
+  }, [invoiceId, invoicesRepo, isDatabaseMode]);
 
   if (!invoice) {
     return (

@@ -1,21 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
+import { useAuthSession } from "@/components/AuthSessionProvider";
 import type { Job } from "@/lib/jobTypes";
 import { useWorkspace } from "@/components/WorkspaceContext";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
 import type { ClientRow } from "@/lib/clientTypes";
-
-type ClientCalendarEvent = {
-  id: string;
-  workspaceId: string;
-  clientId: string;
-  clientName: string;
-  title: string;
-  date: string;
-};
+import { createCalendarEventsRepository, type ClientCalendarEvent } from "@/lib/db/calendarEvents";
+import { createClientsRepository } from "@/lib/db/clients";
+import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 
 function getJobColor(status: string) {
   switch (status) {
@@ -47,16 +42,20 @@ function formatDateString(date: Date) {
 
 export default function CalendarPage() {
   const { activeWorkspace } = useWorkspace();
+  const { isSupabaseConfigured, user } = useAuthSession();
+  const isDatabaseMode = Boolean(isSupabaseConfigured && user);
 
   const [view, setView] = useState("month");
   const [jobItems] = useStoredJsonState<Job[]>(storageKeys.jobs, []);
-  const [clientItems] = useStoredJsonState<ClientRow[]>(
+  const [localClientItems, setLocalClientItems] = useStoredJsonState<ClientRow[]>(
     storageKeys.clients,
     []
   );
-  const [clientEvents, setClientEvents] = useStoredJsonState<
+  const [localClientEvents, setLocalClientEvents] = useStoredJsonState<
     ClientCalendarEvent[]
   >(storageKeys.clientCalendarEvents, []);
+  const [databaseClientItems, setDatabaseClientItems] = useState<ClientRow[]>([]);
+  const [databaseClientEvents, setDatabaseClientEvents] = useState<ClientCalendarEvent[]>([]);
   const [currentMonth, setCurrentMonth] = useState(() => {
     const today = new Date();
     return new Date(today.getFullYear(), today.getMonth(), 1);
@@ -66,6 +65,21 @@ export default function CalendarPage() {
   const [clientEventClientId, setClientEventClientId] = useState("");
   const [clientEventTitle, setClientEventTitle] = useState("");
   const [clientEventDate, setClientEventDate] = useState("");
+
+  const supabase = useMemo(() => (isDatabaseMode ? createBrowserSupabaseClient() : null), [isDatabaseMode]);
+  const eventsRepo = useMemo(() => createCalendarEventsRepository({ isSignedIn: isDatabaseMode, supabase, localEvents: localClientEvents, setLocalEvents: setLocalClientEvents }), [isDatabaseMode, localClientEvents, setLocalClientEvents, supabase]);
+  const clientsRepo = useMemo(() => createClientsRepository({ isSignedIn: isDatabaseMode, supabase, localClients: localClientItems, setLocalClients: setLocalClientItems }), [isDatabaseMode, localClientItems, setLocalClientItems, supabase]);
+  const clientItems = isDatabaseMode ? databaseClientItems : localClientItems;
+  const clientEvents = isDatabaseMode ? databaseClientEvents : localClientEvents;
+
+  useEffect(() => {
+    if (!isDatabaseMode) return;
+    let cancelled = false;
+    Promise.all([clientsRepo.getClients(activeWorkspace.id), eventsRepo.getEvents(activeWorkspace.id)]).then(([clients, events]) => {
+      if (!cancelled) { setDatabaseClientItems(clients); setDatabaseClientEvents(events); }
+    });
+    return () => { cancelled = true; };
+  }, [activeWorkspace.id, clientsRepo, eventsRepo, isDatabaseMode]);
 
   const workspaceClients = clientItems.filter(
     (client) => client.workspaceId === activeWorkspace.id
@@ -106,7 +120,8 @@ export default function CalendarPage() {
   }
 
   function saveClientEvents(updatedEvents: ClientCalendarEvent[]) {
-    setClientEvents(updatedEvents);
+    if (isDatabaseMode) setDatabaseClientEvents(updatedEvents);
+    else setLocalClientEvents(updatedEvents);
   }
 
   function closeClientEventModal() {
@@ -116,7 +131,7 @@ export default function CalendarPage() {
     setClientEventDate("");
   }
 
-  function addClientEvent() {
+  async function addClientEvent() {
     const selectedClient = workspaceClients.find((client) => client.id === clientEventClientId);
     if (!selectedClient || !clientEventDate) return;
 
@@ -129,7 +144,10 @@ export default function CalendarPage() {
       date: clientEventDate,
     };
 
-    saveClientEvents([...clientEvents, newEvent]);
+    const created = await eventsRepo.createEvent(newEvent);
+    if (!created) return;
+    if (isDatabaseMode) setDatabaseClientEvents((current) => [...current, created]);
+    else saveClientEvents([...clientEvents, created]);
     closeClientEventModal();
   }
 

@@ -1,9 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import Sidebar from "./Sidebar";
+import { useAuthSession } from "@/components/AuthSessionProvider";
 import { useWorkspace } from "@/components/WorkspaceContext";
 import { storageKeys, useStoredJsonState, useStoredStringState } from "@/lib/clientStorage";
+import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { defaultBusinessTypes } from "@/lib/workspaceOptions";
 
 type WorkspaceDisplaySettings = {
@@ -33,6 +36,7 @@ function getUserInitials(name: string) {
 }
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
+  const { user } = useAuthSession();
   const [theme, setTheme] = useStoredStringState(storageKeys.theme, "dark");
   const [allDisplaySettings] = useStoredJsonState<WorkspaceDisplaySettings[]>(
     storageKeys.settings,
@@ -41,6 +45,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const [userOpen, setUserOpen] = useState(false);
   const [newWorkspaceOpen, setNewWorkspaceOpen] = useState(false);
+  const [platformAdminCheck, setPlatformAdminCheck] = useState<{
+    userId: string;
+    isAdmin: boolean;
+  } | null>(null);
 
   const [workspaceName, setWorkspaceName] = useState("");
   const [workspaceType, setWorkspaceType] = useState<string>(
@@ -66,6 +74,29 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     document.documentElement.classList.toggle("dark", darkMode);
   }, [darkMode]);
 
+  useEffect(() => {
+    if (!user) {
+      return;
+    }
+
+    let cancelled = false;
+    const supabase = createBrowserSupabaseClient();
+
+    supabase.rpc("is_platform_admin").then(({ data, error }) => {
+      if (error) console.error("Unable to verify platform admin access.", error);
+      if (!cancelled) {
+        setPlatformAdminCheck({
+          userId: user.id,
+          isAdmin: Boolean(data),
+        });
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
+
   const displayedWorkspaceName =
     displaySettings?.workspaceNickname?.trim() || activeWorkspace.name;
 
@@ -73,14 +104,18 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     displaySettings?.businessType?.trim() || activeWorkspace.type;
 
   const displayedUserName =
-    displaySettings?.userDisplayName?.trim() || localUserFallback.name;
+    user?.email || displaySettings?.userDisplayName?.trim() || localUserFallback.name;
 
   const displayedUserEmail =
-    displaySettings?.userEmail?.trim() || localUserFallback.email;
+    user?.email || displaySettings?.userEmail?.trim() || localUserFallback.email;
 
   const displayedWorkspaceInitials =
     getWorkspaceInitials(displayedWorkspaceName);
   const displayedUserInitials = getUserInitials(displayedUserName);
+  const isPlatformAdmin =
+    Boolean(user) &&
+    platformAdminCheck?.userId === user?.id &&
+    Boolean(platformAdminCheck?.isAdmin);
 
   function toggleDarkMode() {
     const nextMode = !darkMode;
@@ -144,6 +179,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       (item) => item.workspaceId === workspace.id
     );
     return saved?.businessType?.trim() || workspace.type;
+  }
+
+  async function signOut() {
+    const supabase = createBrowserSupabaseClient();
+    await supabase.auth.signOut();
+    window.location.href = "/";
   }
 
   return (
@@ -260,14 +301,31 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                   {displayedWorkspaceType}
                 </div>
 
-                <button
-                  type="button"
-                  disabled
-                  className="flex w-full cursor-not-allowed items-center gap-4 px-4 py-4 text-left text-gray-400 dark:text-gray-500"
-                >
-                  <span className="text-xl">Out</span>
-                  <span className="font-medium">Sign Out Coming With Auth</span>
-                </button>
+                {user ? (
+                  <div className="grid grid-cols-1">
+                    {isPlatformAdmin && (
+                      <Link
+                        href="/frontier-admin"
+                        className="px-4 py-3 font-medium hover:bg-gray-100 dark:hover:bg-gray-800"
+                        onClick={() => setUserOpen(false)}
+                      >
+                        Frontier Admin
+                      </Link>
+                    )}
+                    <button
+                      type="button"
+                      onClick={signOut}
+                      className="flex w-full items-center gap-4 px-4 py-4 text-left hover:bg-gray-100 dark:hover:bg-gray-800"
+                    >
+                      <span className="font-medium">Sign Out</span>
+                    </button>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1">
+                    <Link href="/login" className="px-4 py-3 font-medium hover:bg-gray-100 dark:hover:bg-gray-800">Sign In</Link>
+                    <Link href="/signup" className="px-4 py-3 font-medium hover:bg-gray-100 dark:hover:bg-gray-800">Create Account</Link>
+                  </div>
+                )}
               </div>
             )}
           </div>

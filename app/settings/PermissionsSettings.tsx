@@ -1,10 +1,25 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+
+import { useAuthSession } from "@/components/AuthSessionProvider";
+import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 
 type PermissionsSettingsProps = {
+  activeWorkspaceId: string;
   activeWorkspaceName: string;
   setSavedNotice: (message: string) => void;
+};
+
+type WorkspaceRole = "Owner" | "Manager" | "Employee";
+type MemberRow = {
+  id: string;
+  user_id: string | null;
+  role: WorkspaceRole;
+  status: "Active" | "Invited" | "Removed";
+  invited_email: string | null;
+  created_at: string;
+  profiles?: { email: string | null; display_name: string | null } | null;
 };
 
 const roles = [
@@ -35,28 +50,181 @@ const labelClass =
   "mb-2 block text-sm font-semibold text-gray-800 dark:text-gray-100";
 
 export default function PermissionsSettings({
+  activeWorkspaceId,
   activeWorkspaceName,
   setSavedNotice,
 }: PermissionsSettingsProps) {
+  const { user } = useAuthSession();
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
-  const [inviteRole, setInviteRole] = useState("Employee");
+  const [inviteRole, setInviteRole] = useState<WorkspaceRole>("Employee");
+  const [inviteInstruction, setInviteInstruction] = useState("");
+  const [isInviting, setIsInviting] = useState(false);
+  const [members, setMembers] = useState<MemberRow[]>([]);
+
+  const supabase = useMemo(() => (user ? createBrowserSupabaseClient() : null), [user]);
+  const currentMember = members.find((member) => member.user_id === user?.id);
+  const canManageMembers =
+    currentMember?.role === "Owner" || currentMember?.role === "Manager";
+
+  useEffect(() => {
+    if (!supabase) return;
+    let cancelled = false;
+    supabase
+      .from("workspace_members")
+      .select("id, user_id, role, status, invited_email, created_at, profiles(email, display_name)")
+      .eq("workspace_id", activeWorkspaceId)
+      .neq("status", "Removed")
+      .then(({ data, error }) => {
+        if (error) console.error("Unable to load members.", error);
+        if (!cancelled) setMembers((data ?? []) as unknown as MemberRow[]);
+      });
+    return () => { cancelled = true; };
+  }, [activeWorkspaceId, supabase]);
+
+  if (!user) {
+    return <section className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">Sign in to manage members.</section>;
+  }
 
   function closeInviteModal() {
     setInviteOpen(false);
     setInviteEmail("");
     setInviteRole("Employee");
+    setInviteInstruction("");
+    setIsInviting(false);
   }
 
-  function handleInviteSubmit(event: React.FormEvent<HTMLFormElement>) {
+  function buildInviteInstruction(email: string) {
+    const origin = window.location.origin;
+    return [
+      `${activeWorkspaceName} invited you to Frontier.`,
+      `Use this email address: ${email}`,
+      `Create an account or sign in here: ${origin}/signup`,
+      "After login, Frontier will automatically connect you to the invited workspace.",
+    ].join("\n");
+  }
+
+  async function copyInviteInstruction() {
+    if (!inviteInstruction) return;
+    await navigator.clipboard.writeText(inviteInstruction);
+    setSavedNotice("Invite instructions copied.");
+  }
+
+  async function handleInviteSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!supabase || !user) return;
+    if (!canManageMembers) {
+      setSavedNotice("Only Owners and Managers can invite members.");
+      return;
+    }
+
+    const inviterId = user.id;
+    setIsInviting(true);
+    setInviteInstruction("");
+
+    const normalizedEmail = inviteEmail.trim().toLowerCase();
+    const inviteToken = crypto.randomUUID();
+    const inviteExpiresAt = new Date(
+      Date.now() + 14 * 24 * 60 * 60 * 1000
+    ).toISOString();
+
+    const { data: existingRows, error: lookupError } = await supabase
+      .from("workspace_members")
+      .select("id")
+      .eq("workspace_id", activeWorkspaceId)
+      .eq("status", "Invited")
+      .eq("invited_email", normalizedEmail)
+      .limit(1);
+
+    if (lookupError) {
+      setSavedNotice(lookupError.message);
+      setIsInviting(false);
+      return;
+    }
+
+    const existingInvite = existingRows?.[0] as { id: string } | undefined;
+    const writeQuery = existingInvite
+      ? supabase
+          .from("workspace_members")
+          .update({
+            role: inviteRole,
+            invite_token: inviteToken,
+            invite_expires_at: inviteExpiresAt,
+          })
+          .eq("id", existingInvite.id)
+      : supabase.from("workspace_members").insert({
+          workspace_id: activeWorkspaceId,
+          invited_email: normalizedEmail,
+          invited_by: inviterId,
+          invite_token: inviteToken,
+          invite_expires_at: inviteExpiresAt,
+          role: inviteRole,
+          status: "Invited",
+        });
+
+    const { data, error } = await writeQuery
+      .select("id, user_id, role, status, invited_email, created_at")
+      .single();
+
+    if (error) {
+      setSavedNotice(error.message);
+      setIsInviting(false);
+      return;
+    }
+
+    setMembers((current) => {
+      const nextMember = data as MemberRow;
+      const withoutExisting = current.filter(
+        (member) => member.id !== nextMember.id
+      );
+      return [nextMember, ...withoutExisting];
+    });
+
+    const fallbackInstruction = buildInviteInstruction(normalizedEmail);
+    const { error: emailError } = await supabase.auth.signInWithOtp({
+      email: normalizedEmail,
+      options: {
+        shouldCreateUser: true,
+        emailRedirectTo: `${window.location.origin}/dashboard`,
+      },
+    });
+
+    setIsInviting(false);
+
+    if (emailError) {
+      setInviteInstruction(fallbackInstruction);
+      setSavedNotice(
+        "Invite saved. Email could not be sent, so use the copyable instructions."
+      );
+      return;
+    }
 
     setInviteEmail("");
     setInviteRole("Employee");
     setInviteOpen(false);
+    setSavedNotice("Invite saved and email sent.");
+  }
 
-    setSavedNotice("Invite placeholder saved.");
-    window.setTimeout(() => setSavedNotice(""), 2500);
+  async function updateRole(member: MemberRow, role: WorkspaceRole) {
+    const ownerCount = members.filter((item) => item.role === "Owner" && item.status !== "Removed").length;
+    if (member.role === "Owner" && role !== "Owner" && ownerCount <= 1) {
+      setSavedNotice("Cannot change the last Owner.");
+      return;
+    }
+    const { error } = await supabase!.from("workspace_members").update({ role }).eq("id", member.id);
+    if (error) return setSavedNotice(error.message);
+    setMembers((current) => current.map((item) => item.id === member.id ? { ...item, role } : item));
+  }
+
+  async function removeMember(member: MemberRow) {
+    const ownerCount = members.filter((item) => item.role === "Owner" && item.status !== "Removed").length;
+    if (member.role === "Owner" && ownerCount <= 1) {
+      setSavedNotice("Cannot remove the last Owner.");
+      return;
+    }
+    const { error } = await supabase!.from("workspace_members").update({ status: "Removed" }).eq("id", member.id);
+    if (error) return setSavedNotice(error.message);
+    setMembers((current) => current.filter((item) => item.id !== member.id));
   }
 
   return (
@@ -66,21 +234,40 @@ export default function PermissionsSettings({
           <div>
             <h2 className="text-2xl font-bold">Team Members</h2>
             <p className="mt-2 text-gray-500 dark:text-gray-400">
-              Invite placeholder for {activeWorkspaceName}. Real auth comes later.
+              Invite and manage access for {activeWorkspaceName}.
             </p>
           </div>
 
           <button
             type="button"
             onClick={() => setInviteOpen(true)}
-            className="rounded-lg bg-blue-600 px-5 py-3 font-semibold text-white hover:bg-blue-700"
+            disabled={!canManageMembers}
+            className="rounded-lg bg-blue-600 px-5 py-3 font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-400"
           >
             Invite Member
           </button>
         </div>
 
-        <div className="mt-6 rounded-xl border border-dashed border-gray-300 p-8 text-center text-gray-500 dark:border-gray-700 dark:text-gray-400">
-          No team members saved yet.
+        <div className="mt-6 overflow-x-auto">
+          <table className="w-full min-w-[760px]">
+            <thead><tr className="text-left text-sm text-gray-500"><th className="p-3">Email</th><th className="p-3">Role</th><th className="p-3">Status</th><th className="p-3">Created</th><th className="p-3 text-right">Actions</th></tr></thead>
+            <tbody>
+              {members.map((member) => (
+                <tr key={member.id} className="border-t border-gray-200 dark:border-gray-800">
+                  <td className="p-3">{member.profiles?.email || member.invited_email || member.user_id || "-"}</td>
+                  <td className="p-3">
+                    <select value={member.role} onChange={(e) => updateRole(member, e.target.value as WorkspaceRole)} disabled={!canManageMembers} className={inputClass}>
+                      <option>Owner</option><option>Manager</option><option>Employee</option>
+                    </select>
+                  </td>
+                  <td className="p-3">{member.status}</td>
+                  <td className="p-3">{new Date(member.created_at).toLocaleDateString()}</td>
+                  <td className="p-3 text-right"><button type="button" onClick={() => removeMember(member)} disabled={!canManageMembers} className="rounded-lg bg-red-600 px-3 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-gray-400">Remove</button></td>
+                </tr>
+              ))}
+              {members.length === 0 && <tr><td colSpan={5} className="p-8 text-center text-gray-500">No team members saved yet.</td></tr>}
+            </tbody>
+          </table>
         </div>
       </div>
 
@@ -137,7 +324,7 @@ export default function PermissionsSettings({
                 <label className={labelClass}>Role</label>
                 <select
                   value={inviteRole}
-                  onChange={(event) => setInviteRole(event.target.value)}
+                  onChange={(event) => setInviteRole(event.target.value as WorkspaceRole)}
                   className={inputClass}
                 >
                   <option>Owner</option>
@@ -157,11 +344,32 @@ export default function PermissionsSettings({
 
                 <button
                   type="submit"
-                  className="rounded-lg bg-blue-600 px-5 py-3 font-semibold text-white hover:bg-blue-700"
+                  disabled={isInviting}
+                  className="rounded-lg bg-blue-600 px-5 py-3 font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-400"
                 >
-                  Save Invite Placeholder
+                  {isInviting ? "Sending..." : "Send Invite"}
                 </button>
               </div>
+
+              {inviteInstruction && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-900 dark:bg-amber-950/30">
+                  <p className="text-sm font-semibold text-amber-900 dark:text-amber-100">
+                    Email delivery is not available yet. Share this instead.
+                  </p>
+                  <textarea
+                    readOnly
+                    value={inviteInstruction}
+                    className="mt-3 h-32 w-full rounded-lg border border-amber-200 bg-white p-3 text-sm text-gray-950 dark:border-amber-900 dark:bg-gray-900 dark:text-gray-100"
+                  />
+                  <button
+                    type="button"
+                    onClick={copyInviteInstruction}
+                    className="mt-3 rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-700"
+                  >
+                    Copy Instructions
+                  </button>
+                </div>
+              )}
             </form>
           </div>
         </div>

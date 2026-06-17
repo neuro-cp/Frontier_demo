@@ -1,14 +1,19 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 
+import { useAuthSession } from "@/components/AuthSessionProvider";
 import { useWorkspace } from "@/components/WorkspaceContext";
 import { storageKeys, useStoredJsonState, writeStoredJson } from "@/lib/clientStorage";
+import { createClientsRepository } from "@/lib/db/clients";
+import { createInvoicesRepository } from "@/lib/db/invoices";
+import { createJobsRepository } from "@/lib/db/jobs";
 import type { Job } from "@/lib/jobTypes";
 import type { ClientRow } from "@/lib/clientTypes";
 import { InvoiceRow, InvoiceSetupDraft } from "@/lib/frontierInvoices";
+import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 
 type WorkspaceInvoiceSettings = {
   workspaceId: string;
@@ -52,20 +57,42 @@ function NewInvoiceContent() {
   const searchParams = useSearchParams();
   const startingJobId = searchParams.get("jobId") || "";
   const { activeWorkspace } = useWorkspace();
+  const { isSupabaseConfigured, user } = useAuthSession();
+  const isDatabaseMode = Boolean(isSupabaseConfigured && user);
 
-  const [clientItems] = useStoredJsonState<ClientRow[]>(
+  const [localClientItems, setLocalClientItems] = useStoredJsonState<ClientRow[]>(
     storageKeys.clients,
     []
   );
-  const [jobItems] = useStoredJsonState<Job[]>(storageKeys.jobs, []);
-  const [savedInvoices] = useStoredJsonState<InvoiceRow[]>(
+  const [localJobItems, setLocalJobItems] = useStoredJsonState<Job[]>(storageKeys.jobs, []);
+  const [localSavedInvoices, setLocalSavedInvoices] = useStoredJsonState<InvoiceRow[]>(
     storageKeys.invoices,
     []
   );
+  const [databaseClientItems, setDatabaseClientItems] = useState<ClientRow[]>([]);
+  const [databaseJobItems, setDatabaseJobItems] = useState<Job[]>([]);
+  const [databaseSavedInvoices, setDatabaseSavedInvoices] = useState<InvoiceRow[]>([]);
   const [workspaceSettings] = useStoredJsonState<WorkspaceInvoiceSettings[]>(
     storageKeys.settings,
     []
   );
+
+  const supabase = useMemo(() => (isDatabaseMode ? createBrowserSupabaseClient() : null), [isDatabaseMode]);
+  const clientsRepo = useMemo(() => createClientsRepository({ isSignedIn: isDatabaseMode, supabase, localClients: localClientItems, setLocalClients: setLocalClientItems }), [isDatabaseMode, localClientItems, setLocalClientItems, supabase]);
+  const jobsRepo = useMemo(() => createJobsRepository({ isSignedIn: isDatabaseMode, supabase, localJobs: localJobItems, setLocalJobs: setLocalJobItems }), [isDatabaseMode, localJobItems, setLocalJobItems, supabase]);
+  const invoicesRepo = useMemo(() => createInvoicesRepository({ isSignedIn: isDatabaseMode, supabase, localInvoices: localSavedInvoices, setLocalInvoices: setLocalSavedInvoices }), [isDatabaseMode, localSavedInvoices, setLocalSavedInvoices, supabase]);
+  const clientItems = isDatabaseMode ? databaseClientItems : localClientItems;
+  const jobItems = isDatabaseMode ? databaseJobItems : localJobItems;
+  const savedInvoices = isDatabaseMode ? databaseSavedInvoices : localSavedInvoices;
+
+  useEffect(() => {
+    if (!isDatabaseMode) return;
+    let cancelled = false;
+    Promise.all([clientsRepo.getClients(activeWorkspace.id), jobsRepo.getJobs(activeWorkspace.id), invoicesRepo.getInvoices(activeWorkspace.id)]).then(([clients, jobs, invoices]) => {
+      if (!cancelled) { setDatabaseClientItems(clients); setDatabaseJobItems(jobs); setDatabaseSavedInvoices(invoices); }
+    });
+    return () => { cancelled = true; };
+  }, [activeWorkspace.id, clientsRepo, invoicesRepo, isDatabaseMode, jobsRepo]);
 
   const workspaceClients = clientItems.filter(
     (client) => client.workspaceId === activeWorkspace.id

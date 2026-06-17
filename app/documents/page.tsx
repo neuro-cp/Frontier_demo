@@ -1,21 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useAuthSession } from "@/components/AuthSessionProvider";
 import { useWorkspace } from "@/components/WorkspaceContext";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
-
-type StoredDocument = {
-  id: string;
-  workspaceId: string;
-  name: string;
-  detectedType: string;
-  extractionStatus: string;
-  fileName: string;
-  notes: string;
-  clientId: string;
-  jobId: string;
-  createdAt: string;
-};
+import { createDocumentsRepository, type StoredDocument } from "@/lib/db/documents";
+import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 
 type ClientLike = {
   id: string;
@@ -38,12 +28,15 @@ function getJobDisplayName(job: JobLike) {
 
 export default function DocumentsPage() {
   const { activeWorkspace } = useWorkspace();
+  const { isSupabaseConfigured, user } = useAuthSession();
+  const isDatabaseMode = Boolean(isSupabaseConfigured && user);
 
   const [isUploadOpen, setIsUploadOpen] = useState(false);
-  const [documents, setDocuments] = useStoredJsonState<StoredDocument[]>(
+  const [localDocuments, setLocalDocuments] = useStoredJsonState<StoredDocument[]>(
     storageKeys.documents,
     []
   );
+  const [databaseDocuments, setDatabaseDocuments] = useState<StoredDocument[]>([]);
   const [clients] = useStoredJsonState<ClientLike[]>(
     storageKeys.clients,
     []
@@ -56,9 +49,22 @@ export default function DocumentsPage() {
   const [documentName, setDocumentName] = useState("");
   const [detectedType, setDetectedType] = useState("Pending");
   const [fileName, setFileName] = useState("");
+  const [mimeType, setMimeType] = useState("");
+  const [sizeBytes, setSizeBytes] = useState(0);
   const [notes, setNotes] = useState("");
   const [clientId, setClientId] = useState("");
   const [jobId, setJobId] = useState("");
+
+  const supabase = useMemo(() => (isDatabaseMode ? createBrowserSupabaseClient() : null), [isDatabaseMode]);
+  const documentsRepo = useMemo(() => createDocumentsRepository({ isSignedIn: isDatabaseMode, supabase, localDocuments, setLocalDocuments }), [isDatabaseMode, localDocuments, setLocalDocuments, supabase]);
+  const documents = isDatabaseMode ? databaseDocuments : localDocuments;
+
+  useEffect(() => {
+    if (!isDatabaseMode) return;
+    let cancelled = false;
+    documentsRepo.getDocuments(activeWorkspace.id).then((items) => { if (!cancelled) setDatabaseDocuments(items); });
+    return () => { cancelled = true; };
+  }, [activeWorkspace.id, documentsRepo, isDatabaseMode]);
 
   const workspaceDocuments = documents.filter(
     (document) => document.workspaceId === activeWorkspace.id
@@ -94,6 +100,8 @@ export default function DocumentsPage() {
     setDocumentName("");
     setDetectedType("Pending");
     setFileName("");
+    setMimeType("");
+    setSizeBytes(0);
     setNotes("");
     setClientId("");
     setJobId("");
@@ -109,7 +117,7 @@ export default function DocumentsPage() {
     setJobId("");
   }
 
-  function saveUploadPlaceholder() {
+  async function saveUploadPlaceholder() {
     if (!documentName.trim()) return;
 
     const newDocument: StoredDocument = {
@@ -119,24 +127,27 @@ export default function DocumentsPage() {
       detectedType,
       extractionStatus: "Waiting for extraction",
       fileName: fileName || "No file selected",
+      mimeType,
+      sizeBytes,
+      storageBucket: "",
+      storagePath: "",
+      storageStatus: "Pending storage setup",
       notes: notes.trim(),
       clientId,
       jobId,
       createdAt: new Date().toISOString(),
     };
 
-    const updatedDocuments = [newDocument, ...documents];
-
-    setDocuments(updatedDocuments);
+    const created = await documentsRepo.createDocument(newDocument);
+    if (!created) return;
+    if (isDatabaseMode) setDatabaseDocuments((current) => [created, ...current]);
     closeUploadModal();
   }
 
-  function deleteDocument(documentId: string) {
-    const updatedDocuments = documents.filter(
-      (document) => document.id !== documentId
-    );
-
-    setDocuments(updatedDocuments);
+  async function deleteDocument(documentId: string) {
+    const deleted = await documentsRepo.deleteDocument(documentId);
+    if (!deleted) return;
+    if (isDatabaseMode) setDatabaseDocuments((current) => current.filter((document) => document.id !== documentId));
   }
 
   function getClientName(documentClientId: string) {
@@ -180,6 +191,7 @@ export default function DocumentsPage() {
               <th className="px-6 py-4">Client</th>
               <th className="px-6 py-4">Job</th>
               <th className="px-6 py-4">File</th>
+              <th className="px-6 py-4">Storage</th>
               <th className="px-6 py-4 text-right">Actions</th>
             </tr>
           </thead>
@@ -188,7 +200,7 @@ export default function DocumentsPage() {
             {workspaceDocuments.length === 0 ? (
               <tr>
                 <td
-                  colSpan={7}
+                  colSpan={8}
                   className="px-6 py-16 text-center text-2xl text-gray-500 dark:text-gray-400"
                 >
                   No documents uploaded for {activeWorkspace.name}
@@ -222,6 +234,13 @@ export default function DocumentsPage() {
 
                   <td className="px-6 py-4 text-gray-600 dark:text-gray-300">
                     {document.fileName}
+                  </td>
+
+                  <td className="px-6 py-4 text-gray-600 dark:text-gray-300">
+                    <div>{document.storageStatus || "Pending storage setup"}</div>
+                    <div className="text-xs text-gray-500">
+                      {document.mimeType || "No MIME type"} {document.sizeBytes ? `- ${document.sizeBytes} bytes` : ""}
+                    </div>
                   </td>
 
                   <td className="px-6 py-4 text-right">
@@ -365,9 +384,12 @@ export default function DocumentsPage() {
 
                 <input
                   type="file"
-                  onChange={(event) =>
-                    setFileName(event.target.files?.[0]?.name ?? "")
-                  }
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    setFileName(file?.name ?? "");
+                    setMimeType(file?.type ?? "");
+                    setSizeBytes(file?.size ?? 0);
+                  }}
                   className="block w-full text-sm text-gray-900 dark:text-gray-100"
                 />
               </div>

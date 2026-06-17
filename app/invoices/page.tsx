@@ -1,10 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
+import { useAuthSession } from "@/components/AuthSessionProvider";
 import { useWorkspace } from "@/components/WorkspaceContext";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
+import { createInvoicesRepository } from "@/lib/db/invoices";
 import {
   formatCurrency,
   getInvoiceClientName,
@@ -13,16 +15,31 @@ import {
   invoiceStatuses,
   InvoiceStatus,
 } from "@/lib/frontierInvoices";
+import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 
 export default function InvoicesPage() {
   const { activeWorkspace } = useWorkspace();
+  const { isSupabaseConfigured, user } = useAuthSession();
+  const isDatabaseMode = Boolean(isSupabaseConfigured && user);
 
-  const [invoices, setInvoices] = useStoredJsonState<InvoiceRow[]>(
+  const [localInvoices, setLocalInvoices] = useStoredJsonState<InvoiceRow[]>(
     storageKeys.invoices,
     []
   );
+  const [databaseInvoices, setDatabaseInvoices] = useState<InvoiceRow[]>([]);
   const [selectedInvoices, setSelectedInvoices] = useState<string[]>([]);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+
+  const supabase = useMemo(() => (isDatabaseMode ? createBrowserSupabaseClient() : null), [isDatabaseMode]);
+  const invoicesRepo = useMemo(() => createInvoicesRepository({ isSignedIn: isDatabaseMode, supabase, localInvoices, setLocalInvoices }), [isDatabaseMode, localInvoices, setLocalInvoices, supabase]);
+  const invoices = isDatabaseMode ? databaseInvoices : localInvoices;
+
+  useEffect(() => {
+    if (!isDatabaseMode) return;
+    let cancelled = false;
+    invoicesRepo.getInvoices(activeWorkspace.id).then((items) => { if (!cancelled) setDatabaseInvoices(items); });
+    return () => { cancelled = true; };
+  }, [activeWorkspace.id, invoicesRepo, isDatabaseMode]);
 
   const workspaceInvoices = invoices.filter(
     (invoice) => invoice.workspaceId === activeWorkspace.id
@@ -33,7 +50,8 @@ export default function InvoicesPage() {
     .reduce((total, invoice) => total + getInvoiceTotals(invoice).total, 0);
 
   function saveInvoices(updatedInvoices: InvoiceRow[]) {
-    setInvoices(updatedInvoices);
+    if (isDatabaseMode) setDatabaseInvoices(updatedInvoices);
+    else setLocalInvoices(updatedInvoices);
   }
 
   function toggleInvoice(id: string) {
@@ -49,21 +67,20 @@ export default function InvoicesPage() {
     setShowDeleteModal(true);
   }
 
-  function removeSelectedInvoices() {
-    saveInvoices(
-      invoices.filter((invoice) => !selectedInvoices.includes(invoice.id))
-    );
-
+  async function removeSelectedInvoices() {
+    const deleted = await Promise.all(selectedInvoices.map((id) => invoicesRepo.deleteInvoice(id)));
+    const deletedIds = selectedInvoices.filter((_, index) => deleted[index]);
+    saveInvoices(invoices.filter((invoice) => !deletedIds.includes(invoice.id)));
     setSelectedInvoices([]);
     setShowDeleteModal(false);
   }
 
-  function updateInvoiceStatus(id: string, nextStatus: InvoiceStatus) {
-    saveInvoices(
-      invoices.map((invoice) =>
-        invoice.id === id ? { ...invoice, status: nextStatus } : invoice
-      )
-    );
+  async function updateInvoiceStatus(id: string, nextStatus: InvoiceStatus) {
+    const invoice = invoices.find((item) => item.id === id);
+    if (!invoice) return;
+    const saved = await invoicesRepo.updateInvoice({ ...invoice, status: nextStatus });
+    if (!saved) return;
+    saveInvoices(invoices.map((item) => item.id === id ? saved : item));
   }
 
   return (
