@@ -43,7 +43,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [newWorkspaceOpen, setNewWorkspaceOpen] = useState(false);
 
   const [workspaceName, setWorkspaceName] = useState("");
-  const [workspaceType, setWorkspaceType] = useState(defaultBusinessTypes[0]);
+  const [workspaceType, setWorkspaceType] = useState<string>(
+    defaultBusinessTypes[0]
+  );
   const [customWorkspaceType, setCustomWorkspaceType] = useState("");
 
   const {
