@@ -65,14 +65,23 @@ function NewInvoiceContent() {
     .filter((job) => job.workspaceId === activeWorkspace.id)
     .sort((a, b) => a.name.localeCompare(b.name));
 
+  function getClientForJob(job: Job) {
+    if (job.clientId) {
+      const matchedById = workspaceClients.find(
+        (client) => client.id === job.clientId
+      );
+
+      if (matchedById) return matchedById;
+    }
+
+    return workspaceClients.find(
+      (client) =>
+        client.name.trim().toLowerCase() === job.client.trim().toLowerCase()
+    );
+  }
+
   const startingJob = workspaceJobs.find((job) => job.id === startingJobId);
-  const startingClient = startingJob
-    ? workspaceClients.find(
-        (client) =>
-          client.name.trim().toLowerCase() ===
-          startingJob.client.trim().toLowerCase()
-      )
-    : undefined;
+  const startingClient = startingJob ? getClientForJob(startingJob) : undefined;
 
   const [selectedClientId, setSelectedClientId] = useState(
     startingClient?.id ?? "new"
@@ -157,10 +166,7 @@ function NewInvoiceContent() {
 
     setSelectedJobId(selectedJob.id);
 
-    const matchedClient = workspaceClients.find(
-      (client) =>
-        client.name.trim().toLowerCase() === selectedJob.client.trim().toLowerCase()
-    );
+    const matchedClient = getClientForJob(selectedJob);
 
     if (matchedClient) {
       populateBillToFromClient(matchedClient.id);
