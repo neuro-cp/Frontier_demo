@@ -51,12 +51,17 @@
 📁 lib
   📄 clients.ts
   📄 clientStorage.ts
+  📄 clientTypes.ts
+  📁 demo
+    📄 inventory.ts
   📄 expenses.ts
+  📄 expenseTypes.ts
   📄 frontierClients.ts
   📄 frontierInvoices.ts
-  📄 inventory.ts
   📄 jobs.ts
   📄 jobStorage.ts
+  📄 jobTypes.ts
+  📄 workspaceOptions.ts
 📄 next-env.d.ts
 📄 next.config.ts
 📄 package-lock.json
@@ -93,10 +98,10 @@ This version has breaking changes — APIs, conventions, and file structure may 
 import { useState } from "react";
 import Link from "next/link";
 
-import type { Job } from "@/lib/jobs";
+import type { Job } from "@/lib/jobTypes";
 import { useWorkspace } from "@/components/WorkspaceContext";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
-import { ClientRow } from "@/lib/frontierClients";
+import type { ClientRow } from "@/lib/clientTypes";
 
 type ClientCalendarEvent = {
   id: string;
@@ -356,8 +361,8 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
-import type { Job } from "@/lib/jobs";
-import { ClientRow } from "@/lib/frontierClients";
+import type { Job } from "@/lib/jobTypes";
+import type { ClientRow } from "@/lib/clientTypes";
 import {
   formatCurrency,
   getInvoiceTotals,
@@ -501,7 +506,7 @@ import Link from "next/link";
 import { useWorkspace } from "@/components/WorkspaceContext";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
 import { InvoiceRow } from "@/lib/frontierInvoices";
-import type { Job } from "@/lib/jobs";
+import type { Job } from "@/lib/jobTypes";
 
 type ClientRow = {
   id: string;
@@ -572,6 +577,7 @@ function isJobLinkedToClient(job: ClientLinkedJob, client: ClientRow) {
   if (job.workspaceId !== client.workspaceId) return false;
   if (job.clientId) return job.clientId === client.id;
 
+  // Legacy localStorage jobs may only have a client name snapshot.
   return normalizeName(job.client) === normalizeName(client.name);
 }
 
@@ -579,6 +585,7 @@ function isInvoiceLinkedToClient(invoice: InvoiceRow, client: ClientRow) {
   if (invoice.workspaceId !== client.workspaceId) return false;
   if (invoice.sourceClientId) return invoice.sourceClientId === client.id;
 
+  // Legacy/manual invoices may only have bill-to names.
   const clientName = normalizeName(client.name);
 
   return (
@@ -1282,9 +1289,9 @@ import Link from "next/link";
 import StatCard from "../../components/Statcard";
 import { useWorkspace } from "@/components/WorkspaceContext";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
-import type { Job } from "@/lib/jobs";
-import type { ClientRow } from "@/lib/frontierClients";
-import type { Expense } from "@/lib/expenses";
+import type { Job } from "@/lib/jobTypes";
+import type { ClientRow } from "@/lib/clientTypes";
+import type { Expense } from "@/lib/expenseTypes";
 import { getInvoiceTotals, InvoiceRow } from "@/lib/frontierInvoices";
 
 type DashboardInventoryItem = {
@@ -1549,6 +1556,7 @@ export default function DocumentsPage() {
           return job.clientId === selectedClient.id;
         }
 
+        // Legacy localStorage jobs may only have a client name snapshot.
         return (
           (job.client ?? "").trim().toLowerCase() ===
           selectedClient.name.trim().toLowerCase()
@@ -1888,7 +1896,7 @@ import Link from "next/link";
 
 import { useWorkspace } from "@/components/WorkspaceContext";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
-import type { Expense } from "@/lib/expenses";
+import type { Expense } from "@/lib/expenseTypes";
 import {
   formatCurrency,
   getInvoiceClientName,
@@ -2436,7 +2444,7 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 import { useState } from "react";
 import { useWorkspace } from "@/components/WorkspaceContext";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
-import type { Job } from "@/lib/jobs";
+import type { Job } from "@/lib/jobTypes";
 
 type InventoryRow = {
   name: string;
@@ -2569,8 +2577,8 @@ export default function InventoryPage() {
 
   function openTargetEditor(item: InventoryRow) {
     setEditingItemName(item.name);
-    setEditingCurrentQty(String(item.currentQty ?? 0));
-    setEditingTargetQty(String(item.targetQty ?? 0));
+    setEditingCurrentQty(item.currentQty === null ? "" : String(item.currentQty));
+    setEditingTargetQty(item.targetQty === null ? "" : String(item.targetQty));
     setEditTargetOpen(true);
   }
 
@@ -2583,6 +2591,7 @@ export default function InventoryPage() {
 
   function saveTargetEditor() {
     if (!editingItemName.trim()) return;
+    if (!editingCurrentQty.trim() || !editingTargetQty.trim()) return;
 
     const current = Number(editingCurrentQty);
     const target = Number(editingTargetQty);
@@ -2632,21 +2641,22 @@ export default function InventoryPage() {
       </div>
 
       <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-200">
-        Click a <strong>Target Qty</strong> value to update inventory thresholds.
+        Use the Actions column to update inventory quantities and thresholds.
       </div>
 
       <div className="overflow-x-auto rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
-        <table className="min-w-[1100px] w-full">
+        <table className="min-w-[1180px] w-full">
           <thead>
             <tr className="border-b border-gray-200 bg-white text-sm uppercase tracking-wide text-gray-500 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-400">
               <th className="w-12 px-4 py-4"></th>
               <th className="px-6 py-4 text-left">Item Name</th>
               <th className="px-6 py-4 text-center">Current Qty</th>
               <th className="px-6 py-4 text-center">Reserved</th>
-              <th className="px-6 py-4 text-center">Available</th>
+              <th className="px-6 py-4 text-center">Available Qty</th>
               <th className="px-6 py-4 text-center">Target Qty</th>
               <th className="px-6 py-4 text-left">Tied Jobs</th>
               <th className="px-6 py-4 text-right">Suggested Order</th>
+              <th className="px-6 py-4 text-right">Actions</th>
             </tr>
           </thead>
 
@@ -2674,11 +2684,7 @@ export default function InventoryPage() {
                     <td className="px-6 py-5 text-center text-gray-900 dark:text-gray-100">{item.currentQty ?? "-"}</td>
                     <td className="px-6 py-5 text-center text-blue-600 dark:text-blue-400">{reservedQty}</td>
                     <td className={`px-6 py-5 text-center ${warning ? "text-red-600 dark:text-red-400" : "text-green-600 dark:text-green-400"}`}>{availableAfterJobs ?? "-"}</td>
-                    <td className="px-6 py-5 text-center">
-                      <button type="button" onClick={() => openTargetEditor(item)} className="rounded px-2 py-1 text-blue-600 hover:bg-blue-50 hover:underline dark:text-blue-400 dark:hover:bg-blue-950/30">
-                        {item.targetQty ?? "Set target"}
-                      </button>
-                    </td>
+                    <td className="px-6 py-5 text-center text-gray-900 dark:text-gray-100">{item.targetQty ?? "-"}</td>
                     <td className="px-6 py-5 text-sm text-gray-600 dark:text-gray-400">
                       {reservedJobs.length > 0 ? (
                         <div className="space-y-1">
@@ -2689,11 +2695,16 @@ export default function InventoryPage() {
                       ) : "-"}
                     </td>
                     <td className={`px-6 py-5 text-right ${warning ? "text-orange-600 dark:text-orange-400" : "text-green-600 dark:text-green-400"}`}>{suggestedOrder ?? "-"}</td>
+                    <td className="px-6 py-5 text-right">
+                      <button type="button" onClick={() => openTargetEditor(item)} className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700">
+                        Edit
+                      </button>
+                    </td>
                   </tr>
                 );
               })
             ) : (
-              <tr><td colSpan={8} className="px-6 py-16 text-center text-xl text-gray-500 dark:text-gray-400">No inventory items or scheduled job materials for {activeWorkspace.name}</td></tr>
+              <tr><td colSpan={9} className="px-6 py-16 text-center text-xl text-gray-500 dark:text-gray-400">No inventory items or scheduled job materials for {activeWorkspace.name}</td></tr>
             )}
           </tbody>
         </table>
@@ -2703,14 +2714,20 @@ export default function InventoryPage() {
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4">
           <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl dark:bg-gray-900">
             <div className="mb-6 flex items-center justify-between">
-              <h2 className="text-xl font-bold text-gray-950 dark:text-gray-100">{editTargetOpen ? `Edit ${editingItemName}` : "Add Inventory Item"}</h2>
+              <h2 className="text-xl font-bold text-gray-950 dark:text-gray-100">{editTargetOpen ? `Edit Inventory Item: ${editingItemName}` : "Add Inventory Item"}</h2>
               <button type="button" onClick={editTargetOpen ? closeTargetEditor : closeNewItemModal} className="text-2xl text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">-</button>
             </div>
 
             <div className="space-y-4">
               {!editTargetOpen && <input type="text" value={itemName} onChange={(event) => setItemName(event.target.value)} placeholder="Item Name" className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800" />}
-              <input type="number" value={editTargetOpen ? editingCurrentQty : currentQty} onChange={(event) => editTargetOpen ? setEditingCurrentQty(event.target.value) : setCurrentQty(event.target.value)} placeholder="Current Quantity" className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800" />
-              <input type="number" value={editTargetOpen ? editingTargetQty : targetQty} onChange={(event) => editTargetOpen ? setEditingTargetQty(event.target.value) : setTargetQty(event.target.value)} placeholder="Target Quantity" className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800" />
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Current Qty
+                <input type="number" value={editTargetOpen ? editingCurrentQty : currentQty} onChange={(event) => editTargetOpen ? setEditingCurrentQty(event.target.value) : setCurrentQty(event.target.value)} placeholder="Current Qty" className="mt-2 w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800" />
+              </label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Target Qty
+                <input type="number" value={editTargetOpen ? editingTargetQty : targetQty} onChange={(event) => editTargetOpen ? setEditingTargetQty(event.target.value) : setTargetQty(event.target.value)} placeholder="Target Qty" className="mt-2 w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800" />
+              </label>
               <button type="button" onClick={editTargetOpen ? saveTargetEditor : addInventoryItem} className="w-full rounded-lg bg-blue-600 py-3 text-white hover:bg-blue-700">
                 {editTargetOpen ? "Save Quantity Targets" : "Add Item"}
               </button>
@@ -3024,9 +3041,20 @@ import Link from "next/link";
 
 import { useWorkspace } from "@/components/WorkspaceContext";
 import { storageKeys, useStoredJsonState, writeStoredJson } from "@/lib/clientStorage";
-import type { Job } from "@/lib/jobs";
-import { ClientRow } from "@/lib/frontierClients";
+import type { Job } from "@/lib/jobTypes";
+import type { ClientRow } from "@/lib/clientTypes";
 import { InvoiceRow, InvoiceSetupDraft } from "@/lib/frontierInvoices";
+
+type WorkspaceInvoiceSettings = {
+  workspaceId: string;
+  companyName?: string;
+  companyAddress?: string;
+  companyCity?: string;
+  companyState?: string;
+  companyZip?: string;
+  companyPhone?: string;
+  companyEmail?: string;
+};
 
 function getTodayDate() {
   return new Date().toISOString().slice(0, 10);
@@ -3067,6 +3095,10 @@ function NewInvoiceContent() {
   const [jobItems] = useStoredJsonState<Job[]>(storageKeys.jobs, []);
   const [savedInvoices] = useStoredJsonState<InvoiceRow[]>(
     storageKeys.invoices,
+    []
+  );
+  const [workspaceSettings] = useStoredJsonState<WorkspaceInvoiceSettings[]>(
+    storageKeys.settings,
     []
   );
 
@@ -3128,14 +3160,20 @@ function NewInvoiceContent() {
   const [footerMessage, setFooterMessage] = useState("Thank you for your business!");
   const [contactMessage, setContactMessage] = useState("Please contact us with any questions about this invoice.");
 
+  const savedWorkspaceSettings = workspaceSettings.find(
+    (settings) => settings.workspaceId === activeWorkspace.id
+  );
+
   const companyPlaceholder = {
-    companyName: `${activeWorkspace.name} Company`,
-    companyAddress: "123 Business Street",
-    companyCity: "Rochester Hills",
-    companyState: "MI",
-    companyZip: "48307",
-    companyPhone: "(555) 123-4567",
-    companyEmail: "billing@example.com",
+    companyName:
+      savedWorkspaceSettings?.companyName || `${activeWorkspace.name} Company`,
+    companyAddress:
+      savedWorkspaceSettings?.companyAddress || "123 Business Street",
+    companyCity: savedWorkspaceSettings?.companyCity || "Rochester Hills",
+    companyState: savedWorkspaceSettings?.companyState || "MI",
+    companyZip: savedWorkspaceSettings?.companyZip || "48307",
+    companyPhone: savedWorkspaceSettings?.companyPhone || "(555) 123-4567",
+    companyEmail: savedWorkspaceSettings?.companyEmail || "billing@example.com",
   };
 
   function clearBillToForm() {
@@ -3241,12 +3279,7 @@ function NewInvoiceContent() {
   return (
     <div className="space-y-6 text-gray-950 dark:text-gray-100">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 className="text-3xl font-bold">New Invoice</h1>
-          <p className="mt-2 text-gray-500 dark:text-gray-400">
-            Step 1: setup invoice details for {activeWorkspace.name}
-          </p>
-        </div>
+
 
         <Link
           href="/invoices"
@@ -3300,7 +3333,7 @@ function NewInvoiceContent() {
         <section className="rounded-xl bg-white p-4 shadow dark:bg-gray-900 sm:p-6">
           <h2 className="text-xl font-bold">From</h2>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            Placeholder until company settings are connected.
+            Uses the saved business profile for this workspace.
           </p>
 
           <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm dark:border-gray-800 dark:bg-gray-800">
@@ -3568,12 +3601,7 @@ export default function InvoicesPage() {
   return (
     <div className="space-y-6 text-gray-950 dark:text-gray-100">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 className="text-3xl font-bold">Invoices</h1>
-          <p className="mt-2 text-gray-500 dark:text-gray-400">
-            Create and manage invoices for {activeWorkspace.name}
-          </p>
-        </div>
+
 
         <div className="flex flex-wrap gap-2">
           <Link
@@ -3764,8 +3792,8 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
-import { ClientRow } from "@/lib/frontierClients";
-import type { Job, JobMaterial, JobStatus } from "@/lib/jobs";
+import type { ClientRow } from "@/lib/clientTypes";
+import type { Job, JobMaterial, JobStatus } from "@/lib/jobTypes";
 import {
   formatCurrency,
   getInvoiceTotals,
@@ -4097,8 +4125,8 @@ import Link from "next/link";
 
 import { useWorkspace } from "@/components/WorkspaceContext";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
-import type { Job, JobMaterial, JobStatus } from "@/lib/jobs";
-import { ClientRow } from "@/lib/frontierClients";
+import type { Job, JobMaterial, JobStatus } from "@/lib/jobTypes";
+import type { ClientRow } from "@/lib/clientTypes";
 import {
   formatCurrency,
   getInvoiceTotals,
@@ -4595,7 +4623,7 @@ export default function RootLayout({
 ## app\logistics\logisticsData.ts
 
 ```typescript
-import { ClientRow } from "@/lib/frontierClients";
+import type { ClientRow } from "@/lib/clientTypes";
 
 export type LogisticsLocation = {
   id: string;
@@ -4757,7 +4785,7 @@ export default function LogisticsMap({
       center={center}
       zoom={13}
       scrollWheelZoom
-      className="h-[500px] w-full rounded-xl"
+      className="relative z-0 h-[500px] w-full rounded-xl"
     >
       <TileLayer
         attribution="&copy; OpenStreetMap contributors"
@@ -4817,7 +4845,7 @@ import { useMemo, useState } from "react";
 
 import { useWorkspace } from "@/components/WorkspaceContext";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
-import { ClientRow } from "@/lib/frontierClients";
+import type { ClientRow } from "@/lib/clientTypes";
 import {
   buildLogisticsLocations,
   getClientFullAddress,
@@ -5141,8 +5169,8 @@ export default function Home() {
   return (
     <main className="flex min-h-full items-center justify-center px-6 py-10">
       <section className="w-full max-w-3xl text-center">
-        <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-xl bg-blue-600 text-lg font-black text-white">
-          FR
+        <div className="mx-auto flex h-16 w-16 items-center justify-center overflow-hidden rounded-xl bg-blue-600 font-black text-white">
+          <span className="scale-[4] leading-none">⌖</span>
         </div>
 
         <h1 className="mt-6 text-4xl font-black tracking-wide text-gray-950 dark:text-gray-100 sm:text-6xl">
@@ -5186,6 +5214,7 @@ export default function Home() {
 import { useState } from "react";
 import { useWorkspace } from "@/components/WorkspaceContext";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
+import { defaultBusinessTypes } from "@/lib/workspaceOptions";
 import PermissionsSettings from "./PermissionsSettings";
 
 type SettingsTab =
@@ -5221,23 +5250,6 @@ type WorkspaceSettings = {
   businessType: string;
   notes: string;
 };
-
-const businessTypes = [
-  "Landscaping",
-  "Tree Service",
-  "Lawn Care",
-  "Snow Removal",
-  "Property Management",
-  "Construction",
-  "Auto Repair",
-  "IT Services",
-  "Plumbing",
-  "Electrical",
-  "Cleaning",
-  "Restaurant",
-  "Property Maintenance",
-  "Other",
-];
 
 function getDefaultSettings(
   workspaceId: string,
@@ -5720,7 +5732,7 @@ function SettingsWorkspacePanel({
                 }
                 className={inputClass}
               >
-                {businessTypes.map((type) => (
+                {defaultBusinessTypes.map((type) => (
                   <option key={type}>{type}</option>
                 ))}
               </select>
@@ -5953,6 +5965,7 @@ import { useEffect, useState } from "react";
 import Sidebar from "./Sidebar";
 import { useWorkspace } from "@/components/WorkspaceContext";
 import { storageKeys, useStoredJsonState, useStoredStringState } from "@/lib/clientStorage";
+import { defaultBusinessTypes } from "@/lib/workspaceOptions";
 
 type WorkspaceDisplaySettings = {
   workspaceId: string;
@@ -5962,22 +5975,10 @@ type WorkspaceDisplaySettings = {
   userEmail?: string;
 };
 
-const businessTypes = [
-  "Landscaping",
-  "Tree Service",
-  "Lawn Care",
-  "Snow Removal",
-  "Property Management",
-  "Construction",
-  "Auto Repair",
-  "IT Services",
-  "Plumbing",
-  "Electrical",
-  "Cleaning",
-  "Restaurant",
-  "Property Maintenance",
-  "Other",
-];
+const localUserFallback = {
+  name: "Local User",
+  email: "local.user@frontier.local",
+};
 
 function getWorkspaceInitials(name: string) {
   return name
@@ -5985,6 +5986,11 @@ function getWorkspaceInitials(name: string) {
     .filter(Boolean)
     .map((word) => word[0]?.toUpperCase())
     .join("");
+}
+
+function getUserInitials(name: string) {
+  const initials = getWorkspaceInitials(name);
+  return initials.slice(0, 2) || "LU";
 }
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
@@ -5998,7 +6004,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [newWorkspaceOpen, setNewWorkspaceOpen] = useState(false);
 
   const [workspaceName, setWorkspaceName] = useState("");
-  const [workspaceType, setWorkspaceType] = useState("Landscaping");
+  const [workspaceType, setWorkspaceType] = useState<string>(
+    defaultBusinessTypes[0]
+  );
   const [customWorkspaceType, setCustomWorkspaceType] = useState("");
 
   const {
@@ -6026,13 +6034,14 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     displaySettings?.businessType?.trim() || activeWorkspace.type;
 
   const displayedUserName =
-    displaySettings?.userDisplayName?.trim() || "Nicholas Thompson";
+    displaySettings?.userDisplayName?.trim() || localUserFallback.name;
 
   const displayedUserEmail =
-    displaySettings?.userEmail?.trim() || "thomp3ns@gmail.com";
+    displaySettings?.userEmail?.trim() || localUserFallback.email;
 
   const displayedWorkspaceInitials =
     getWorkspaceInitials(displayedWorkspaceName);
+  const displayedUserInitials = getUserInitials(displayedUserName);
 
   function toggleDarkMode() {
     const nextMode = !darkMode;
@@ -6041,7 +6050,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   function resetNewWorkspaceForm() {
     setWorkspaceName("");
-    setWorkspaceType("Landscaping");
+    setWorkspaceType(defaultBusinessTypes[0]);
     setCustomWorkspaceType("");
   }
 
@@ -6100,7 +6109,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-gray-100 text-gray-950 dark:bg-gray-950 dark:text-gray-100">
-      <header className="flex h-20 flex-shrink-0 items-center justify-between border-b border-gray-200 bg-white px-3 dark:border-gray-800 dark:bg-gray-900 sm:px-6 lg:px-8">
+      <header className="relative z-[2000] flex h-20 flex-shrink-0 items-center justify-between border-b border-gray-200 bg-white px-3 dark:border-gray-800 dark:bg-gray-900 sm:px-6 lg:px-8">
         <div className="flex min-w-0 flex-1 items-center gap-3">
           <div className="relative min-w-0">
             <button
@@ -6125,7 +6134,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             </button>
 
             {workspaceOpen && (
-              <div className="absolute left-0 top-14 z-50 w-72 max-w-[90vw] overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-900">
+              <div className="absolute left-0 top-14 z-[2100] w-72 max-w-[90vw] overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-900">
                 <div className="px-4 py-3 text-sm font-semibold text-gray-500 dark:text-gray-400">
                   Workspaces
                 </div>
@@ -6189,7 +6198,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               className="flex items-center gap-2 rounded-lg px-2 py-2 hover:bg-gray-100 dark:hover:bg-gray-800"
             >
               <span className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-100 text-sm font-bold text-blue-600 dark:bg-blue-950">
-                NT
+                {displayedUserInitials}
               </span>
               <span className="hidden max-w-32 truncate font-semibold lg:block">
                 {displayedUserName}
@@ -6198,7 +6207,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             </button>
 
             {userOpen && (
-              <div className="absolute right-0 top-14 z-50 w-72 max-w-[90vw] overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-900">
+              <div className="absolute right-0 top-14 z-[2100] w-72 max-w-[90vw] overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-900">
                 <div className="border-b border-gray-200 px-4 py-4 dark:border-gray-700">
                   <div className="font-semibold">{displayedUserName}</div>
                   <div className="mt-1 break-all text-sm text-gray-500 dark:text-gray-400">
@@ -6212,9 +6221,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                   {displayedWorkspaceType}
                 </div>
 
-                <button className="flex w-full items-center gap-4 px-4 py-4 text-left hover:bg-gray-100 dark:hover:bg-gray-800">
+                <button
+                  type="button"
+                  disabled
+                  className="flex w-full cursor-not-allowed items-center gap-4 px-4 py-4 text-left text-gray-400 dark:text-gray-500"
+                >
                   <span className="text-xl">Out</span>
-                  <span className="font-medium">Sign Out</span>
+                  <span className="font-medium">Sign Out Coming With Auth</span>
                 </button>
               </div>
             )}
@@ -6231,7 +6244,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       </div>
 
       {newWorkspaceOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4">
+        <div className="fixed inset-0 z-[2200] flex items-center justify-center bg-black/70 p-4">
           <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl dark:bg-gray-900">
             <div className="mb-6 flex items-center justify-between">
               <h2 className="text-xl font-bold">New Workspace</h2>
@@ -6258,7 +6271,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 onChange={(e) => setWorkspaceType(e.target.value)}
                 className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800"
               >
-                {businessTypes.map((type) => (
+                {defaultBusinessTypes.map((type) => (
                   <option key={type}>{type}</option>
                 ))}
               </select>
@@ -6299,12 +6312,12 @@ import { useState } from "react";
 
 const navItems = [
   { label: "Dashboard", href: "/dashboard", icon: "🏠" },
-  { label: "Calendar", href: "/calendar", icon: "📅" },
+  { label: "Clients", href: "/clients", icon: "🧑‍💼" },
   { label: "Jobs", href: "/jobs", icon: "✅" },
+  { label: "Calendar", href: "/calendar", icon: "📅" },
   { label: "Inventory", href: "/inventory", icon: "🧱" },
   { label: "Financials", href: "/financials", icon: "💵" },
   { label: "Invoices", href: "/invoices", icon: "📄" },
-  { label: "Clients", href: "/clients", icon: "🧑‍💼" },
   { label: "Document Extraction", href: "/documents", icon: "📁" },
   { label: "Logistics", href: "/logistics", icon: "🛣️" },
   { label: "Settings", href: "/settings", icon: "⚙️" },
@@ -6426,19 +6439,9 @@ export type Workspace = {
 
 const defaultWorkspaces: Workspace[] = [
   {
-    id: "landscaping",
-    name: "Landscaping",
-    type: "Landscaping",
-  },
-  {
-    id: "snow-removal",
-    name: "Thompson Snow Removal",
-    type: "Snow Removal",
-  },
-  {
-    id: "properties",
-    name: "Thompson Properties",
-    type: "Property Management",
+    id: "local-workspace",
+    name: "Local Workspace",
+    type: "Other",
   },
 ];
 
@@ -6798,6 +6801,7 @@ function repairLegacyJobClientIds(snapshot: string) {
     const repairedJobs = jobs.map((job) => {
       if (job.clientId || !job.client?.trim() || !job.workspaceId) return job;
 
+      // Legacy localStorage jobs only stored the client name.
       const matchingClient = clients.find(
         (client) =>
           client.workspaceId === job.workspaceId &&
@@ -6965,17 +6969,165 @@ export function useStoredStringState(
 }
 ```
 
+## lib\clientTypes.ts
+
+```typescript
+export type ClientRow = {
+  id: string;
+  workspaceId: string;
+  name: string;
+  status: string;
+  balance: string;
+  email?: string;
+  phone?: string;
+  address?: string;
+  city?: string;
+  state?: string;
+  zip?: string;
+  notes?: string;
+  latitude?: number;
+  longitude?: number;
+};
+```
+
+## lib\demo\inventory.ts
+
+```typescript
+// lib/demo/inventory.ts
+
+export type InventoryItem = {
+  name: string;
+  currentQty: number;
+  targetQty: number;
+  warning: boolean;
+  workspaceId: string;
+};
+
+export const inventory: InventoryItem[] = [
+  // LANDSCAPING
+
+  {
+    name: "Gasoline (gallons)",
+    currentQty: 20,
+    targetQty: 40,
+    warning: true,
+    workspaceId: "landscaping",
+  },
+  {
+    name: "Mulch (cubic yards)",
+    currentQty: 12,
+    targetQty: 50,
+    warning: true,
+    workspaceId: "landscaping",
+  },
+  {
+    name: "Fertilizer (50lb bags)",
+    currentQty: 8,
+    targetQty: 25,
+    warning: true,
+    workspaceId: "landscaping",
+  },
+  {
+    name: "Trimmer Line",
+    currentQty: 6,
+    targetQty: 15,
+    warning: true,
+    workspaceId: "landscaping",
+  },
+  {
+    name: "Topsoil (cubic yards)",
+    currentQty: 22,
+    targetQty: 20,
+    warning: false,
+    workspaceId: "landscaping",
+  },
+
+  // SNOW REMOVAL
+
+  {
+    name: "Salt Bags",
+    currentQty: 18,
+    targetQty: 80,
+    warning: true,
+    workspaceId: "snow-removal",
+  },
+  {
+    name: "Ice Melt Buckets",
+    currentQty: 10,
+    targetQty: 30,
+    warning: true,
+    workspaceId: "snow-removal",
+  },
+  {
+    name: "Snow Shovels",
+    currentQty: 14,
+    targetQty: 12,
+    warning: false,
+    workspaceId: "snow-removal",
+  },
+  {
+    name: "Fuel (gallons)",
+    currentQty: 30,
+    targetQty: 50,
+    warning: true,
+    workspaceId: "snow-removal",
+  },
+  {
+    name: "Hydraulic Fluid",
+    currentQty: 12,
+    targetQty: 10,
+    warning: false,
+    workspaceId: "snow-removal",
+  },
+
+  // PROPERTIES
+
+  {
+    name: "HVAC Filters",
+    currentQty: 22,
+    targetQty: 40,
+    warning: true,
+    workspaceId: "properties",
+  },
+  {
+    name: "Light Bulbs",
+    currentQty: 60,
+    targetQty: 50,
+    warning: false,
+    workspaceId: "properties",
+  },
+  {
+    name: "Smoke Detectors",
+    currentQty: 8,
+    targetQty: 20,
+    warning: true,
+    workspaceId: "properties",
+  },
+  {
+    name: "Paint (gallons)",
+    currentQty: 14,
+    targetQty: 10,
+    warning: false,
+    workspaceId: "properties",
+  },
+  {
+    name: "Air Fresheners",
+    currentQty: 5,
+    targetQty: 15,
+    warning: true,
+    workspaceId: "properties",
+  },
+];
+```
+
 ## lib\expenses.ts
 
 ```typescript
 // lib/expenses.ts
 
-export type Expense = {
-  description: string;
-  category: string;
-  amount: string;
-  workspaceId: string;
-};
+import type { Expense } from "@/lib/expenseTypes";
+
+export type { Expense } from "@/lib/expenseTypes";
 
 export const expenses: Expense[] = [
   // LANDSCAPING
@@ -7061,28 +7213,25 @@ export const expenses: Expense[] = [
 ];
 ```
 
+## lib\expenseTypes.ts
+
+```typescript
+export type Expense = {
+  description: string;
+  category: string;
+  amount: string;
+  workspaceId: string;
+};
+```
+
 ## lib\frontierClients.ts
 
 ```typescript
 import { readStoredJson, storageKeys, writeStoredJson } from "@/lib/clientStorage";
 import { formatCurrency } from "@/lib/frontierInvoices";
+import type { ClientRow } from "@/lib/clientTypes";
 
-export type ClientRow = {
-  id: string;
-  workspaceId: string;
-  name: string;
-  status: string;
-  balance: string;
-  email?: string;
-  phone?: string;
-  address?: string;
-  city?: string;
-  state?: string;
-  zip?: string;
-  notes?: string;
-  latitude?: number;
-  longitude?: number;
-};
+export type { ClientRow } from "@/lib/clientTypes";
 
 export const clientStatuses = ["Lead", "Active", "Inactive"] as const;
 export type ClientStatus = (typeof clientStatuses)[number];
@@ -7278,163 +7427,12 @@ export function saveSavedInvoices(invoices: InvoiceRow[]) {
 }
 ```
 
-## lib\inventory.ts
-
-```typescript
-// lib/inventory.ts
-
-export type InventoryItem = {
-  name: string;
-  currentQty: number;
-  targetQty: number;
-  warning: boolean;
-  workspaceId: string;
-};
-
-export const inventory: InventoryItem[] = [
-  // LANDSCAPING
-
-  {
-    name: "Gasoline (gallons)",
-    currentQty: 20,
-    targetQty: 40,
-    warning: true,
-    workspaceId: "landscaping",
-  },
-  {
-    name: "Mulch (cubic yards)",
-    currentQty: 12,
-    targetQty: 50,
-    warning: true,
-    workspaceId: "landscaping",
-  },
-  {
-    name: "Fertilizer (50lb bags)",
-    currentQty: 8,
-    targetQty: 25,
-    warning: true,
-    workspaceId: "landscaping",
-  },
-  {
-    name: "Trimmer Line",
-    currentQty: 6,
-    targetQty: 15,
-    warning: true,
-    workspaceId: "landscaping",
-  },
-  {
-    name: "Topsoil (cubic yards)",
-    currentQty: 22,
-    targetQty: 20,
-    warning: false,
-    workspaceId: "landscaping",
-  },
-
-  // SNOW REMOVAL
-
-  {
-    name: "Salt Bags",
-    currentQty: 18,
-    targetQty: 80,
-    warning: true,
-    workspaceId: "snow-removal",
-  },
-  {
-    name: "Ice Melt Buckets",
-    currentQty: 10,
-    targetQty: 30,
-    warning: true,
-    workspaceId: "snow-removal",
-  },
-  {
-    name: "Snow Shovels",
-    currentQty: 14,
-    targetQty: 12,
-    warning: false,
-    workspaceId: "snow-removal",
-  },
-  {
-    name: "Fuel (gallons)",
-    currentQty: 30,
-    targetQty: 50,
-    warning: true,
-    workspaceId: "snow-removal",
-  },
-  {
-    name: "Hydraulic Fluid",
-    currentQty: 12,
-    targetQty: 10,
-    warning: false,
-    workspaceId: "snow-removal",
-  },
-
-  // PROPERTIES
-
-  {
-    name: "HVAC Filters",
-    currentQty: 22,
-    targetQty: 40,
-    warning: true,
-    workspaceId: "properties",
-  },
-  {
-    name: "Light Bulbs",
-    currentQty: 60,
-    targetQty: 50,
-    warning: false,
-    workspaceId: "properties",
-  },
-  {
-    name: "Smoke Detectors",
-    currentQty: 8,
-    targetQty: 20,
-    warning: true,
-    workspaceId: "properties",
-  },
-  {
-    name: "Paint (gallons)",
-    currentQty: 14,
-    targetQty: 10,
-    warning: false,
-    workspaceId: "properties",
-  },
-  {
-    name: "Air Fresheners",
-    currentQty: 5,
-    targetQty: 15,
-    warning: true,
-    workspaceId: "properties",
-  },
-];
-```
-
 ## lib\jobs.ts
 
 ```typescript
-export type JobStatus =
-  | "Lead"
-  | "Quoted"
-  | "Scheduled"
-  | "Completed"
-  | "Paid";
+import type { Job } from "@/lib/jobTypes";
 
-export type JobMaterial = {
-  name: string;
-  quantity: number;
-};
-
-export type Job = {
-  id: string;
-  workspaceId: string;
-  name: string;
-  clientId?: string;
-  client: string;
-  status: JobStatus;
-  value: string;
-  date: string;
-  materials: JobMaterial[];
-  notes?: string;
-};
+export type { Job, JobMaterial, JobStatus } from "@/lib/jobTypes";
 
 export const jobs: Job[] = [
   // LANDSCAPING
@@ -7694,7 +7692,7 @@ export const jobs: Job[] = [
 
 ```typescript
 import { readStoredJson, storageKeys, writeStoredJson } from "@/lib/clientStorage";
-import type { Job } from "@/lib/jobs";
+import type { Job } from "@/lib/jobTypes";
 
 export function getStoredJobs() {
   return readStoredJson(storageKeys.jobs, [] as Job[]);
@@ -7703,6 +7701,56 @@ export function getStoredJobs() {
 export function saveStoredJobs(jobs: Job[]) {
   writeStoredJson(storageKeys.jobs, jobs);
 }
+```
+
+## lib\jobTypes.ts
+
+```typescript
+export type JobStatus =
+  | "Lead"
+  | "Quoted"
+  | "Scheduled"
+  | "Completed"
+  | "Paid";
+
+export type JobMaterial = {
+  name: string;
+  quantity: number;
+};
+
+export type Job = {
+  id: string;
+  workspaceId: string;
+  name: string;
+  clientId?: string;
+  client: string;
+  status: JobStatus;
+  value: string;
+  date: string;
+  materials: JobMaterial[];
+  notes?: string;
+};
+```
+
+## lib\workspaceOptions.ts
+
+```typescript
+export const defaultBusinessTypes = [
+  "Landscaping",
+  "Tree Service",
+  "Lawn Care",
+  "Snow Removal",
+  "Property Management",
+  "Construction",
+  "Auto Repair",
+  "IT Services",
+  "Plumbing",
+  "Electrical",
+  "Cleaning",
+  "Restaurant",
+  "Property Maintenance",
+  "Other",
+] as const;
 ```
 
 ## next-env.d.ts

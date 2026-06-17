@@ -4,8 +4,8 @@ export default function Home() {
   return (
     <main className="flex min-h-full items-center justify-center px-6 py-10">
       <section className="w-full max-w-3xl text-center">
-        <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-xl bg-blue-600 text-lg font-black text-white">
-          FR
+        <div className="mx-auto flex h-16 w-16 items-center justify-center overflow-hidden rounded-xl bg-blue-600 font-black text-white">
+          <span className="scale-[4] leading-none">⌖</span>
         </div>
 
         <h1 className="mt-6 text-4xl font-black tracking-wide text-gray-950 dark:text-gray-100 sm:text-6xl">
