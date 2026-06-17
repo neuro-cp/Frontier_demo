@@ -1,22 +1,8 @@
 import { readStoredJson, storageKeys, writeStoredJson } from "@/lib/clientStorage";
 import { formatCurrency } from "@/lib/frontierInvoices";
+import type { ClientRow } from "@/lib/clientTypes";
 
-export type ClientRow = {
-  id: string;
-  workspaceId: string;
-  name: string;
-  status: string;
-  balance: string;
-  email?: string;
-  phone?: string;
-  address?: string;
-  city?: string;
-  state?: string;
-  zip?: string;
-  notes?: string;
-  latitude?: number;
-  longitude?: number;
-};
+export type { ClientRow } from "@/lib/clientTypes";
 
 export const clientStatuses = ["Lead", "Active", "Inactive"] as const;
 export type ClientStatus = (typeof clientStatuses)[number];

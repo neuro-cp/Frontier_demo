@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useWorkspace } from "@/components/WorkspaceContext";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
-import type { Job } from "@/lib/jobs";
+import type { Job } from "@/lib/jobTypes";
 
 type InventoryRow = {
   name: string;
@@ -136,8 +136,8 @@ export default function InventoryPage() {
 
   function openTargetEditor(item: InventoryRow) {
     setEditingItemName(item.name);
-    setEditingCurrentQty(String(item.currentQty ?? 0));
-    setEditingTargetQty(String(item.targetQty ?? 0));
+    setEditingCurrentQty(item.currentQty === null ? "" : String(item.currentQty));
+    setEditingTargetQty(item.targetQty === null ? "" : String(item.targetQty));
     setEditTargetOpen(true);
   }
 
@@ -150,6 +150,7 @@ export default function InventoryPage() {
 
   function saveTargetEditor() {
     if (!editingItemName.trim()) return;
+    if (!editingCurrentQty.trim() || !editingTargetQty.trim()) return;
 
     const current = Number(editingCurrentQty);
     const target = Number(editingTargetQty);
@@ -199,21 +200,22 @@ export default function InventoryPage() {
       </div>
 
       <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-200">
-        Click a <strong>Target Qty</strong> value to update inventory thresholds.
+        Use the Actions column to update inventory quantities and thresholds.
       </div>
 
       <div className="overflow-x-auto rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
-        <table className="min-w-[1100px] w-full">
+        <table className="min-w-[1180px] w-full">
           <thead>
             <tr className="border-b border-gray-200 bg-white text-sm uppercase tracking-wide text-gray-500 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-400">
               <th className="w-12 px-4 py-4"></th>
               <th className="px-6 py-4 text-left">Item Name</th>
               <th className="px-6 py-4 text-center">Current Qty</th>
               <th className="px-6 py-4 text-center">Reserved</th>
-              <th className="px-6 py-4 text-center">Available</th>
+              <th className="px-6 py-4 text-center">Available Qty</th>
               <th className="px-6 py-4 text-center">Target Qty</th>
               <th className="px-6 py-4 text-left">Tied Jobs</th>
               <th className="px-6 py-4 text-right">Suggested Order</th>
+              <th className="px-6 py-4 text-right">Actions</th>
             </tr>
           </thead>
 
@@ -241,11 +243,7 @@ export default function InventoryPage() {
                     <td className="px-6 py-5 text-center text-gray-900 dark:text-gray-100">{item.currentQty ?? "-"}</td>
                     <td className="px-6 py-5 text-center text-blue-600 dark:text-blue-400">{reservedQty}</td>
                     <td className={`px-6 py-5 text-center ${warning ? "text-red-600 dark:text-red-400" : "text-green-600 dark:text-green-400"}`}>{availableAfterJobs ?? "-"}</td>
-                    <td className="px-6 py-5 text-center">
-                      <button type="button" onClick={() => openTargetEditor(item)} className="rounded px-2 py-1 text-blue-600 hover:bg-blue-50 hover:underline dark:text-blue-400 dark:hover:bg-blue-950/30">
-                        {item.targetQty ?? "Set target"}
-                      </button>
-                    </td>
+                    <td className="px-6 py-5 text-center text-gray-900 dark:text-gray-100">{item.targetQty ?? "-"}</td>
                     <td className="px-6 py-5 text-sm text-gray-600 dark:text-gray-400">
                       {reservedJobs.length > 0 ? (
                         <div className="space-y-1">
@@ -256,11 +254,16 @@ export default function InventoryPage() {
                       ) : "-"}
                     </td>
                     <td className={`px-6 py-5 text-right ${warning ? "text-orange-600 dark:text-orange-400" : "text-green-600 dark:text-green-400"}`}>{suggestedOrder ?? "-"}</td>
+                    <td className="px-6 py-5 text-right">
+                      <button type="button" onClick={() => openTargetEditor(item)} className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700">
+                        Edit
+                      </button>
+                    </td>
                   </tr>
                 );
               })
             ) : (
-              <tr><td colSpan={8} className="px-6 py-16 text-center text-xl text-gray-500 dark:text-gray-400">No inventory items or scheduled job materials for {activeWorkspace.name}</td></tr>
+              <tr><td colSpan={9} className="px-6 py-16 text-center text-xl text-gray-500 dark:text-gray-400">No inventory items or scheduled job materials for {activeWorkspace.name}</td></tr>
             )}
           </tbody>
         </table>
@@ -270,14 +273,20 @@ export default function InventoryPage() {
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4">
           <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl dark:bg-gray-900">
             <div className="mb-6 flex items-center justify-between">
-              <h2 className="text-xl font-bold text-gray-950 dark:text-gray-100">{editTargetOpen ? `Edit ${editingItemName}` : "Add Inventory Item"}</h2>
+              <h2 className="text-xl font-bold text-gray-950 dark:text-gray-100">{editTargetOpen ? `Edit Inventory Item: ${editingItemName}` : "Add Inventory Item"}</h2>
               <button type="button" onClick={editTargetOpen ? closeTargetEditor : closeNewItemModal} className="text-2xl text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">-</button>
             </div>
 
             <div className="space-y-4">
               {!editTargetOpen && <input type="text" value={itemName} onChange={(event) => setItemName(event.target.value)} placeholder="Item Name" className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800" />}
-              <input type="number" value={editTargetOpen ? editingCurrentQty : currentQty} onChange={(event) => editTargetOpen ? setEditingCurrentQty(event.target.value) : setCurrentQty(event.target.value)} placeholder="Current Quantity" className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800" />
-              <input type="number" value={editTargetOpen ? editingTargetQty : targetQty} onChange={(event) => editTargetOpen ? setEditingTargetQty(event.target.value) : setTargetQty(event.target.value)} placeholder="Target Quantity" className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800" />
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Current Qty
+                <input type="number" value={editTargetOpen ? editingCurrentQty : currentQty} onChange={(event) => editTargetOpen ? setEditingCurrentQty(event.target.value) : setCurrentQty(event.target.value)} placeholder="Current Qty" className="mt-2 w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800" />
+              </label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Target Qty
+                <input type="number" value={editTargetOpen ? editingTargetQty : targetQty} onChange={(event) => editTargetOpen ? setEditingTargetQty(event.target.value) : setTargetQty(event.target.value)} placeholder="Target Qty" className="mt-2 w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800" />
+              </label>
               <button type="button" onClick={editTargetOpen ? saveTargetEditor : addInventoryItem} className="w-full rounded-lg bg-blue-600 py-3 text-white hover:bg-blue-700">
                 {editTargetOpen ? "Save Quantity Targets" : "Add Item"}
               </button>

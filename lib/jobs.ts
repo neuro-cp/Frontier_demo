@@ -1,27 +1,6 @@
-export type JobStatus =
-  | "Lead"
-  | "Quoted"
-  | "Scheduled"
-  | "Completed"
-  | "Paid";
+import type { Job } from "@/lib/jobTypes";
 
-export type JobMaterial = {
-  name: string;
-  quantity: number;
-};
-
-export type Job = {
-  id: string;
-  workspaceId: string;
-  name: string;
-  clientId?: string;
-  client: string;
-  status: JobStatus;
-  value: string;
-  date: string;
-  materials: JobMaterial[];
-  notes?: string;
-};
+export type { Job, JobMaterial, JobStatus } from "@/lib/jobTypes";
 
 export const jobs: Job[] = [
   // LANDSCAPING

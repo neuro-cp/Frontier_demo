@@ -1,4 +1,4 @@
-import { ClientRow } from "@/lib/frontierClients";
+import type { ClientRow } from "@/lib/clientTypes";
 
 export type LogisticsLocation = {
   id: string;

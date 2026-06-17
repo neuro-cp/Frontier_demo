@@ -1,11 +1,8 @@
 // lib/expenses.ts
 
-export type Expense = {
-  description: string;
-  category: string;
-  amount: string;
-  workspaceId: string;
-};
+import type { Expense } from "@/lib/expenseTypes";
+
+export type { Expense } from "@/lib/expenseTypes";
 
 export const expenses: Expense[] = [
   // LANDSCAPING

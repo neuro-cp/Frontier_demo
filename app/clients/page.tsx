@@ -6,7 +6,7 @@ import Link from "next/link";
 import { useWorkspace } from "@/components/WorkspaceContext";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
 import { InvoiceRow } from "@/lib/frontierInvoices";
-import type { Job } from "@/lib/jobs";
+import type { Job } from "@/lib/jobTypes";
 
 type ClientRow = {
   id: string;
@@ -77,6 +77,7 @@ function isJobLinkedToClient(job: ClientLinkedJob, client: ClientRow) {
   if (job.workspaceId !== client.workspaceId) return false;
   if (job.clientId) return job.clientId === client.id;
 
+  // Legacy localStorage jobs may only have a client name snapshot.
   return normalizeName(job.client) === normalizeName(client.name);
 }
 
@@ -84,6 +85,7 @@ function isInvoiceLinkedToClient(invoice: InvoiceRow, client: ClientRow) {
   if (invoice.workspaceId !== client.workspaceId) return false;
   if (invoice.sourceClientId) return invoice.sourceClientId === client.id;
 
+  // Legacy/manual invoices may only have bill-to names.
   const clientName = normalizeName(client.name);
 
   return (

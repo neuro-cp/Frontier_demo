@@ -1,4 +1,4 @@
-// lib/inventory.ts
+// lib/demo/inventory.ts
 
 export type InventoryItem = {
   name: string;

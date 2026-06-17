@@ -5,8 +5,8 @@ import Link from "next/link";
 
 import { useWorkspace } from "@/components/WorkspaceContext";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
-import type { Job, JobMaterial, JobStatus } from "@/lib/jobs";
-import { ClientRow } from "@/lib/frontierClients";
+import type { Job, JobMaterial, JobStatus } from "@/lib/jobTypes";
+import type { ClientRow } from "@/lib/clientTypes";
 import {
   formatCurrency,
   getInvoiceTotals,

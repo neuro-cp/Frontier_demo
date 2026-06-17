@@ -6,9 +6,20 @@ import Link from "next/link";
 
 import { useWorkspace } from "@/components/WorkspaceContext";
 import { storageKeys, useStoredJsonState, writeStoredJson } from "@/lib/clientStorage";
-import type { Job } from "@/lib/jobs";
-import { ClientRow } from "@/lib/frontierClients";
+import type { Job } from "@/lib/jobTypes";
+import type { ClientRow } from "@/lib/clientTypes";
 import { InvoiceRow, InvoiceSetupDraft } from "@/lib/frontierInvoices";
+
+type WorkspaceInvoiceSettings = {
+  workspaceId: string;
+  companyName?: string;
+  companyAddress?: string;
+  companyCity?: string;
+  companyState?: string;
+  companyZip?: string;
+  companyPhone?: string;
+  companyEmail?: string;
+};
 
 function getTodayDate() {
   return new Date().toISOString().slice(0, 10);
@@ -49,6 +60,10 @@ function NewInvoiceContent() {
   const [jobItems] = useStoredJsonState<Job[]>(storageKeys.jobs, []);
   const [savedInvoices] = useStoredJsonState<InvoiceRow[]>(
     storageKeys.invoices,
+    []
+  );
+  const [workspaceSettings] = useStoredJsonState<WorkspaceInvoiceSettings[]>(
+    storageKeys.settings,
     []
   );
 
@@ -110,14 +125,20 @@ function NewInvoiceContent() {
   const [footerMessage, setFooterMessage] = useState("Thank you for your business!");
   const [contactMessage, setContactMessage] = useState("Please contact us with any questions about this invoice.");
 
+  const savedWorkspaceSettings = workspaceSettings.find(
+    (settings) => settings.workspaceId === activeWorkspace.id
+  );
+
   const companyPlaceholder = {
-    companyName: `${activeWorkspace.name} Company`,
-    companyAddress: "123 Business Street",
-    companyCity: "Rochester Hills",
-    companyState: "MI",
-    companyZip: "48307",
-    companyPhone: "(555) 123-4567",
-    companyEmail: "billing@example.com",
+    companyName:
+      savedWorkspaceSettings?.companyName || `${activeWorkspace.name} Company`,
+    companyAddress:
+      savedWorkspaceSettings?.companyAddress || "123 Business Street",
+    companyCity: savedWorkspaceSettings?.companyCity || "Rochester Hills",
+    companyState: savedWorkspaceSettings?.companyState || "MI",
+    companyZip: savedWorkspaceSettings?.companyZip || "48307",
+    companyPhone: savedWorkspaceSettings?.companyPhone || "(555) 123-4567",
+    companyEmail: savedWorkspaceSettings?.companyEmail || "billing@example.com",
   };
 
   function clearBillToForm() {
@@ -223,12 +244,7 @@ function NewInvoiceContent() {
   return (
     <div className="space-y-6 text-gray-950 dark:text-gray-100">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 className="text-3xl font-bold">New Invoice</h1>
-          <p className="mt-2 text-gray-500 dark:text-gray-400">
-            Step 1: setup invoice details for {activeWorkspace.name}
-          </p>
-        </div>
+
 
         <Link
           href="/invoices"
@@ -282,7 +298,7 @@ function NewInvoiceContent() {
         <section className="rounded-xl bg-white p-4 shadow dark:bg-gray-900 sm:p-6">
           <h2 className="text-xl font-bold">From</h2>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            Placeholder until company settings are connected.
+            Uses the saved business profile for this workspace.
           </p>
 
           <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm dark:border-gray-800 dark:bg-gray-800">

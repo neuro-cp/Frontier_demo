@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useWorkspace } from "@/components/WorkspaceContext";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
+import { defaultBusinessTypes } from "@/lib/workspaceOptions";
 import PermissionsSettings from "./PermissionsSettings";
 
 type SettingsTab =
@@ -38,23 +39,6 @@ type WorkspaceSettings = {
   businessType: string;
   notes: string;
 };
-
-const businessTypes = [
-  "Landscaping",
-  "Tree Service",
-  "Lawn Care",
-  "Snow Removal",
-  "Property Management",
-  "Construction",
-  "Auto Repair",
-  "IT Services",
-  "Plumbing",
-  "Electrical",
-  "Cleaning",
-  "Restaurant",
-  "Property Maintenance",
-  "Other",
-];
 
 function getDefaultSettings(
   workspaceId: string,
@@ -537,7 +521,7 @@ function SettingsWorkspacePanel({
                 }
                 className={inputClass}
               >
-                {businessTypes.map((type) => (
+                {defaultBusinessTypes.map((type) => (
                   <option key={type}>{type}</option>
                 ))}
               </select>

@@ -51,7 +51,7 @@ export default function LogisticsMap({
       center={center}
       zoom={13}
       scrollWheelZoom
-      className="h-[500px] w-full rounded-xl"
+      className="relative z-0 h-[500px] w-full rounded-xl"
     >
       <TileLayer
         attribution="&copy; OpenStreetMap contributors"

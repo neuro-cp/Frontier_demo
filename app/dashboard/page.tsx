@@ -5,9 +5,9 @@ import Link from "next/link";
 import StatCard from "../../components/Statcard";
 import { useWorkspace } from "@/components/WorkspaceContext";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
-import type { Job } from "@/lib/jobs";
-import type { ClientRow } from "@/lib/frontierClients";
-import type { Expense } from "@/lib/expenses";
+import type { Job } from "@/lib/jobTypes";
+import type { ClientRow } from "@/lib/clientTypes";
+import type { Expense } from "@/lib/expenseTypes";
 import { getInvoiceTotals, InvoiceRow } from "@/lib/frontierInvoices";
 
 type DashboardInventoryItem = {

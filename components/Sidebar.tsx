@@ -6,12 +6,12 @@ import { useState } from "react";
 
 const navItems = [
   { label: "Dashboard", href: "/dashboard", icon: "🏠" },
-  { label: "Calendar", href: "/calendar", icon: "📅" },
+  { label: "Clients", href: "/clients", icon: "🧑‍💼" },
   { label: "Jobs", href: "/jobs", icon: "✅" },
+  { label: "Calendar", href: "/calendar", icon: "📅" },
   { label: "Inventory", href: "/inventory", icon: "🧱" },
   { label: "Financials", href: "/financials", icon: "💵" },
   { label: "Invoices", href: "/invoices", icon: "📄" },
-  { label: "Clients", href: "/clients", icon: "🧑‍💼" },
   { label: "Document Extraction", href: "/documents", icon: "📁" },
   { label: "Logistics", href: "/logistics", icon: "🛣️" },
   { label: "Settings", href: "/settings", icon: "⚙️" },

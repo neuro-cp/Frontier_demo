@@ -247,6 +247,7 @@ export default function InvoiceBuilderPage() {
       return matchingClientById.id;
     }
 
+    // Legacy/manual invoices may only identify the client by bill-to name.
     const clientName = cleanText(invoice.billToCompany) || cleanText(invoice.billToName);
 
     if (!clientName) return undefined;

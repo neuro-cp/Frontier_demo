@@ -3,10 +3,10 @@
 import { useState } from "react";
 import Link from "next/link";
 
-import type { Job } from "@/lib/jobs";
+import type { Job } from "@/lib/jobTypes";
 import { useWorkspace } from "@/components/WorkspaceContext";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
-import { ClientRow } from "@/lib/frontierClients";
+import type { ClientRow } from "@/lib/clientTypes";
 
 type ClientCalendarEvent = {
   id: string;

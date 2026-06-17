@@ -19,19 +19,9 @@ export type Workspace = {
 
 const defaultWorkspaces: Workspace[] = [
   {
-    id: "landscaping",
-    name: "Landscaping",
-    type: "Landscaping",
-  },
-  {
-    id: "snow-removal",
-    name: "Thompson Snow Removal",
-    type: "Snow Removal",
-  },
-  {
-    id: "properties",
-    name: "Thompson Properties",
-    type: "Property Management",
+    id: "local-workspace",
+    name: "Local Workspace",
+    type: "Other",
   },
 ];
 

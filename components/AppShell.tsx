@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Sidebar from "./Sidebar";
 import { useWorkspace } from "@/components/WorkspaceContext";
 import { storageKeys, useStoredJsonState, useStoredStringState } from "@/lib/clientStorage";
+import { defaultBusinessTypes } from "@/lib/workspaceOptions";
 
 type WorkspaceDisplaySettings = {
   workspaceId: string;
@@ -13,22 +14,10 @@ type WorkspaceDisplaySettings = {
   userEmail?: string;
 };
 
-const businessTypes = [
-  "Landscaping",
-  "Tree Service",
-  "Lawn Care",
-  "Snow Removal",
-  "Property Management",
-  "Construction",
-  "Auto Repair",
-  "IT Services",
-  "Plumbing",
-  "Electrical",
-  "Cleaning",
-  "Restaurant",
-  "Property Maintenance",
-  "Other",
-];
+const localUserFallback = {
+  name: "Local User",
+  email: "local.user@frontier.local",
+};
 
 function getWorkspaceInitials(name: string) {
   return name
@@ -36,6 +25,11 @@ function getWorkspaceInitials(name: string) {
     .filter(Boolean)
     .map((word) => word[0]?.toUpperCase())
     .join("");
+}
+
+function getUserInitials(name: string) {
+  const initials = getWorkspaceInitials(name);
+  return initials.slice(0, 2) || "LU";
 }
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
@@ -49,7 +43,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [newWorkspaceOpen, setNewWorkspaceOpen] = useState(false);
 
   const [workspaceName, setWorkspaceName] = useState("");
-  const [workspaceType, setWorkspaceType] = useState("Landscaping");
+  const [workspaceType, setWorkspaceType] = useState(defaultBusinessTypes[0]);
   const [customWorkspaceType, setCustomWorkspaceType] = useState("");
 
   const {
@@ -77,13 +71,14 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     displaySettings?.businessType?.trim() || activeWorkspace.type;
 
   const displayedUserName =
-    displaySettings?.userDisplayName?.trim() || "Nicholas Thompson";
+    displaySettings?.userDisplayName?.trim() || localUserFallback.name;
 
   const displayedUserEmail =
-    displaySettings?.userEmail?.trim() || "thomp3ns@gmail.com";
+    displaySettings?.userEmail?.trim() || localUserFallback.email;
 
   const displayedWorkspaceInitials =
     getWorkspaceInitials(displayedWorkspaceName);
+  const displayedUserInitials = getUserInitials(displayedUserName);
 
   function toggleDarkMode() {
     const nextMode = !darkMode;
@@ -92,7 +87,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   function resetNewWorkspaceForm() {
     setWorkspaceName("");
-    setWorkspaceType("Landscaping");
+    setWorkspaceType(defaultBusinessTypes[0]);
     setCustomWorkspaceType("");
   }
 
@@ -151,7 +146,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-gray-100 text-gray-950 dark:bg-gray-950 dark:text-gray-100">
-      <header className="flex h-20 flex-shrink-0 items-center justify-between border-b border-gray-200 bg-white px-3 dark:border-gray-800 dark:bg-gray-900 sm:px-6 lg:px-8">
+      <header className="relative z-[2000] flex h-20 flex-shrink-0 items-center justify-between border-b border-gray-200 bg-white px-3 dark:border-gray-800 dark:bg-gray-900 sm:px-6 lg:px-8">
         <div className="flex min-w-0 flex-1 items-center gap-3">
           <div className="relative min-w-0">
             <button
@@ -176,7 +171,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             </button>
 
             {workspaceOpen && (
-              <div className="absolute left-0 top-14 z-50 w-72 max-w-[90vw] overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-900">
+              <div className="absolute left-0 top-14 z-[2100] w-72 max-w-[90vw] overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-900">
                 <div className="px-4 py-3 text-sm font-semibold text-gray-500 dark:text-gray-400">
                   Workspaces
                 </div>
@@ -240,7 +235,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               className="flex items-center gap-2 rounded-lg px-2 py-2 hover:bg-gray-100 dark:hover:bg-gray-800"
             >
               <span className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-100 text-sm font-bold text-blue-600 dark:bg-blue-950">
-                NT
+                {displayedUserInitials}
               </span>
               <span className="hidden max-w-32 truncate font-semibold lg:block">
                 {displayedUserName}
@@ -249,7 +244,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             </button>
 
             {userOpen && (
-              <div className="absolute right-0 top-14 z-50 w-72 max-w-[90vw] overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-900">
+              <div className="absolute right-0 top-14 z-[2100] w-72 max-w-[90vw] overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-900">
                 <div className="border-b border-gray-200 px-4 py-4 dark:border-gray-700">
                   <div className="font-semibold">{displayedUserName}</div>
                   <div className="mt-1 break-all text-sm text-gray-500 dark:text-gray-400">
@@ -263,9 +258,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                   {displayedWorkspaceType}
                 </div>
 
-                <button className="flex w-full items-center gap-4 px-4 py-4 text-left hover:bg-gray-100 dark:hover:bg-gray-800">
+                <button
+                  type="button"
+                  disabled
+                  className="flex w-full cursor-not-allowed items-center gap-4 px-4 py-4 text-left text-gray-400 dark:text-gray-500"
+                >
                   <span className="text-xl">Out</span>
-                  <span className="font-medium">Sign Out</span>
+                  <span className="font-medium">Sign Out Coming With Auth</span>
                 </button>
               </div>
             )}
@@ -282,7 +281,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       </div>
 
       {newWorkspaceOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4">
+        <div className="fixed inset-0 z-[2200] flex items-center justify-center bg-black/70 p-4">
           <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl dark:bg-gray-900">
             <div className="mb-6 flex items-center justify-between">
               <h2 className="text-xl font-bold">New Workspace</h2>
@@ -309,7 +308,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 onChange={(e) => setWorkspaceType(e.target.value)}
                 className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800"
               >
-                {businessTypes.map((type) => (
+                {defaultBusinessTypes.map((type) => (
                   <option key={type}>{type}</option>
                 ))}
               </select>

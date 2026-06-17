@@ -82,6 +82,7 @@ export default function DocumentsPage() {
           return job.clientId === selectedClient.id;
         }
 
+        // Legacy localStorage jobs may only have a client name snapshot.
         return (
           (job.client ?? "").trim().toLowerCase() ===
           selectedClient.name.trim().toLowerCase()

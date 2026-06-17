@@ -5,8 +5,8 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
-import { ClientRow } from "@/lib/frontierClients";
-import type { Job, JobMaterial, JobStatus } from "@/lib/jobs";
+import type { ClientRow } from "@/lib/clientTypes";
+import type { Job, JobMaterial, JobStatus } from "@/lib/jobTypes";
 import {
   formatCurrency,
   getInvoiceTotals,

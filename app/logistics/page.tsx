@@ -5,7 +5,7 @@ import { useMemo, useState } from "react";
 
 import { useWorkspace } from "@/components/WorkspaceContext";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
-import { ClientRow } from "@/lib/frontierClients";
+import type { ClientRow } from "@/lib/clientTypes";
 import {
   buildLogisticsLocations,
   getClientFullAddress,

@@ -55,6 +55,7 @@ function repairLegacyJobClientIds(snapshot: string) {
     const repairedJobs = jobs.map((job) => {
       if (job.clientId || !job.client?.trim() || !job.workspaceId) return job;
 
+      // Legacy localStorage jobs only stored the client name.
       const matchingClient = clients.find(
         (client) =>
           client.workspaceId === job.workspaceId &&

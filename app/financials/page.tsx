@@ -5,7 +5,7 @@ import Link from "next/link";
 
 import { useWorkspace } from "@/components/WorkspaceContext";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
-import type { Expense } from "@/lib/expenses";
+import type { Expense } from "@/lib/expenseTypes";
 import {
   formatCurrency,
   getInvoiceClientName,

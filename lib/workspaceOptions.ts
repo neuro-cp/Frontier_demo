@@ -1,0 +1,16 @@
+export const defaultBusinessTypes = [
+  "Landscaping",
+  "Tree Service",
+  "Lawn Care",
+  "Snow Removal",
+  "Property Management",
+  "Construction",
+  "Auto Repair",
+  "IT Services",
+  "Plumbing",
+  "Electrical",
+  "Cleaning",
+  "Restaurant",
+  "Property Maintenance",
+  "Other",
+] as const;
