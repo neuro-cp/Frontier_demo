@@ -6,7 +6,7 @@ export default function Home() {
           ⌖
         </div>
 
-        <h1 className="mt-4 text-6xl font-black tracking-[0.25em] text-gray-950 dark:text-gray-100">
+        <h1 className="mt-4 text-3xl sm:text-5xl md:text-6xl font-black tracking-[0.1em] text-gray-950 dark:text-gray-100">
           FRONTIER
         </h1>
 

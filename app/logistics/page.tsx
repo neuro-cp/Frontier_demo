@@ -1,169 +1,155 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { jobs } from "@/lib/jobs";
-import { useWorkspace } from "@/components/WorkspaceContext";
+import dynamic from "next/dynamic";
+import { useEffect, useMemo, useState } from "react";
 
-const jobTypes = ["All", "Lead", "Quoted", "Scheduled", "Completed"];
+import { useWorkspace } from "@/components/WorkspaceContext";
+import { ClientRow, loadClients } from "@/lib/frontierClients";
+import {
+  buildLogisticsLocations,
+  getClientFullAddress,
+  LogisticsLocation,
+} from "./logisticsData";
+
+const LogisticsMap = dynamic(() => import("./LogisticsMap"), {
+  ssr: false,
+});
+
+const clientStatuses = ["All", "Lead", "Active", "Inactive"];
 
 export default function LogisticsPage() {
   const { activeWorkspace } = useWorkspace();
-  const [selectedType, setSelectedType] = useState("All");
-  const [selectedJobIds, setSelectedJobIds] = useState<string[]>([]);
 
-  const workspaceJobs = jobs.filter(
-    (job) => job.workspaceId === activeWorkspace.id
-  );
+  const [selectedStatus, setSelectedStatus] = useState("All");
+  const [selectedLocationIds, setSelectedLocationIds] = useState<string[]>([]);
+  const [clients, setClients] = useState<ClientRow[]>([]);
 
-  const filteredJobs =
-    selectedType === "All"
-      ? workspaceJobs
-      : workspaceJobs.filter((job) => job.status === selectedType);
+  useEffect(() => {
+    setClients(loadClients());
+  }, []);
 
-  const visibleJobs = useMemo(() => {
-    return [...filteredJobs].sort((a, b) => {
-      const dateA = a.date ?? "";
-      const dateB = b.date ?? "";
+  const workspaceClients = useMemo(() => {
+    return clients.filter(
+      (client) => client.workspaceId === activeWorkspace.id
+    );
+  }, [clients, activeWorkspace.id]);
 
-      return dateA.localeCompare(dateB);
-    });
-  }, [filteredJobs]);
+  const filteredClients = useMemo(() => {
+    if (selectedStatus === "All") return workspaceClients;
 
-  const routeJobs = visibleJobs.filter((job) =>
-    selectedJobIds.includes(job.id)
-  );
+    return workspaceClients.filter(
+      (client) => client.status === selectedStatus
+    );
+  }, [workspaceClients, selectedStatus]);
 
-  function toggleJob(jobId: string) {
-    setSelectedJobIds((current) =>
-      current.includes(jobId)
-        ? current.filter((id) => id !== jobId)
-        : [...current, jobId]
+  const visibleLocations = useMemo(() => {
+    return buildLogisticsLocations(filteredClients).sort((a, b) =>
+      a.name.localeCompare(b.name)
+    );
+  }, [filteredClients]);
+
+  const selectedLocations = useMemo(() => {
+    return visibleLocations.filter((location) =>
+      selectedLocationIds.includes(location.id)
+    );
+  }, [visibleLocations, selectedLocationIds]);
+
+  function toggleLocation(locationId: string) {
+    setSelectedLocationIds((current) =>
+      current.includes(locationId)
+        ? current.filter((id) => id !== locationId)
+        : [...current, locationId]
     );
   }
 
-  function selectAllVisibleJobs() {
-    setSelectedJobIds(visibleJobs.map((job) => job.id));
+  function selectAllVisibleLocations() {
+    setSelectedLocationIds(visibleLocations.map((location) => location.id));
   }
 
   function clearRoute() {
-    setSelectedJobIds([]);
+    setSelectedLocationIds([]);
   }
 
-  function getPinPosition(index: number) {
-    return {
-      left: 12 + ((index * 23) % 72),
-      top: 15 + ((index * 31) % 68),
-    };
+  function getSelectedRouteNumber(locationId: string) {
+    return (
+      selectedLocations.findIndex((location) => location.id === locationId) + 1
+    );
   }
+
+  function buildGoogleMapsUrl(routeLocations: LogisticsLocation[]) {
+    if (routeLocations.length < 2) return "#";
+
+    const origin = encodeURIComponent(
+      `${routeLocations[0].latitude},${routeLocations[0].longitude}`
+    );
+
+    const destination = encodeURIComponent(
+      `${routeLocations[routeLocations.length - 1].latitude},${
+        routeLocations[routeLocations.length - 1].longitude
+      }`
+    );
+
+    const waypoints = routeLocations
+      .slice(1, -1)
+      .map((location) =>
+        encodeURIComponent(`${location.latitude},${location.longitude}`)
+      )
+      .join("|");
+
+    const waypointParam = waypoints ? `&waypoints=${waypoints}` : "";
+
+    return `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${destination}${waypointParam}&travelmode=driving`;
+  }
+
+  const googleMapsUrl = buildGoogleMapsUrl(selectedLocations);
 
   return (
     <div className="space-y-8">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-950 dark:text-gray-100">
-            Logistics
-          </h1>
-
-          <p className="mt-2 text-gray-500 dark:text-gray-400">
-            Route planning for {activeWorkspace.name}
-          </p>
-        </div>
-
         <select
-          value={selectedType}
+          value={selectedStatus}
           onChange={(event) => {
-            setSelectedType(event.target.value);
-            setSelectedJobIds([]);
+            setSelectedStatus(event.target.value);
+            setSelectedLocationIds([]);
           }}
           className="w-full rounded-lg border border-gray-200 bg-white px-4 py-3 text-gray-900 shadow-sm lg:w-auto dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
         >
-          {jobTypes.map((type) => (
-            <option key={type}>{type}</option>
+          {clientStatuses.map((status) => (
+            <option key={status}>{status}</option>
           ))}
         </select>
       </div>
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1fr_420px]">
-        <div className="relative min-h-[620px] overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
-          <div className="absolute inset-0 bg-[linear-gradient(to_right,#d1d5db_1px,transparent_1px),linear-gradient(to_bottom,#d1d5db_1px,transparent_1px)] bg-[size:70px_70px] opacity-50 dark:opacity-10" />
+        <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-gray-900 sm:p-6">
+          <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h2 className="text-xl font-bold text-gray-950 dark:text-gray-100">
+                Client Location Map
+              </h2>
 
-          <div className="absolute inset-0 opacity-70 dark:opacity-20">
-            <div className="absolute left-[8%] top-[18%] h-3 w-[78%] rotate-[-8deg] rounded-full bg-gray-300 dark:bg-gray-700" />
-            <div className="absolute left-[18%] top-[58%] h-3 w-[72%] rotate-[12deg] rounded-full bg-gray-300 dark:bg-gray-700" />
-            <div className="absolute left-[40%] top-[8%] h-[80%] w-3 rotate-[6deg] rounded-full bg-gray-300 dark:bg-gray-700" />
-            <div className="absolute left-[5%] top-[38%] h-3 w-[40%] rotate-[3deg] rounded-full bg-gray-300 dark:bg-gray-700" />
-            <div className="absolute left-[62%] top-[28%] h-[50%] w-3 rotate-[-14deg] rounded-full bg-gray-300 dark:bg-gray-700" />
+              <p className="mt-1 text-gray-500 dark:text-gray-400">
+                Select client pins to build a route.
+              </p>
+            </div>
+
+            <div className="rounded-lg bg-gray-100 px-3 py-2 text-sm text-gray-600 dark:bg-gray-800 dark:text-gray-300">
+              {selectedLocations.length} selected
+            </div>
           </div>
 
-          <div className="relative h-full p-6">
-            <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-              <div>
-                <h2 className="text-xl font-bold text-gray-950 dark:text-gray-100">
-                  Client Location Map
-                </h2>
-
-                <p className="mt-1 text-gray-500 dark:text-gray-400">
-                  Select client pins to build an efficient route
-                </p>
+          <div className="overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800">
+            {visibleLocations.length > 0 ? (
+              <LogisticsMap
+                locations={visibleLocations}
+                selectedLocationIds={selectedLocationIds}
+                onToggleLocation={toggleLocation}
+              />
+            ) : (
+              <div className="flex h-[500px] items-center justify-center bg-gray-50 text-lg text-gray-500 dark:bg-gray-950 dark:text-gray-400">
+                No client locations found for this filter.
               </div>
-
-              <div className="rounded-lg bg-gray-100 px-3 py-2 text-sm text-gray-600 dark:bg-gray-800 dark:text-gray-300">
-                {routeJobs.length} selected
-              </div>
-            </div>
-
-            <div className="relative h-[500px] overflow-hidden rounded-xl border border-gray-200 bg-green-50 dark:border-gray-800 dark:bg-gray-950">
-              {visibleJobs.length > 0 ? (
-                visibleJobs.map((job, index) => {
-                  const position = getPinPosition(index);
-                  const isSelected = selectedJobIds.includes(job.id);
-                  const routeNumber =
-                    routeJobs.findIndex((routeJob) => routeJob.id === job.id) +
-                    1;
-
-                  return (
-                    <button
-                      key={job.id}
-                      type="button"
-                      onClick={() => toggleJob(job.id)}
-                      className="absolute"
-                      style={{
-                        left: `${position.left}%`,
-                        top: `${position.top}%`,
-                      }}
-                    >
-                      <div className="flex -translate-x-1/2 -translate-y-full flex-col items-center">
-                        <div className="relative flex flex-col items-center">
-                          <div
-                            className={`flex h-10 w-10 items-center justify-center rounded-full text-sm font-bold text-white shadow-lg ring-4 ${
-                              isSelected
-                                ? "bg-blue-600 ring-white dark:ring-gray-900"
-                                : "bg-gray-500 ring-white/80 dark:ring-gray-900"
-                            }`}
-                          >
-                            {isSelected ? routeNumber : "+"}
-                          </div>
-
-                          <div
-                            className={`-mt-1 h-4 w-4 rotate-45 shadow-lg ${
-                              isSelected ? "bg-blue-600" : "bg-gray-500"
-                            }`}
-                          />
-                        </div>
-
-                        <div className="mt-2 max-w-36 rounded-lg bg-white px-3 py-2 text-center text-xs font-medium text-gray-900 shadow dark:bg-gray-800 dark:text-gray-100">
-                          {job.name}
-                        </div>
-                      </div>
-                    </button>
-                  );
-                })
-              ) : (
-                <div className="flex h-full items-center justify-center text-lg text-gray-500 dark:text-gray-400">
-                  No jobs found for this filter
-                </div>
-              )}
-            </div>
+            )}
           </div>
         </div>
 
@@ -174,14 +160,15 @@ export default function LogisticsPage() {
             </h2>
 
             <p className="mt-1 text-gray-500 dark:text-gray-400">
-              Add or remove jobs from the route
+              Add or remove client stops from the route.
             </p>
 
             <div className="mt-5 flex flex-col gap-3 sm:flex-row">
               <button
                 type="button"
-                onClick={selectAllVisibleJobs}
-                className="w-full rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 sm:w-auto"
+                onClick={selectAllVisibleLocations}
+                disabled={visibleLocations.length === 0}
+                className="w-full rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-400 sm:w-auto"
               >
                 + Add All
               </button>
@@ -196,15 +183,16 @@ export default function LogisticsPage() {
             </div>
 
             <div className="mt-6 space-y-3">
-              {visibleJobs.length > 0 ? (
-                visibleJobs.map((job) => {
-                  const isSelected = selectedJobIds.includes(job.id);
+              {visibleLocations.length > 0 ? (
+                visibleLocations.map((location) => {
+                  const isSelected = selectedLocationIds.includes(location.id);
+                  const routeNumber = getSelectedRouteNumber(location.id);
 
                   return (
                     <button
-                      key={job.id}
+                      key={location.id}
                       type="button"
-                      onClick={() => toggleJob(job.id)}
+                      onClick={() => toggleLocation(location.id)}
                       className={`w-full rounded-xl border p-4 text-left ${
                         isSelected
                           ? "border-blue-500 bg-blue-50 dark:bg-blue-950/40"
@@ -212,25 +200,28 @@ export default function LogisticsPage() {
                       }`}
                     >
                       <div className="flex items-start justify-between gap-4">
-                        <div>
+                        <div className="min-w-0">
                           <h3 className="font-semibold text-gray-950 dark:text-gray-100">
-                            {job.name}
+                            {location.name}
                           </h3>
 
                           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                            {job.status}
-                            {job.date ? ` · ${job.date}` : ""}
+                            {location.status}
+                          </p>
+
+                          <p className="mt-1 line-clamp-2 text-sm text-gray-500 dark:text-gray-400">
+                            {getClientFullAddress(location)}
                           </p>
                         </div>
 
                         <span
-                          className={`rounded-full px-3 py-1 text-sm font-semibold ${
+                          className={`flex h-8 min-w-8 items-center justify-center rounded-full px-3 text-sm font-semibold ${
                             isSelected
                               ? "bg-blue-600 text-white"
                               : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300"
                           }`}
                         >
-                          {isSelected ? "−" : "+"}
+                          {isSelected ? routeNumber : "+"}
                         </span>
                       </div>
                     </button>
@@ -238,7 +229,7 @@ export default function LogisticsPage() {
                 })
               ) : (
                 <p className="text-gray-500 dark:text-gray-400">
-                  No jobs available.
+                  No client locations available.
                 </p>
               )}
             </div>
@@ -250,29 +241,28 @@ export default function LogisticsPage() {
             </h2>
 
             <p className="mt-1 text-gray-500 dark:text-gray-400">
-              Current selected stop order
+              Current selected stop order.
             </p>
 
             <div className="mt-6 space-y-4">
-              {routeJobs.length > 0 ? (
-                routeJobs.map((job, index) => (
+              {selectedLocations.length > 0 ? (
+                selectedLocations.map((location, index) => (
                   <div
-                    key={job.id}
+                    key={location.id}
                     className="rounded-xl border border-gray-200 p-4 dark:border-gray-800"
                   >
                     <div className="flex items-start gap-3">
-                      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-600 text-sm font-bold text-white">
+                      <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-blue-600 text-sm font-bold text-white">
                         {index + 1}
                       </div>
 
-                      <div>
+                      <div className="min-w-0">
                         <h3 className="font-semibold text-gray-950 dark:text-gray-100">
-                          {job.name}
+                          {location.name}
                         </h3>
 
                         <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                          {job.status}
-                          {job.date ? ` · ${job.date}` : ""}
+                          {getClientFullAddress(location)}
                         </p>
                       </div>
                     </div>
@@ -280,18 +270,24 @@ export default function LogisticsPage() {
                 ))
               ) : (
                 <p className="text-gray-500 dark:text-gray-400">
-                  Select jobs to build a route.
+                  Select clients to build a route.
                 </p>
               )}
             </div>
 
-            <button
-              type="button"
-              disabled={routeJobs.length < 2}
-              className="mt-6 w-full rounded-lg bg-green-600 px-4 py-3 font-semibold text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:bg-gray-400"
+            <a
+              href={selectedLocations.length >= 2 ? googleMapsUrl : undefined}
+              target="_blank"
+              rel="noreferrer"
+              aria-disabled={selectedLocations.length < 2}
+              className={`mt-6 block w-full rounded-lg px-4 py-3 text-center font-semibold text-white ${
+                selectedLocations.length >= 2
+                  ? "bg-green-600 hover:bg-green-700"
+                  : "pointer-events-none cursor-not-allowed bg-gray-400"
+              }`}
             >
               Open Route in Google Maps
-            </button>
+            </a>
           </div>
         </div>
       </div>

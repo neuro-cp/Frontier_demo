@@ -14,6 +14,8 @@ export type ClientRow = {
   state?: string;
   zip?: string;
   notes?: string;
+  latitude?: number;
+  longitude?: number;
 };
 
 export const clientStatuses = ["Lead", "Active", "Inactive"] as const;

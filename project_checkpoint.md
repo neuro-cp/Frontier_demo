@@ -34,10 +34,13 @@
     📄 page.tsx
   📄 layout.tsx
   📁 logistics
+    📄 logisticsData.ts
+    📄 LogisticsMap.tsx
     📄 page.tsx
   📄 page.tsx
   📁 settings
     📄 page.tsx
+    📄 PermissionsSettings.tsx
 📄 CLAUDE.md
 📁 components
   📄 AppShell.tsx
@@ -1357,87 +1360,412 @@ export default function DashboardPage() {
 ```tsx
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useWorkspace } from "@/components/WorkspaceContext";
+import { clients as defaultClients } from "@/lib/clients";
+import { jobs as defaultJobs } from "@/lib/jobs";
+
+type StoredDocument = {
+  id: string;
+  workspaceId: string;
+  name: string;
+  detectedType: string;
+  extractionStatus: string;
+  fileName: string;
+  notes: string;
+  clientId: string;
+  jobId: string;
+  createdAt: string;
+};
+
+type ClientLike = {
+  id: string;
+  workspaceId: string;
+  name: string;
+};
+
+type JobLike = {
+  id: string;
+  workspaceId: string;
+  jobName?: string;
+  name?: string;
+  clientId?: string;
+  client?: string;
+};
+
+function loadStoredDocuments() {
+  if (typeof window === "undefined") return [];
+
+  const saved = localStorage.getItem("frontier-documents");
+  if (!saved) return [];
+
+  try {
+    const parsed = JSON.parse(saved);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveStoredDocuments(documents: StoredDocument[]) {
+  localStorage.setItem("frontier-documents", JSON.stringify(documents));
+}
+
+function loadStoredClients(): ClientLike[] {
+  if (typeof window === "undefined") return defaultClients as ClientLike[];
+
+  const saved = localStorage.getItem("frontier-clients");
+  if (!saved) return defaultClients as ClientLike[];
+
+  try {
+    const parsed = JSON.parse(saved);
+    return Array.isArray(parsed) ? parsed : (defaultClients as ClientLike[]);
+  } catch {
+    return defaultClients as ClientLike[];
+  }
+}
+
+function loadStoredJobs(): JobLike[] {
+  if (typeof window === "undefined") return defaultJobs as JobLike[];
+
+  const saved = localStorage.getItem("frontier-jobs");
+  if (!saved) return defaultJobs as JobLike[];
+
+  try {
+    const parsed = JSON.parse(saved);
+    return Array.isArray(parsed) ? parsed : (defaultJobs as JobLike[]);
+  } catch {
+    return defaultJobs as JobLike[];
+  }
+}
 
 export default function DocumentsPage() {
   const { activeWorkspace } = useWorkspace();
+
   const [isUploadOpen, setIsUploadOpen] = useState(false);
+  const [documents, setDocuments] = useState<StoredDocument[]>([]);
+  const [clients, setClients] = useState<ClientLike[]>([]);
+  const [jobs, setJobs] = useState<JobLike[]>([]);
+
+  const [documentName, setDocumentName] = useState("");
+  const [detectedType, setDetectedType] = useState("Pending");
+  const [fileName, setFileName] = useState("");
+  const [notes, setNotes] = useState("");
+  const [clientId, setClientId] = useState("");
+  const [jobId, setJobId] = useState("");
+
+  useEffect(() => {
+    setDocuments(loadStoredDocuments());
+    setClients(loadStoredClients());
+    setJobs(loadStoredJobs());
+  }, []);
+
+  const workspaceDocuments = documents.filter(
+    (document) => document.workspaceId === activeWorkspace.id
+  );
+
+  const workspaceClients = clients.filter(
+    (client) => client.workspaceId === activeWorkspace.id
+  );
+
+  const workspaceJobs = jobs.filter(
+    (job) => job.workspaceId === activeWorkspace.id
+  );
+
+  function resetUploadForm() {
+    setDocumentName("");
+    setDetectedType("Pending");
+    setFileName("");
+    setNotes("");
+    setClientId("");
+    setJobId("");
+  }
+
+  function closeUploadModal() {
+    setIsUploadOpen(false);
+    resetUploadForm();
+  }
+
+  function saveUploadPlaceholder() {
+    if (!documentName.trim()) return;
+
+    const newDocument: StoredDocument = {
+      id: crypto.randomUUID(),
+      workspaceId: activeWorkspace.id,
+      name: documentName.trim(),
+      detectedType,
+      extractionStatus: "Waiting for extraction",
+      fileName: fileName || "No file selected",
+      notes: notes.trim(),
+      clientId,
+      jobId,
+      createdAt: new Date().toISOString(),
+    };
+
+    const updatedDocuments = [newDocument, ...documents];
+
+    setDocuments(updatedDocuments);
+    saveStoredDocuments(updatedDocuments);
+    closeUploadModal();
+  }
+
+  function deleteDocument(documentId: string) {
+    const updatedDocuments = documents.filter(
+      (document) => document.id !== documentId
+    );
+
+    setDocuments(updatedDocuments);
+    saveStoredDocuments(updatedDocuments);
+  }
+
+  function getClientName(documentClientId: string) {
+    if (!documentClientId) return "—";
+
+    const client = clients.find((item) => item.id === documentClientId);
+    return client?.name ?? "Unknown client";
+  }
+
+  function getJobName(documentJobId: string) {
+    if (!documentJobId) return "—";
+
+    const job = jobs.find((item) => item.id === documentJobId);
+    return job?.jobName || job?.name || "Unknown job";
+  }
 
   return (
     <div className="space-y-8">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-950 dark:text-gray-100">
-            Document Extraction
-          </h1>
-          <p className="mt-2 text-lg text-gray-500 dark:text-gray-400">
-            Upload documents for {activeWorkspace.name}. Extraction and verification pipeline comes later.
-          </p>
-        </div>
-
-        <button onClick={() => setIsUploadOpen(true)} className="w-full rounded-lg bg-blue-600 px-6 py-3 text-center text-white shadow hover:bg-blue-700 sm:w-auto">
+        <button
+          onClick={() => setIsUploadOpen(true)}
+          className="w-full rounded-lg bg-blue-600 px-6 py-3 text-center font-semibold text-white shadow hover:bg-blue-700 sm:w-auto"
+        >
           + Upload Document
         </button>
       </div>
 
       <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-200">
-        Future flow: upload once → extract intended use and data → verify → choose whether to create a client, job, quote, invoice, expense, or calendar item.
+        upload once → extract intended use and data → verify → choose whether to
+        create a client, job, quote, invoice, expense, or calendar item.
       </div>
 
       <div className="overflow-x-auto rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
-        <table className="min-w-[650px] w-full">
+        <table className="min-w-[900px] w-full">
           <thead>
             <tr className="border-b border-gray-200 text-left text-sm uppercase tracking-wide text-gray-500 dark:border-gray-800 dark:text-gray-400">
               <th className="px-6 py-4">Name</th>
               <th className="px-6 py-4">Detected Type</th>
               <th className="px-6 py-4">Extraction Status</th>
-              <th className="px-6 py-4 text-right">File</th>
+              <th className="px-6 py-4">Client</th>
+              <th className="px-6 py-4">Job</th>
+              <th className="px-6 py-4">File</th>
+              <th className="px-6 py-4 text-right">Actions</th>
             </tr>
           </thead>
 
           <tbody>
-            <tr>
-              <td colSpan={4} className="px-6 py-16 text-center text-2xl text-gray-500 dark:text-gray-400">
-                No documents uploaded for {activeWorkspace.name}
-              </td>
-            </tr>
+            {workspaceDocuments.length === 0 ? (
+              <tr>
+                <td
+                  colSpan={7}
+                  className="px-6 py-16 text-center text-2xl text-gray-500 dark:text-gray-400"
+                >
+                  No documents uploaded for {activeWorkspace.name}
+                </td>
+              </tr>
+            ) : (
+              workspaceDocuments.map((document) => (
+                <tr
+                  key={document.id}
+                  className="border-b border-gray-100 dark:border-gray-800"
+                >
+                  <td className="px-6 py-4 font-semibold">{document.name}</td>
+
+                  <td className="px-6 py-4 text-gray-600 dark:text-gray-300">
+                    {document.detectedType}
+                  </td>
+
+                  <td className="px-6 py-4">
+                    <span className="rounded-full bg-yellow-100 px-3 py-1 text-sm font-semibold text-yellow-800 dark:bg-yellow-950/50 dark:text-yellow-300">
+                      {document.extractionStatus}
+                    </span>
+                  </td>
+
+                  <td className="px-6 py-4 text-gray-600 dark:text-gray-300">
+                    {getClientName(document.clientId)}
+                  </td>
+
+                  <td className="px-6 py-4 text-gray-600 dark:text-gray-300">
+                    {getJobName(document.jobId)}
+                  </td>
+
+                  <td className="px-6 py-4 text-gray-600 dark:text-gray-300">
+                    {document.fileName}
+                  </td>
+
+                  <td className="px-6 py-4 text-right">
+                    <button
+                      type="button"
+                      onClick={() => deleteDocument(document.id)}
+                      className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700"
+                    >
+                      Delete
+                    </button>
+                  </td>
+                </tr>
+              ))
+            )}
           </tbody>
         </table>
       </div>
 
       {isUploadOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4">
-          <div className="w-full max-w-2xl rounded-xl bg-white p-4 shadow-xl sm:p-6 lg:p-8 dark:bg-gray-900">
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/75 p-3 sm:items-center sm:p-4">
+          <div className="my-4 max-h-[calc(100vh-2rem)] w-full max-w-2xl overflow-y-auto rounded-xl bg-white p-4 shadow-xl dark:bg-gray-900 sm:my-0 sm:p-6 lg:p-8">
             <div className="mb-6 flex items-center justify-between">
-              <h2 className="text-2xl font-bold text-gray-950 dark:text-gray-100">Upload for Extraction</h2>
-              <button onClick={() => setIsUploadOpen(false)} className="text-2xl text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">×</button>
+              <h2 className="text-xl font-bold text-gray-950 dark:text-gray-100 sm:text-2xl">
+                Upload for Extraction
+              </h2>
+
+              <button
+                onClick={closeUploadModal}
+                className="text-2xl text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+              >
+                ×
+              </button>
             </div>
 
-            <form className="space-y-6">
+            <form className="space-y-5 sm:space-y-6">
               <div>
-                <label className="mb-2 block text-lg font-medium text-gray-900 dark:text-gray-100">Workspace</label>
-                <input value={activeWorkspace.name} readOnly className="w-full rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-lg text-gray-700 outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300" />
+                <label className="mb-2 block text-base font-medium text-gray-900 dark:text-gray-100 sm:text-lg">
+                  Workspace
+                </label>
+
+                <input
+                  value={activeWorkspace.name}
+                  readOnly
+                  className="w-full rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-base text-gray-700 outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 sm:text-lg"
+                />
               </div>
 
               <div>
-                <label className="mb-2 block text-lg font-medium text-gray-900 dark:text-gray-100">Document Name</label>
-                <input type="text" placeholder="Quote, invoice, receipt, handwritten note..." className="w-full rounded-lg border border-blue-500 bg-white px-4 py-3 text-lg text-gray-950 outline-none dark:bg-gray-800 dark:text-gray-100" />
+                <label className="mb-2 block text-base font-medium text-gray-900 dark:text-gray-100 sm:text-lg">
+                  Document Name
+                </label>
+
+                <input
+                  type="text"
+                  value={documentName}
+                  onChange={(event) => setDocumentName(event.target.value)}
+                  placeholder="Quote, invoice, receipt, handwritten note..."
+                  className="w-full rounded-lg border border-blue-500 bg-white px-4 py-3 text-base text-gray-950 outline-none dark:bg-gray-800 dark:text-gray-100 sm:text-lg"
+                />
               </div>
 
               <div>
-                <label className="mb-2 block text-lg font-medium text-gray-900 dark:text-gray-100">File</label>
-                <input type="file" className="block w-full text-sm text-gray-900 dark:text-gray-100" />
+                <label className="mb-2 block text-base font-medium text-gray-900 dark:text-gray-100 sm:text-lg">
+                  Detected Type
+                </label>
+
+                <select
+                  value={detectedType}
+                  onChange={(event) => setDetectedType(event.target.value)}
+                  className="w-full rounded-lg border border-gray-200 bg-white px-4 py-3 text-base text-gray-950 outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 sm:text-lg"
+                >
+                  <option>Pending</option>
+                  <option>Invoice</option>
+                  <option>Quote</option>
+                  <option>Receipt</option>
+                  <option>Contract</option>
+                  <option>Job Note</option>
+                  <option>Client Document</option>
+                  <option>Other</option>
+                </select>
+              </div>
+
+              <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+                <div>
+                  <label className="mb-2 block text-base font-medium text-gray-900 dark:text-gray-100 sm:text-lg">
+                    Link Client
+                  </label>
+
+                  <select
+                    value={clientId}
+                    onChange={(event) => setClientId(event.target.value)}
+                    className="w-full rounded-lg border border-gray-200 bg-white px-4 py-3 text-base text-gray-950 outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 sm:text-lg"
+                  >
+                    <option value="">No client</option>
+                    {workspaceClients.map((client) => (
+                      <option key={client.id} value={client.id}>
+                        {client.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="mb-2 block text-base font-medium text-gray-900 dark:text-gray-100 sm:text-lg">
+                    Link Job
+                  </label>
+
+                  <select
+                    value={jobId}
+                    onChange={(event) => setJobId(event.target.value)}
+                    className="w-full rounded-lg border border-gray-200 bg-white px-4 py-3 text-base text-gray-950 outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 sm:text-lg"
+                  >
+                    <option value="">No job</option>
+                    {workspaceJobs.map((job) => (
+                      <option key={job.id} value={job.id}>
+                        {job.jobName || job.name || "Untitled job"}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
 
               <div>
-                <label className="mb-2 block text-lg font-medium text-gray-900 dark:text-gray-100">Notes</label>
-                <textarea rows={3} placeholder="Optional context for later extraction." className="w-full rounded-lg border border-gray-200 bg-white px-4 py-3 text-lg text-gray-900 shadow-sm dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100" />
+                <label className="mb-2 block text-base font-medium text-gray-900 dark:text-gray-100 sm:text-lg">
+                  File
+                </label>
+
+                <input
+                  type="file"
+                  onChange={(event) =>
+                    setFileName(event.target.files?.[0]?.name ?? "")
+                  }
+                  className="block w-full text-sm text-gray-900 dark:text-gray-100"
+                />
+              </div>
+
+              <div>
+                <label className="mb-2 block text-base font-medium text-gray-900 dark:text-gray-100 sm:text-lg">
+                  Notes
+                </label>
+
+                <textarea
+                  rows={3}
+                  value={notes}
+                  onChange={(event) => setNotes(event.target.value)}
+                  placeholder="Optional context for later extraction."
+                  className="w-full rounded-lg border border-gray-200 bg-white px-4 py-3 text-base text-gray-900 shadow-sm dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 sm:text-lg"
+                />
               </div>
 
               <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-                <button type="button" onClick={() => setIsUploadOpen(false)} className="w-full rounded-lg border border-gray-200 px-6 py-3 text-lg text-gray-900 shadow-sm hover:bg-gray-50 dark:border-gray-700 dark:text-gray-100 dark:hover:bg-gray-800 sm:w-auto">Cancel</button>
-                <button type="button" onClick={() => setIsUploadOpen(false)} className="w-full rounded-lg bg-blue-500 px-6 py-3 text-lg font-semibold text-white hover:bg-blue-600 sm:w-auto">Save Upload Placeholder</button>
+                <button
+                  type="button"
+                  onClick={closeUploadModal}
+                  className="w-full rounded-lg border border-gray-200 px-6 py-3 text-base text-gray-900 shadow-sm hover:bg-gray-50 dark:border-gray-700 dark:text-gray-100 dark:hover:bg-gray-800 sm:w-auto sm:text-lg"
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="button"
+                  onClick={saveUploadPlaceholder}
+                  className="w-full rounded-lg bg-blue-600 px-6 py-3 text-base font-semibold text-white hover:bg-blue-700 sm:w-auto sm:text-lg"
+                >
+                  Save Upload Placeholder
+                </button>
               </div>
             </form>
           </div>
@@ -2664,7 +2992,7 @@ export default function InvoiceDetailPage() {
 ```tsx
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 
@@ -2694,7 +3022,7 @@ function formatPhone(value: string) {
   return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
 }
 
-export default function NewInvoicePage() {
+function NewInvoiceContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const startingJobId = searchParams.get("jobId") || "";
@@ -2718,12 +3046,8 @@ export default function NewInvoicePage() {
   const [billToPhone, setBillToPhone] = useState("");
   const [billToEmail, setBillToEmail] = useState("");
 
-  const [footerMessage, setFooterMessage] = useState(
-    "Thank you for your business!"
-  );
-  const [contactMessage, setContactMessage] = useState(
-    "Please contact us with any questions about this invoice."
-  );
+  const [footerMessage, setFooterMessage] = useState("Thank you for your business!");
+  const [contactMessage, setContactMessage] = useState("Please contact us with any questions about this invoice.");
 
   useEffect(() => {
     setClientItems(loadClients());
@@ -2779,9 +3103,7 @@ export default function NewInvoicePage() {
       return;
     }
 
-    const selectedClient = workspaceClients.find(
-      (client) => client.id === clientId
-    );
+    const selectedClient = workspaceClients.find((client) => client.id === clientId);
 
     if (!selectedClient) return;
 
@@ -2810,8 +3132,7 @@ export default function NewInvoicePage() {
 
     const matchedClient = workspaceClients.find(
       (client) =>
-        client.name.trim().toLowerCase() ===
-        selectedJob.client.trim().toLowerCase()
+        client.name.trim().toLowerCase() === selectedJob.client.trim().toLowerCase()
     );
 
     if (matchedClient) {
@@ -2879,7 +3200,6 @@ export default function NewInvoicePage() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className="text-3xl font-bold">New Invoice</h1>
-
           <p className="mt-2 text-gray-500 dark:text-gray-400">
             Step 1: setup invoice details for {activeWorkspace.name}
           </p>
@@ -2936,7 +3256,6 @@ export default function NewInvoicePage() {
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
         <section className="rounded-xl bg-white p-4 shadow dark:bg-gray-900 sm:p-6">
           <h2 className="text-xl font-bold">From</h2>
-
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
             Placeholder until company settings are connected.
           </p>
@@ -2945,8 +3264,8 @@ export default function NewInvoicePage() {
             <p className="font-semibold">{companyPlaceholder.companyName}</p>
             <p>{companyPlaceholder.companyAddress}</p>
             <p>
-              {companyPlaceholder.companyCity},{" "}
-              {companyPlaceholder.companyState} {companyPlaceholder.companyZip}
+              {companyPlaceholder.companyCity}, {companyPlaceholder.companyState}{" "}
+              {companyPlaceholder.companyZip}
             </p>
             <p className="mt-2">{companyPlaceholder.companyPhone}</p>
             <p>{companyPlaceholder.companyEmail}</p>
@@ -2968,7 +3287,6 @@ export default function NewInvoicePage() {
               className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-800"
             >
               <option value="new">New Client</option>
-
               {activeWorkspaceClients.map((client) => (
                 <option key={client.id} value={client.id}>
                   {client.name}
@@ -3115,6 +3433,20 @@ export default function NewInvoicePage() {
         </button>
       </div>
     </div>
+  );
+}
+
+export default function NewInvoicePage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="space-y-6 text-gray-950 dark:text-gray-100">
+          Loading invoice setup...
+        </div>
+      }
+    >
+      <NewInvoiceContent />
+    </Suspense>
   );
 }
 ```
@@ -4156,6 +4488,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import AppShell from "@/components/AppShell";
 import { WorkspaceProvider } from "@/components/WorkspaceContext";
+import "leaflet/dist/leaflet.css";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -4194,175 +4527,346 @@ export default function RootLayout({
 }
 ```
 
+## app\logistics\logisticsData.ts
+
+```typescript
+import { ClientRow } from "@/lib/frontierClients";
+
+export type LogisticsLocation = {
+  id: string;
+  workspaceId: string;
+  clientId: string;
+  name: string;
+  status: string;
+  address: string;
+  city: string;
+  state: string;
+  zip: string;
+  latitude: number;
+  longitude: number;
+};
+
+const demoCoordinatesByClientId: Record<
+  string,
+  { latitude: number; longitude: number }
+> = {
+  "1": { latitude: 42.6886, longitude: -83.1359 },
+  "2": { latitude: 42.6658, longitude: -83.1141 },
+  "3": { latitude: 42.6698, longitude: -83.1517 },
+  "4": { latitude: 42.6518, longitude: -83.1436 },
+  "5": { latitude: 42.6816, longitude: -83.1952 },
+  "6": { latitude: 42.6417, longitude: -83.1508 },
+
+  "7": { latitude: 42.6358, longitude: -83.1418 },
+  "8": { latitude: 42.6802, longitude: -83.1348 },
+  "9": { latitude: 42.6512, longitude: -83.1942 },
+  "10": { latitude: 42.6807, longitude: -83.1496 },
+  "11": { latitude: 42.6328, longitude: -83.1337 },
+
+  "12": { latitude: 42.6611, longitude: -83.1249 },
+  "13": { latitude: 42.6802, longitude: -83.1348 },
+  "14": { latitude: 42.6816, longitude: -83.1952 },
+  "15": { latitude: 42.6923, longitude: -83.1237 },
+  "16": { latitude: 42.6525, longitude: -83.1946 },
+};
+
+export function getClientFullAddress(location: LogisticsLocation) {
+  return [location.address, location.city, location.state, location.zip]
+    .filter(Boolean)
+    .join(", ");
+}
+
+export function buildLogisticsLocations(
+  clients: ClientRow[]
+): LogisticsLocation[] {
+  return clients
+    .map((client) => {
+      const fallbackCoordinates = demoCoordinatesByClientId[client.id];
+
+      const latitude = client.latitude ?? fallbackCoordinates?.latitude;
+      const longitude = client.longitude ?? fallbackCoordinates?.longitude;
+
+      if (!latitude || !longitude) return null;
+
+      return {
+        id: client.id,
+        workspaceId: client.workspaceId,
+        clientId: client.id,
+        name: client.name,
+        status: client.status,
+        address: client.address ?? "",
+        city: client.city ?? "",
+        state: client.state ?? "",
+        zip: client.zip ?? "",
+        latitude,
+        longitude,
+      };
+    })
+    .filter((location): location is LogisticsLocation => Boolean(location));
+}
+```
+
+## app\logistics\LogisticsMap.tsx
+
+```tsx
+"use client";
+
+import L from "leaflet";
+import { MapContainer, Marker, Popup, TileLayer } from "react-leaflet";
+
+import { LogisticsLocation } from "./logisticsData";
+
+type LogisticsMapProps = {
+  locations: LogisticsLocation[];
+  selectedLocationIds: string[];
+  onToggleLocation: (locationId: string) => void;
+};
+
+const defaultCenter: [number, number] = [42.68, -83.15];
+
+const defaultMarkerIcon = new L.Icon({
+  iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
+  iconRetinaUrl:
+    "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
+  shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
+  iconSize: [25, 41],
+  iconAnchor: [12, 41],
+  popupAnchor: [1, -34],
+  shadowSize: [41, 41],
+});
+
+const selectedMarkerIcon = new L.Icon({
+  iconUrl:
+    "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-green.png",
+  iconRetinaUrl:
+    "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-green.png",
+  shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
+  iconSize: [25, 41],
+  iconAnchor: [12, 41],
+  popupAnchor: [1, -34],
+  shadowSize: [41, 41],
+});
+
+export default function LogisticsMap({
+  locations,
+  selectedLocationIds,
+  onToggleLocation,
+}: LogisticsMapProps) {
+  const center: [number, number] =
+    locations.length > 0
+      ? [locations[0].latitude, locations[0].longitude]
+      : defaultCenter;
+
+  return (
+    <MapContainer
+      center={center}
+      zoom={13}
+      scrollWheelZoom
+      className="h-[500px] w-full rounded-xl"
+    >
+      <TileLayer
+        attribution="&copy; OpenStreetMap contributors"
+        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+      />
+
+      {locations.map((location) => {
+        const isSelected = selectedLocationIds.includes(location.id);
+
+        return (
+          <Marker
+            key={location.id}
+            position={[location.latitude, location.longitude]}
+            icon={isSelected ? selectedMarkerIcon : defaultMarkerIcon}
+            eventHandlers={{
+              click: () => onToggleLocation(location.id),
+            }}
+          >
+            <Popup>
+              <div className="space-y-2">
+                <div className="font-semibold">{location.name}</div>
+
+                <div className="text-sm">
+                  {location.address}
+                  <br />
+                  {location.city}, {location.state} {location.zip}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => onToggleLocation(location.id)}
+                  className={`rounded px-3 py-1 text-sm font-semibold text-white ${
+                    isSelected
+                      ? "bg-green-600 hover:bg-green-700"
+                      : "bg-blue-600 hover:bg-blue-700"
+                  }`}
+                >
+                  {isSelected ? "Remove from Route" : "Add to Route"}
+                </button>
+              </div>
+            </Popup>
+          </Marker>
+        );
+      })}
+    </MapContainer>
+  );
+}
+```
+
 ## app\logistics\page.tsx
 
 ```tsx
 "use client";
 
-import { useMemo, useState } from "react";
-import { jobs } from "@/lib/jobs";
-import { useWorkspace } from "@/components/WorkspaceContext";
+import dynamic from "next/dynamic";
+import { useEffect, useMemo, useState } from "react";
 
-const jobTypes = ["All", "Lead", "Quoted", "Scheduled", "Completed"];
+import { useWorkspace } from "@/components/WorkspaceContext";
+import { ClientRow, loadClients } from "@/lib/frontierClients";
+import {
+  buildLogisticsLocations,
+  getClientFullAddress,
+  LogisticsLocation,
+} from "./logisticsData";
+
+const LogisticsMap = dynamic(() => import("./LogisticsMap"), {
+  ssr: false,
+});
+
+const clientStatuses = ["All", "Lead", "Active", "Inactive"];
 
 export default function LogisticsPage() {
   const { activeWorkspace } = useWorkspace();
-  const [selectedType, setSelectedType] = useState("All");
-  const [selectedJobIds, setSelectedJobIds] = useState<string[]>([]);
 
-  const workspaceJobs = jobs.filter(
-    (job) => job.workspaceId === activeWorkspace.id
-  );
+  const [selectedStatus, setSelectedStatus] = useState("All");
+  const [selectedLocationIds, setSelectedLocationIds] = useState<string[]>([]);
+  const [clients, setClients] = useState<ClientRow[]>([]);
 
-  const filteredJobs =
-    selectedType === "All"
-      ? workspaceJobs
-      : workspaceJobs.filter((job) => job.status === selectedType);
+  useEffect(() => {
+    setClients(loadClients());
+  }, []);
 
-  const visibleJobs = useMemo(() => {
-    return [...filteredJobs].sort((a, b) => {
-      const dateA = a.date ?? "";
-      const dateB = b.date ?? "";
+  const workspaceClients = useMemo(() => {
+    return clients.filter(
+      (client) => client.workspaceId === activeWorkspace.id
+    );
+  }, [clients, activeWorkspace.id]);
 
-      return dateA.localeCompare(dateB);
-    });
-  }, [filteredJobs]);
+  const filteredClients = useMemo(() => {
+    if (selectedStatus === "All") return workspaceClients;
 
-  const routeJobs = visibleJobs.filter((job) =>
-    selectedJobIds.includes(job.id)
-  );
+    return workspaceClients.filter(
+      (client) => client.status === selectedStatus
+    );
+  }, [workspaceClients, selectedStatus]);
 
-  function toggleJob(jobId: string) {
-    setSelectedJobIds((current) =>
-      current.includes(jobId)
-        ? current.filter((id) => id !== jobId)
-        : [...current, jobId]
+  const visibleLocations = useMemo(() => {
+    return buildLogisticsLocations(filteredClients).sort((a, b) =>
+      a.name.localeCompare(b.name)
+    );
+  }, [filteredClients]);
+
+  const selectedLocations = useMemo(() => {
+    return visibleLocations.filter((location) =>
+      selectedLocationIds.includes(location.id)
+    );
+  }, [visibleLocations, selectedLocationIds]);
+
+  function toggleLocation(locationId: string) {
+    setSelectedLocationIds((current) =>
+      current.includes(locationId)
+        ? current.filter((id) => id !== locationId)
+        : [...current, locationId]
     );
   }
 
-  function selectAllVisibleJobs() {
-    setSelectedJobIds(visibleJobs.map((job) => job.id));
+  function selectAllVisibleLocations() {
+    setSelectedLocationIds(visibleLocations.map((location) => location.id));
   }
 
   function clearRoute() {
-    setSelectedJobIds([]);
+    setSelectedLocationIds([]);
   }
 
-  function getPinPosition(index: number) {
-    return {
-      left: 12 + ((index * 23) % 72),
-      top: 15 + ((index * 31) % 68),
-    };
+  function getSelectedRouteNumber(locationId: string) {
+    return (
+      selectedLocations.findIndex((location) => location.id === locationId) + 1
+    );
   }
+
+  function buildGoogleMapsUrl(routeLocations: LogisticsLocation[]) {
+    if (routeLocations.length < 2) return "#";
+
+    const origin = encodeURIComponent(
+      `${routeLocations[0].latitude},${routeLocations[0].longitude}`
+    );
+
+    const destination = encodeURIComponent(
+      `${routeLocations[routeLocations.length - 1].latitude},${
+        routeLocations[routeLocations.length - 1].longitude
+      }`
+    );
+
+    const waypoints = routeLocations
+      .slice(1, -1)
+      .map((location) =>
+        encodeURIComponent(`${location.latitude},${location.longitude}`)
+      )
+      .join("|");
+
+    const waypointParam = waypoints ? `&waypoints=${waypoints}` : "";
+
+    return `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${destination}${waypointParam}&travelmode=driving`;
+  }
+
+  const googleMapsUrl = buildGoogleMapsUrl(selectedLocations);
 
   return (
     <div className="space-y-8">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-950 dark:text-gray-100">
-            Logistics
-          </h1>
-
-          <p className="mt-2 text-gray-500 dark:text-gray-400">
-            Route planning for {activeWorkspace.name}
-          </p>
-        </div>
-
         <select
-          value={selectedType}
+          value={selectedStatus}
           onChange={(event) => {
-            setSelectedType(event.target.value);
-            setSelectedJobIds([]);
+            setSelectedStatus(event.target.value);
+            setSelectedLocationIds([]);
           }}
           className="w-full rounded-lg border border-gray-200 bg-white px-4 py-3 text-gray-900 shadow-sm lg:w-auto dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
         >
-          {jobTypes.map((type) => (
-            <option key={type}>{type}</option>
+          {clientStatuses.map((status) => (
+            <option key={status}>{status}</option>
           ))}
         </select>
       </div>
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1fr_420px]">
-        <div className="relative min-h-[620px] overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
-          <div className="absolute inset-0 bg-[linear-gradient(to_right,#d1d5db_1px,transparent_1px),linear-gradient(to_bottom,#d1d5db_1px,transparent_1px)] bg-[size:70px_70px] opacity-50 dark:opacity-10" />
+        <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-gray-900 sm:p-6">
+          <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h2 className="text-xl font-bold text-gray-950 dark:text-gray-100">
+                Client Location Map
+              </h2>
 
-          <div className="absolute inset-0 opacity-70 dark:opacity-20">
-            <div className="absolute left-[8%] top-[18%] h-3 w-[78%] rotate-[-8deg] rounded-full bg-gray-300 dark:bg-gray-700" />
-            <div className="absolute left-[18%] top-[58%] h-3 w-[72%] rotate-[12deg] rounded-full bg-gray-300 dark:bg-gray-700" />
-            <div className="absolute left-[40%] top-[8%] h-[80%] w-3 rotate-[6deg] rounded-full bg-gray-300 dark:bg-gray-700" />
-            <div className="absolute left-[5%] top-[38%] h-3 w-[40%] rotate-[3deg] rounded-full bg-gray-300 dark:bg-gray-700" />
-            <div className="absolute left-[62%] top-[28%] h-[50%] w-3 rotate-[-14deg] rounded-full bg-gray-300 dark:bg-gray-700" />
+              <p className="mt-1 text-gray-500 dark:text-gray-400">
+                Select client pins to build a route.
+              </p>
+            </div>
+
+            <div className="rounded-lg bg-gray-100 px-3 py-2 text-sm text-gray-600 dark:bg-gray-800 dark:text-gray-300">
+              {selectedLocations.length} selected
+            </div>
           </div>
 
-          <div className="relative h-full p-6">
-            <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-              <div>
-                <h2 className="text-xl font-bold text-gray-950 dark:text-gray-100">
-                  Client Location Map
-                </h2>
-
-                <p className="mt-1 text-gray-500 dark:text-gray-400">
-                  Select client pins to build an efficient route
-                </p>
+          <div className="overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800">
+            {visibleLocations.length > 0 ? (
+              <LogisticsMap
+                locations={visibleLocations}
+                selectedLocationIds={selectedLocationIds}
+                onToggleLocation={toggleLocation}
+              />
+            ) : (
+              <div className="flex h-[500px] items-center justify-center bg-gray-50 text-lg text-gray-500 dark:bg-gray-950 dark:text-gray-400">
+                No client locations found for this filter.
               </div>
-
-              <div className="rounded-lg bg-gray-100 px-3 py-2 text-sm text-gray-600 dark:bg-gray-800 dark:text-gray-300">
-                {routeJobs.length} selected
-              </div>
-            </div>
-
-            <div className="relative h-[500px] overflow-hidden rounded-xl border border-gray-200 bg-green-50 dark:border-gray-800 dark:bg-gray-950">
-              {visibleJobs.length > 0 ? (
-                visibleJobs.map((job, index) => {
-                  const position = getPinPosition(index);
-                  const isSelected = selectedJobIds.includes(job.id);
-                  const routeNumber =
-                    routeJobs.findIndex((routeJob) => routeJob.id === job.id) +
-                    1;
-
-                  return (
-                    <button
-                      key={job.id}
-                      type="button"
-                      onClick={() => toggleJob(job.id)}
-                      className="absolute"
-                      style={{
-                        left: `${position.left}%`,
-                        top: `${position.top}%`,
-                      }}
-                    >
-                      <div className="flex -translate-x-1/2 -translate-y-full flex-col items-center">
-                        <div className="relative flex flex-col items-center">
-                          <div
-                            className={`flex h-10 w-10 items-center justify-center rounded-full text-sm font-bold text-white shadow-lg ring-4 ${
-                              isSelected
-                                ? "bg-blue-600 ring-white dark:ring-gray-900"
-                                : "bg-gray-500 ring-white/80 dark:ring-gray-900"
-                            }`}
-                          >
-                            {isSelected ? routeNumber : "+"}
-                          </div>
-
-                          <div
-                            className={`-mt-1 h-4 w-4 rotate-45 shadow-lg ${
-                              isSelected ? "bg-blue-600" : "bg-gray-500"
-                            }`}
-                          />
-                        </div>
-
-                        <div className="mt-2 max-w-36 rounded-lg bg-white px-3 py-2 text-center text-xs font-medium text-gray-900 shadow dark:bg-gray-800 dark:text-gray-100">
-                          {job.name}
-                        </div>
-                      </div>
-                    </button>
-                  );
-                })
-              ) : (
-                <div className="flex h-full items-center justify-center text-lg text-gray-500 dark:text-gray-400">
-                  No jobs found for this filter
-                </div>
-              )}
-            </div>
+            )}
           </div>
         </div>
 
@@ -4373,14 +4877,15 @@ export default function LogisticsPage() {
             </h2>
 
             <p className="mt-1 text-gray-500 dark:text-gray-400">
-              Add or remove jobs from the route
+              Add or remove client stops from the route.
             </p>
 
             <div className="mt-5 flex flex-col gap-3 sm:flex-row">
               <button
                 type="button"
-                onClick={selectAllVisibleJobs}
-                className="w-full rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 sm:w-auto"
+                onClick={selectAllVisibleLocations}
+                disabled={visibleLocations.length === 0}
+                className="w-full rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-400 sm:w-auto"
               >
                 + Add All
               </button>
@@ -4395,15 +4900,16 @@ export default function LogisticsPage() {
             </div>
 
             <div className="mt-6 space-y-3">
-              {visibleJobs.length > 0 ? (
-                visibleJobs.map((job) => {
-                  const isSelected = selectedJobIds.includes(job.id);
+              {visibleLocations.length > 0 ? (
+                visibleLocations.map((location) => {
+                  const isSelected = selectedLocationIds.includes(location.id);
+                  const routeNumber = getSelectedRouteNumber(location.id);
 
                   return (
                     <button
-                      key={job.id}
+                      key={location.id}
                       type="button"
-                      onClick={() => toggleJob(job.id)}
+                      onClick={() => toggleLocation(location.id)}
                       className={`w-full rounded-xl border p-4 text-left ${
                         isSelected
                           ? "border-blue-500 bg-blue-50 dark:bg-blue-950/40"
@@ -4411,25 +4917,28 @@ export default function LogisticsPage() {
                       }`}
                     >
                       <div className="flex items-start justify-between gap-4">
-                        <div>
+                        <div className="min-w-0">
                           <h3 className="font-semibold text-gray-950 dark:text-gray-100">
-                            {job.name}
+                            {location.name}
                           </h3>
 
                           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                            {job.status}
-                            {job.date ? ` · ${job.date}` : ""}
+                            {location.status}
+                          </p>
+
+                          <p className="mt-1 line-clamp-2 text-sm text-gray-500 dark:text-gray-400">
+                            {getClientFullAddress(location)}
                           </p>
                         </div>
 
                         <span
-                          className={`rounded-full px-3 py-1 text-sm font-semibold ${
+                          className={`flex h-8 min-w-8 items-center justify-center rounded-full px-3 text-sm font-semibold ${
                             isSelected
                               ? "bg-blue-600 text-white"
                               : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300"
                           }`}
                         >
-                          {isSelected ? "−" : "+"}
+                          {isSelected ? routeNumber : "+"}
                         </span>
                       </div>
                     </button>
@@ -4437,7 +4946,7 @@ export default function LogisticsPage() {
                 })
               ) : (
                 <p className="text-gray-500 dark:text-gray-400">
-                  No jobs available.
+                  No client locations available.
                 </p>
               )}
             </div>
@@ -4449,29 +4958,28 @@ export default function LogisticsPage() {
             </h2>
 
             <p className="mt-1 text-gray-500 dark:text-gray-400">
-              Current selected stop order
+              Current selected stop order.
             </p>
 
             <div className="mt-6 space-y-4">
-              {routeJobs.length > 0 ? (
-                routeJobs.map((job, index) => (
+              {selectedLocations.length > 0 ? (
+                selectedLocations.map((location, index) => (
                   <div
-                    key={job.id}
+                    key={location.id}
                     className="rounded-xl border border-gray-200 p-4 dark:border-gray-800"
                   >
                     <div className="flex items-start gap-3">
-                      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-600 text-sm font-bold text-white">
+                      <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-blue-600 text-sm font-bold text-white">
                         {index + 1}
                       </div>
 
-                      <div>
+                      <div className="min-w-0">
                         <h3 className="font-semibold text-gray-950 dark:text-gray-100">
-                          {job.name}
+                          {location.name}
                         </h3>
 
                         <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                          {job.status}
-                          {job.date ? ` · ${job.date}` : ""}
+                          {getClientFullAddress(location)}
                         </p>
                       </div>
                     </div>
@@ -4479,18 +4987,24 @@ export default function LogisticsPage() {
                 ))
               ) : (
                 <p className="text-gray-500 dark:text-gray-400">
-                  Select jobs to build a route.
+                  Select clients to build a route.
                 </p>
               )}
             </div>
 
-            <button
-              type="button"
-              disabled={routeJobs.length < 2}
-              className="mt-6 w-full rounded-lg bg-green-600 px-4 py-3 font-semibold text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:bg-gray-400"
+            <a
+              href={selectedLocations.length >= 2 ? googleMapsUrl : undefined}
+              target="_blank"
+              rel="noreferrer"
+              aria-disabled={selectedLocations.length < 2}
+              className={`mt-6 block w-full rounded-lg px-4 py-3 text-center font-semibold text-white ${
+                selectedLocations.length >= 2
+                  ? "bg-green-600 hover:bg-green-700"
+                  : "pointer-events-none cursor-not-allowed bg-gray-400"
+              }`}
             >
               Open Route in Google Maps
-            </button>
+            </a>
           </div>
         </div>
       </div>
@@ -4510,7 +5024,7 @@ export default function Home() {
           ⌖
         </div>
 
-        <h1 className="mt-4 text-6xl font-black tracking-[0.25em] text-gray-950 dark:text-gray-100">
+        <h1 className="mt-4 text-3xl sm:text-5xl md:text-6xl font-black tracking-[0.1em] text-gray-950 dark:text-gray-100">
           FRONTIER
         </h1>
 
@@ -4556,6 +5070,7 @@ export default function Home() {
 
 import { useEffect, useState } from "react";
 import { useWorkspace } from "@/components/WorkspaceContext";
+import PermissionsSettings from "./PermissionsSettings";
 
 type SettingsTab =
   | "business"
@@ -4608,28 +5123,10 @@ const businessTypes = [
   "Other",
 ];
 
-const roles = [
-  {
-    name: "Owner",
-    color: "text-purple-600",
-    description:
-      "Full access. Can manage settings, billing, team members, clients, invoices, jobs, inventory, and documents.",
-  },
-  {
-    name: "Manager",
-    color: "text-blue-600",
-    description:
-      "Can manage daily operations, clients, jobs, invoices, calendar, inventory, logistics, and documents.",
-  },
-  {
-    name: "Employee",
-    color: "text-gray-700 dark:text-gray-300",
-    description:
-      "Can view assigned jobs, update job notes, view calendar, and access limited client/job information.",
-  },
-];
-
-function getDefaultSettings(workspaceId: string, workspaceName: string): WorkspaceSettings {
+function getDefaultSettings(
+  workspaceId: string,
+  workspaceName: string
+): WorkspaceSettings {
   return {
     workspaceId,
 
@@ -4644,7 +5141,8 @@ function getDefaultSettings(workspaceId: string, workspaceName: string): Workspa
 
     defaultInvoiceTerms: "Due upon receipt",
     defaultFooterMessage: "Thank you for your business!",
-    defaultContactMessage: "Please contact us with any questions about this invoice.",
+    defaultContactMessage:
+      "Please contact us with any questions about this invoice.",
     defaultInvoiceStatus: "Draft",
 
     taxState: "MI",
@@ -4662,7 +5160,6 @@ function loadAllSettings() {
   if (typeof window === "undefined") return [];
 
   const saved = localStorage.getItem("frontier-settings");
-
   if (!saved) return [];
 
   try {
@@ -4687,9 +5184,6 @@ export default function SettingsPage() {
   );
 
   const [savedNotice, setSavedNotice] = useState("");
-  const [inviteOpen, setInviteOpen] = useState(false);
-  const [inviteEmail, setInviteEmail] = useState("");
-  const [inviteRole, setInviteRole] = useState("Employee");
 
   useEffect(() => {
     const loadedSettings = loadAllSettings();
@@ -4712,6 +5206,11 @@ export default function SettingsPage() {
     }));
   }
 
+  function showSavedNotice(message: string) {
+    setSavedNotice(message);
+    window.setTimeout(() => setSavedNotice(""), 2500);
+  }
+
   function saveSettings() {
     const withoutCurrentWorkspace = allSettings.filter(
       (item) => item.workspaceId !== activeWorkspace.id
@@ -4722,12 +5221,17 @@ export default function SettingsPage() {
     setAllSettings(updatedSettings);
     saveAllSettings(updatedSettings);
 
-    setSavedNotice("Settings saved.");
-    window.setTimeout(() => setSavedNotice(""), 2500);
+    showSavedNotice("Settings saved.");
+
+    window.dispatchEvent(new Event("frontier-settings-updated"));
   }
 
   function resetWorkspaceSettings() {
-    const resetSettings = getDefaultSettings(activeWorkspace.id, activeWorkspace.name);
+    const resetSettings = getDefaultSettings(
+      activeWorkspace.id,
+      activeWorkspace.name
+    );
+
     const updatedSettings = allSettings.filter(
       (item) => item.workspaceId !== activeWorkspace.id
     );
@@ -4735,27 +5239,20 @@ export default function SettingsPage() {
     setSettings(resetSettings);
     setAllSettings(updatedSettings);
     saveAllSettings(updatedSettings);
-    setSavedNotice("Settings reset.");
-    window.setTimeout(() => setSavedNotice(""), 2500);
-  }
 
-  function handleInviteSubmit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+    showSavedNotice("Settings reset.");
 
-    setInviteEmail("");
-    setInviteRole("Employee");
-    setInviteOpen(false);
-    setSavedNotice("Invite placeholder saved.");
-    window.setTimeout(() => setSavedNotice(""), 2500);
+    window.dispatchEvent(new Event("frontier-settings-updated"));
   }
 
   const inputClass =
     "w-full rounded-lg border border-gray-300 bg-white px-4 py-3 text-gray-950 shadow-sm outline-none focus:border-blue-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100";
 
-  const labelClass = "mb-2 block text-sm font-semibold text-gray-800 dark:text-gray-100";
+  const labelClass =
+    "mb-2 block text-sm font-semibold text-gray-800 dark:text-gray-100";
 
   const tabClass = (target: SettingsTab) =>
-    `rounded-lg px-4 py-2 text-sm font-semibold ${
+    `rounded-lg px-4 py-2 text-xs font-semibold ${
       tab === target
         ? "bg-blue-600 text-white shadow"
         : "bg-white text-gray-700 hover:bg-gray-100 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800"
@@ -4764,18 +5261,11 @@ export default function SettingsPage() {
   return (
     <div className="space-y-8 text-gray-950 dark:text-gray-100">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <div>
-          <h1 className="text-3xl font-bold">Settings</h1>
-          <p className="mt-2 text-gray-500 dark:text-gray-400">
-            Configure {activeWorkspace.name} defaults for invoices, taxes, workspace behavior, and team access.
-          </p>
-        </div>
-
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
             onClick={resetWorkspaceSettings}
-            className="rounded-lg border border-gray-300 px-4 py-2 font-semibold hover:bg-gray-100 dark:border-gray-700 dark:hover:bg-gray-800"
+            className="rounded-lg bg-gray-200 px-4 py-2 font-semibold text-gray-800 hover:bg-gray-300 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
           >
             Reset
           </button>
@@ -4797,19 +5287,35 @@ export default function SettingsPage() {
       )}
 
       <div className="flex flex-wrap gap-2 rounded-xl bg-gray-100 p-2 dark:bg-gray-800">
-        <button onClick={() => setTab("business")} className={tabClass("business")}>
+        <button
+          onClick={() => setTab("business")}
+          className={tabClass("business")}
+        >
           Business Profile
         </button>
-        <button onClick={() => setTab("invoice")} className={tabClass("invoice")}>
+
+        <button
+          onClick={() => setTab("invoice")}
+          className={tabClass("invoice")}
+        >
           Invoice Defaults
         </button>
+
         <button onClick={() => setTab("tax")} className={tabClass("tax")}>
           Tax
         </button>
-        <button onClick={() => setTab("workspace")} className={tabClass("workspace")}>
+
+        <button
+          onClick={() => setTab("workspace")}
+          className={tabClass("workspace")}
+        >
           Workspace
         </button>
-        <button onClick={() => setTab("permissions")} className={tabClass("permissions")}>
+
+        <button
+          onClick={() => setTab("permissions")}
+          className={tabClass("permissions")}
+        >
           Permissions
         </button>
       </div>
@@ -4817,6 +5323,7 @@ export default function SettingsPage() {
       {tab === "business" && (
         <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-gray-900 sm:p-6">
           <h2 className="text-2xl font-bold">Business Profile</h2>
+
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
             This should later feed the invoice “From” section automatically.
           </p>
@@ -4826,7 +5333,9 @@ export default function SettingsPage() {
               <label className={labelClass}>Company Name</label>
               <input
                 value={settings.companyName}
-                onChange={(event) => updateSetting("companyName", event.target.value)}
+                onChange={(event) =>
+                  updateSetting("companyName", event.target.value)
+                }
                 className={inputClass}
               />
             </div>
@@ -4836,7 +5345,9 @@ export default function SettingsPage() {
               <input
                 type="email"
                 value={settings.companyEmail}
-                onChange={(event) => updateSetting("companyEmail", event.target.value)}
+                onChange={(event) =>
+                  updateSetting("companyEmail", event.target.value)
+                }
                 className={inputClass}
               />
             </div>
@@ -4845,7 +5356,9 @@ export default function SettingsPage() {
               <label className={labelClass}>Company Phone</label>
               <input
                 value={settings.companyPhone}
-                onChange={(event) => updateSetting("companyPhone", event.target.value)}
+                onChange={(event) =>
+                  updateSetting("companyPhone", event.target.value)
+                }
                 className={inputClass}
               />
             </div>
@@ -4854,7 +5367,9 @@ export default function SettingsPage() {
               <label className={labelClass}>Website</label>
               <input
                 value={settings.companyWebsite}
-                onChange={(event) => updateSetting("companyWebsite", event.target.value)}
+                onChange={(event) =>
+                  updateSetting("companyWebsite", event.target.value)
+                }
                 placeholder="https://example.com"
                 className={inputClass}
               />
@@ -4864,7 +5379,9 @@ export default function SettingsPage() {
               <label className={labelClass}>Street Address</label>
               <input
                 value={settings.companyAddress}
-                onChange={(event) => updateSetting("companyAddress", event.target.value)}
+                onChange={(event) =>
+                  updateSetting("companyAddress", event.target.value)
+                }
                 className={inputClass}
               />
             </div>
@@ -4873,7 +5390,9 @@ export default function SettingsPage() {
               <label className={labelClass}>City</label>
               <input
                 value={settings.companyCity}
-                onChange={(event) => updateSetting("companyCity", event.target.value)}
+                onChange={(event) =>
+                  updateSetting("companyCity", event.target.value)
+                }
                 className={inputClass}
               />
             </div>
@@ -4884,7 +5403,10 @@ export default function SettingsPage() {
                 <input
                   value={settings.companyState}
                   onChange={(event) =>
-                    updateSetting("companyState", event.target.value.toUpperCase())
+                    updateSetting(
+                      "companyState",
+                      event.target.value.toUpperCase()
+                    )
                   }
                   maxLength={2}
                   className={inputClass}
@@ -4895,7 +5417,9 @@ export default function SettingsPage() {
                 <label className={labelClass}>ZIP</label>
                 <input
                   value={settings.companyZip}
-                  onChange={(event) => updateSetting("companyZip", event.target.value)}
+                  onChange={(event) =>
+                    updateSetting("companyZip", event.target.value)
+                  }
                   className={inputClass}
                 />
               </div>
@@ -4907,6 +5431,7 @@ export default function SettingsPage() {
       {tab === "invoice" && (
         <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-gray-900 sm:p-6">
           <h2 className="text-2xl font-bold">Invoice Defaults</h2>
+
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
             These values should be connected to the invoice builder next.
           </p>
@@ -4919,7 +5444,8 @@ export default function SettingsPage() {
                 onChange={(event) =>
                   updateSetting(
                     "defaultInvoiceStatus",
-                    event.target.value as WorkspaceSettings["defaultInvoiceStatus"]
+                    event.target
+                      .value as WorkspaceSettings["defaultInvoiceStatus"]
                   )
                 }
                 className={inputClass}
@@ -4969,8 +5495,10 @@ export default function SettingsPage() {
       {tab === "tax" && (
         <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-gray-900 sm:p-6">
           <h2 className="text-2xl font-bold">Tax Settings</h2>
+
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            Discount is currently set to apply before tax, which is the normal invoice calculation flow.
+            Discount is currently set to apply before tax, which is the normal
+            invoice calculation flow.
           </p>
 
           <div className="mt-6 grid grid-cols-1 gap-5 xl:grid-cols-2">
@@ -4991,7 +5519,9 @@ export default function SettingsPage() {
               <input
                 type="number"
                 value={settings.defaultTaxRate}
-                onChange={(event) => updateSetting("defaultTaxRate", event.target.value)}
+                onChange={(event) =>
+                  updateSetting("defaultTaxRate", event.target.value)
+                }
                 placeholder="6"
                 className={inputClass}
               />
@@ -5026,9 +5556,12 @@ export default function SettingsPage() {
                 />
 
                 <span>
-                  <span className="block font-semibold">Apply discount before tax</span>
+                  <span className="block font-semibold">
+                    Apply discount before tax
+                  </span>
                   <span className="mt-1 block text-sm text-gray-500 dark:text-gray-400">
-                    Keeps invoice totals consistent with the current calculation helper.
+                    Keeps invoice totals consistent with the current calculation
+                    helper.
                   </span>
                 </span>
               </label>
@@ -5044,7 +5577,11 @@ export default function SettingsPage() {
           <div className="mt-6 grid grid-cols-1 gap-5 xl:grid-cols-2">
             <div>
               <label className={labelClass}>Workspace Name</label>
-              <input value={activeWorkspace.name} readOnly className={inputClass} />
+              <input
+                value={activeWorkspace.name}
+                readOnly
+                className={inputClass}
+              />
             </div>
 
             <div>
@@ -5062,7 +5599,9 @@ export default function SettingsPage() {
               <label className={labelClass}>Business Type</label>
               <select
                 value={settings.businessType}
-                onChange={(event) => updateSetting("businessType", event.target.value)}
+                onChange={(event) =>
+                  updateSetting("businessType", event.target.value)
+                }
                 className={inputClass}
               >
                 {businessTypes.map((type) => (
@@ -5073,7 +5612,11 @@ export default function SettingsPage() {
 
             <div>
               <label className={labelClass}>Workspace ID</label>
-              <input value={activeWorkspace.id} readOnly className={inputClass} />
+              <input
+                value={activeWorkspace.id}
+                readOnly
+                className={inputClass}
+              />
             </div>
 
             <div className="xl:col-span-2">
@@ -5081,7 +5624,9 @@ export default function SettingsPage() {
               <textarea
                 rows={5}
                 value={settings.notes}
-                onChange={(event) => updateSetting("notes", event.target.value)}
+                onChange={(event) =>
+                  updateSetting("notes", event.target.value)
+                }
                 placeholder="Internal workspace notes, default operating procedures, billing notes..."
                 className={inputClass}
               />
@@ -5091,49 +5636,125 @@ export default function SettingsPage() {
       )}
 
       {tab === "permissions" && (
-        <section className="space-y-6">
-          <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-gray-900 sm:p-6">
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-              <div>
-                <h2 className="text-2xl font-bold">Team Members</h2>
-                <p className="mt-2 text-gray-500 dark:text-gray-400">
-                  Invite placeholder for {activeWorkspace.name}. Real auth comes later.
-                </p>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setInviteOpen(true)}
-                className="rounded-lg bg-blue-600 px-5 py-3 font-semibold text-white hover:bg-blue-700"
-              >
-                Invite Member
-              </button>
-            </div>
-
-            <div className="mt-6 rounded-xl border border-dashed border-gray-300 p-8 text-center text-gray-500 dark:border-gray-700 dark:text-gray-400">
-              No team members saved yet.
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-gray-900 sm:p-6">
-            <h2 className="text-2xl font-bold">Role Permissions</h2>
-
-            <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-3">
-              {roles.map((role) => (
-                <div
-                  key={role.name}
-                  className="rounded-xl border border-gray-200 p-5 dark:border-gray-800"
-                >
-                  <h3 className={`text-lg font-bold ${role.color}`}>{role.name}</h3>
-                  <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
-                    {role.description}
-                  </p>
-                </div>
-              ))}
-            </div>
-          </div>
-        </section>
+        <PermissionsSettings
+          activeWorkspaceName={activeWorkspace.name}
+          setSavedNotice={showSavedNotice}
+        />
       )}
+    </div>
+  );
+}
+```
+
+## app\settings\PermissionsSettings.tsx
+
+```tsx
+"use client";
+
+import { useState } from "react";
+
+type PermissionsSettingsProps = {
+  activeWorkspaceName: string;
+  setSavedNotice: (message: string) => void;
+};
+
+const roles = [
+  {
+    name: "Owner",
+    color: "text-purple-600",
+    description:
+      "Full access. Can manage settings, billing, team members, clients, invoices, jobs, inventory, and documents.",
+  },
+  {
+    name: "Manager",
+    color: "text-blue-600",
+    description:
+      "Can manage daily operations, clients, jobs, invoices, calendar, inventory, logistics, and documents.",
+  },
+  {
+    name: "Employee",
+    color: "text-gray-700 dark:text-gray-300",
+    description:
+      "Can view assigned jobs, update job notes, view calendar, and access limited client/job information.",
+  },
+];
+
+const inputClass =
+  "w-full rounded-lg border border-gray-300 bg-white px-4 py-3 text-gray-950 shadow-sm outline-none focus:border-blue-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100";
+
+const labelClass =
+  "mb-2 block text-sm font-semibold text-gray-800 dark:text-gray-100";
+
+export default function PermissionsSettings({
+  activeWorkspaceName,
+  setSavedNotice,
+}: PermissionsSettingsProps) {
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole] = useState("Employee");
+
+  function closeInviteModal() {
+    setInviteOpen(false);
+    setInviteEmail("");
+    setInviteRole("Employee");
+  }
+
+  function handleInviteSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    setInviteEmail("");
+    setInviteRole("Employee");
+    setInviteOpen(false);
+
+    setSavedNotice("Invite placeholder saved.");
+    window.setTimeout(() => setSavedNotice(""), 2500);
+  }
+
+  return (
+    <section className="space-y-6">
+      <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-gray-900 sm:p-6">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h2 className="text-2xl font-bold">Team Members</h2>
+            <p className="mt-2 text-gray-500 dark:text-gray-400">
+              Invite placeholder for {activeWorkspaceName}. Real auth comes later.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setInviteOpen(true)}
+            className="rounded-lg bg-blue-600 px-5 py-3 font-semibold text-white hover:bg-blue-700"
+          >
+            Invite Member
+          </button>
+        </div>
+
+        <div className="mt-6 rounded-xl border border-dashed border-gray-300 p-8 text-center text-gray-500 dark:border-gray-700 dark:text-gray-400">
+          No team members saved yet.
+        </div>
+      </div>
+
+      <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-gray-900 sm:p-6">
+        <h2 className="text-2xl font-bold">Role Permissions</h2>
+
+        <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-3">
+          {roles.map((role) => (
+            <div
+              key={role.name}
+              className="rounded-xl border border-gray-200 p-5 dark:border-gray-800"
+            >
+              <h3 className={`text-lg font-bold ${role.color}`}>
+                {role.name}
+              </h3>
+
+              <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
+                {role.description}
+              </p>
+            </div>
+          ))}
+        </div>
+      </div>
 
       {inviteOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/75 p-4">
@@ -5143,11 +5764,7 @@ export default function SettingsPage() {
 
               <button
                 type="button"
-                onClick={() => {
-                  setInviteOpen(false);
-                  setInviteEmail("");
-                  setInviteRole("Employee");
-                }}
+                onClick={closeInviteModal}
                 className="text-2xl text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
               >
                 ×
@@ -5183,11 +5800,7 @@ export default function SettingsPage() {
               <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
                 <button
                   type="button"
-                  onClick={() => {
-                    setInviteOpen(false);
-                    setInviteEmail("");
-                    setInviteRole("Employee");
-                  }}
+                  onClick={closeInviteModal}
                   className="rounded-lg border border-gray-300 px-5 py-3 hover:bg-gray-100 dark:border-gray-700 dark:hover:bg-gray-800"
                 >
                   Cancel
@@ -5204,7 +5817,7 @@ export default function SettingsPage() {
           </div>
         </div>
       )}
-    </div>
+    </section>
   );
 }
 ```
@@ -5249,7 +5862,9 @@ const businessTypes = [
   "Other",
 ];
 
-function loadWorkspaceSettings(workspaceId: string): WorkspaceDisplaySettings | null {
+function loadWorkspaceSettings(
+  workspaceId: string
+): WorkspaceDisplaySettings | null {
   if (typeof window === "undefined") return null;
 
   const saved = localStorage.getItem("frontier-settings");
@@ -5269,18 +5884,24 @@ function loadWorkspaceSettings(workspaceId: string): WorkspaceDisplaySettings | 
   }
 }
 
-export default function AppShell({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+function getWorkspaceInitials(name: string) {
+  return name
+    .split(" ")
+    .filter(Boolean)
+    .map((word) => word[0]?.toUpperCase())
+    .join("");
+}
+
+export default function AppShell({ children }: { children: React.ReactNode }) {
   const [darkMode, setDarkMode] = useState(false);
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const [userOpen, setUserOpen] = useState(false);
   const [newWorkspaceOpen, setNewWorkspaceOpen] = useState(false);
+
   const [workspaceName, setWorkspaceName] = useState("");
   const [workspaceType, setWorkspaceType] = useState("Landscaping");
   const [customWorkspaceType, setCustomWorkspaceType] = useState("");
+
   const [displaySettings, setDisplaySettings] =
     useState<WorkspaceDisplaySettings | null>(null);
 
@@ -5297,6 +5918,9 @@ export default function AppShell({
     if (savedTheme === "dark") {
       setDarkMode(true);
       document.documentElement.classList.add("dark");
+    } else {
+      setDarkMode(false);
+      document.documentElement.classList.remove("dark");
     }
   }, []);
 
@@ -5331,6 +5955,9 @@ export default function AppShell({
   const displayedUserEmail =
     displaySettings?.userEmail?.trim() || "thomp3ns@gmail.com";
 
+  const displayedWorkspaceInitials =
+    getWorkspaceInitials(displayedWorkspaceName);
+
   function toggleDarkMode() {
     const nextMode = !darkMode;
 
@@ -5362,18 +5989,24 @@ export default function AppShell({
     if (!workspaceName.trim()) return;
 
     const resolvedType =
-      workspaceType === "Other" ? customWorkspaceType.trim() : workspaceType;
+      workspaceType === "Other"
+        ? customWorkspaceType.trim()
+        : workspaceType;
 
     if (!resolvedType) return;
 
-    addWorkspace({
+    const newWorkspace = {
       id: crypto.randomUUID(),
       name: workspaceName.trim(),
       type: resolvedType,
-    });
+    };
+
+    addWorkspace(newWorkspace);
+    setActiveWorkspace(newWorkspace);
 
     resetNewWorkspaceForm();
     setNewWorkspaceOpen(false);
+    setWorkspaceOpen(false);
   }
 
   function getWorkspaceDisplayName(workspace: {
@@ -5395,26 +6028,30 @@ export default function AppShell({
   }
 
   return (
-    <div className="flex h-screen w-full overflow-hidden bg-gray-100 text-gray-950 dark:bg-gray-950 dark:text-gray-100">
-      <Sidebar />
-
-      <div className="flex min-w-0 flex-1 flex-col bg-gray-100 dark:bg-gray-950">
-        <header className="flex h-20 items-center justify-between border-b border-gray-200 bg-white px-3 sm:px-6 lg:px-8 dark:border-gray-800 dark:bg-gray-900">
-          <div className="relative">
+    <div className="flex h-screen w-screen flex-col overflow-hidden bg-gray-100 text-gray-950 dark:bg-gray-950 dark:text-gray-100">
+      <header className="flex h-20 flex-shrink-0 items-center justify-between border-b border-gray-200 bg-white px-3 dark:border-gray-800 dark:bg-gray-900 sm:px-6 lg:px-8">
+        <div className="flex min-w-0 flex-1 items-center gap-3">
+          <div className="relative min-w-0">
             <button
               onClick={() => {
                 setWorkspaceOpen(!workspaceOpen);
                 setUserOpen(false);
               }}
-              className="flex max-w-[52vw] items-center gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3 shadow-sm hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:hover:bg-gray-800 sm:max-w-none"
+              className="flex max-w-[150px] items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-3 shadow-sm hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:hover:bg-gray-800 sm:max-w-[260px]"
             >
               <span className="text-blue-600">▤</span>
 
-              <span className="truncate font-semibold">
+              {/* Mobile: initials only */}
+              <span className="font-semibold sm:hidden">
+                {displayedWorkspaceInitials}
+              </span>
+
+              {/* Tablet/Desktop: full workspace name */}
+              <span className="hidden truncate font-semibold sm:inline">
                 {displayedWorkspaceName}
               </span>
 
-              <span className="text-gray-500">⌄</span>
+              
             </button>
 
             {workspaceOpen && (
@@ -5442,7 +6079,6 @@ export default function AppShell({
                       <span className="block truncate font-semibold">
                         {getWorkspaceDisplayName(workspace)}
                       </span>
-
                       <span className="block truncate text-sm text-gray-500 dark:text-gray-400">
                         {getWorkspaceDisplayType(workspace)}
                       </span>
@@ -5458,127 +6094,125 @@ export default function AppShell({
                   className="flex w-full items-center gap-4 border-t border-gray-200 px-4 py-4 text-left hover:bg-gray-100 dark:border-gray-700 dark:hover:bg-gray-800"
                 >
                   <span className="text-xl">+</span>
-
                   <span className="font-medium">New Workspace</span>
                 </button>
               </div>
             )}
           </div>
+        </div>
 
-          <div className="flex items-center gap-2 sm:gap-4 lg:gap-8">
+        <div className="flex flex-shrink-0 items-center gap-2 sm:gap-4">
+          <button
+            onClick={toggleDarkMode}
+            className="rounded-full px-3 py-2 text-xl hover:bg-gray-100 dark:hover:bg-gray-800"
+            aria-label="Toggle dark mode"
+          >
+            {darkMode ? "☀️" : "🌙"}
+          </button>
+
+          <div className="relative">
             <button
-              onClick={toggleDarkMode}
-              className="rounded-full px-3 py-2 text-xl hover:bg-gray-100 dark:hover:bg-gray-800"
-              aria-label="Toggle dark mode"
+              onClick={() => {
+                setUserOpen(!userOpen);
+                setWorkspaceOpen(false);
+              }}
+              className="flex items-center gap-2 rounded-lg px-2 py-2 hover:bg-gray-100 dark:hover:bg-gray-800"
             >
-              {darkMode ? "☀️" : "🌙"}
+              <span className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-100 text-blue-600 dark:bg-blue-950">
+                ♙
+              </span>
+              <span className="hidden max-w-32 truncate font-semibold lg:block">
+                {displayedUserName}
+              </span>
+              <span className="hidden text-gray-500 sm:inline">⌄</span>
             </button>
 
-            <div className="relative">
-              <button
-                onClick={() => {
-                  setUserOpen(!userOpen);
-                  setWorkspaceOpen(false);
-                }}
-                className="flex items-center gap-3 rounded-lg px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-800"
-              >
-                <span className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-100 text-blue-600 dark:bg-blue-950">
-                  ♙
-                </span>
-
-                <span className="hidden max-w-48 truncate font-semibold md:block">
-                  {displayedUserName}
-                </span>
-
-                <span className="text-gray-500">⌄</span>
-              </button>
-
-              {userOpen && (
-                <div className="absolute right-0 top-14 z-50 w-72 max-w-[90vw] overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-900">
-                  <div className="border-b border-gray-200 px-4 py-4 dark:border-gray-700">
-                    <div className="font-semibold">{displayedUserName}</div>
-                    <div className="mt-1 break-all text-sm text-gray-500 dark:text-gray-400">
-                      {displayedUserEmail}
-                    </div>
+            {userOpen && (
+              <div className="absolute right-0 top-14 z-50 w-72 max-w-[90vw] overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-900">
+                <div className="border-b border-gray-200 px-4 py-4 dark:border-gray-700">
+                  <div className="font-semibold">{displayedUserName}</div>
+                  <div className="mt-1 break-all text-sm text-gray-500 dark:text-gray-400">
+                    {displayedUserEmail}
                   </div>
-
-                  <div className="border-b border-gray-200 px-4 py-3 text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
-                    {displayedWorkspaceName}
-                    <br />
-                    {displayedWorkspaceType}
-                  </div>
-
-                  <button className="flex w-full items-center gap-4 px-4 py-4 text-left hover:bg-gray-100 dark:hover:bg-gray-800">
-                    <span className="text-xl">↪</span>
-
-                    <span className="font-medium">Sign Out</span>
-                  </button>
                 </div>
-              )}
-            </div>
+
+                <div className="border-b border-gray-200 px-4 py-3 text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
+                  {displayedWorkspaceName}
+                  <br />
+                  {displayedWorkspaceType}
+                </div>
+
+                <button className="flex w-full items-center gap-4 px-4 py-4 text-left hover:bg-gray-100 dark:hover:bg-gray-800">
+                  <span className="text-xl">↪</span>
+                  <span className="font-medium">Sign Out</span>
+                </button>
+              </div>
+            )}
           </div>
-        </header>
+        </div>
+      </header>
+
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+        <Sidebar />
 
         <main className="min-h-0 min-w-0 flex-1 overflow-y-auto p-3 sm:p-4 lg:p-6">
           {children}
         </main>
+      </div>
 
-        {newWorkspaceOpen && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4">
-            <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl dark:bg-gray-900">
-              <div className="mb-6 flex items-center justify-between">
-                <h2 className="text-xl font-bold">New Workspace</h2>
+      {newWorkspaceOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4">
+          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl dark:bg-gray-900">
+            <div className="mb-6 flex items-center justify-between">
+              <h2 className="text-xl font-bold">New Workspace</h2>
 
-                <button
-                  onClick={closeNewWorkspaceModal}
-                  className="text-2xl text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
-                >
-                  ×
-                </button>
-              </div>
+              <button
+                onClick={closeNewWorkspaceModal}
+                className="text-2xl text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+              >
+                ×
+              </button>
+            </div>
 
-              <div className="space-y-4">
+            <div className="space-y-4">
+              <input
+                type="text"
+                value={workspaceName}
+                onChange={(e) => setWorkspaceName(e.target.value)}
+                placeholder="Workspace Name"
+                className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800"
+              />
+
+              <select
+                value={workspaceType}
+                onChange={(e) => setWorkspaceType(e.target.value)}
+                className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800"
+              >
+                {businessTypes.map((type) => (
+                  <option key={type}>{type}</option>
+                ))}
+              </select>
+
+              {workspaceType === "Other" && (
                 <input
                   type="text"
-                  value={workspaceName}
-                  onChange={(event) => setWorkspaceName(event.target.value)}
-                  placeholder="Workspace Name"
+                  value={customWorkspaceType}
+                  onChange={(e) => setCustomWorkspaceType(e.target.value)}
+                  placeholder="Specify Business Type"
                   className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800"
                 />
+              )}
 
-                <select
-                  value={workspaceType}
-                  onChange={(event) => setWorkspaceType(event.target.value)}
-                  className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800"
-                >
-                  {businessTypes.map((type) => (
-                    <option key={type}>{type}</option>
-                  ))}
-                </select>
-
-                {workspaceType === "Other" && (
-                  <input
-                    type="text"
-                    value={customWorkspaceType}
-                    onChange={(event) =>
-                      setCustomWorkspaceType(event.target.value)
-                    }
-                    placeholder="Specify Business Type"
-                    className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800"
-                  />
-                )}
-
-                <button
-                  onClick={createWorkspace}
-                  className="w-full rounded-lg bg-blue-600 py-3 text-white hover:bg-blue-700"
-                >
-                  Create Workspace
-                </button>
-              </div>
+              <button
+                onClick={createWorkspace}
+                className="w-full rounded-lg bg-blue-600 py-3 text-white hover:bg-blue-700"
+              >
+                Create Workspace
+              </button>
             </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -5609,35 +6243,55 @@ export default function Sidebar() {
   const [collapsed, setCollapsed] = useState(true);
 
   return (
-    <aside className={`min-h-screen bg-gray-900 text-white transition-all duration-300 ${collapsed ? "w-20" : "w-64"}`}>
-      <div className="flex h-full flex-col">
-        <div className={`flex items-center border-b border-gray-800 p-4 ${collapsed ? "justify-center" : "justify-between"}`}>
-          {collapsed ? (
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-3xl font-light">⌖</div>
-          ) : (
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-3xl font-light">⌖</div>
-              <h1 className="text-2xl font-bold">Frontier</h1>
-            </div>
+    <aside
+      className={`flex h-full flex-shrink-0 flex-col bg-gray-900 text-white transition-all duration-300 ${
+        collapsed ? "w-20" : "w-64"
+      }`}
+    >
+      <nav className="flex flex-1 flex-col gap-1 p-2">
+        {navItems.map((item) => (
+          <Link
+            key={item.href}
+            href={item.href}
+            title={collapsed ? item.label : undefined}
+            className={`group relative flex items-center rounded-xl px-3 py-2.5 text-gray-300 transition-colors hover:bg-blue-600 hover:text-white ${
+              collapsed ? "justify-center" : "gap-3"
+            }`}
+          >
+            <span className="w-8 text-center text-2xl leading-none">
+              {item.icon}
+            </span>
+
+            {!collapsed && (
+              <span className="truncate text-base font-medium">
+                {item.label}
+              </span>
+            )}
+
+            {collapsed && (
+              <span className="pointer-events-none absolute left-full z-50 ml-3 whitespace-nowrap rounded-lg bg-gray-800 px-3 py-2 text-sm text-white opacity-0 shadow-lg transition-opacity group-hover:opacity-100">
+                {item.label}
+              </span>
+            )}
+          </Link>
+        ))}
+      </nav>
+
+      <div className="border-t border-gray-800 p-3">
+        <button
+          onClick={() => setCollapsed(!collapsed)}
+          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          title={collapsed ? "Expand" : "Collapse"}
+          className={`flex w-full items-center rounded-xl px-3 py-3 text-gray-300 transition-colors hover:bg-gray-800 hover:text-white ${
+            collapsed ? "justify-center" : "gap-3"
+          }`}
+        >
+          <span className="text-xl">{collapsed ? "›" : "‹"}</span>
+
+          {!collapsed && (
+            <span className="text-base font-medium">Collapse</span>
           )}
-        </div>
-
-        <nav className="flex flex-col gap-1 p-2">
-          {navItems.map((item) => (
-            <Link key={item.href} href={item.href} title={collapsed ? item.label : undefined} className={`group relative flex items-center rounded-xl px-3 py-2.5 text-gray-300 hover:bg-blue-600 hover:text-white ${collapsed ? "justify-center" : "gap-3"}`}>
-              <span className="w-8 text-center text-2xl leading-none">{item.icon}</span>
-              {!collapsed && <span className="text-base font-medium">{item.label}</span>}
-              {collapsed && <span className="pointer-events-none absolute left-full z-50 ml-3 whitespace-nowrap rounded-lg bg-gray-800 px-3 py-2 text-sm text-white opacity-0 shadow-lg transition-opacity group-hover:opacity-100">{item.label}</span>}
-            </Link>
-          ))}
-        </nav>
-
-        <div className="mt-auto mb-4 p-3">
-          <button onClick={() => setCollapsed(!collapsed)} className={`flex w-full items-center rounded-xl px-3 py-3 text-gray-300 hover:bg-gray-800 hover:text-white ${collapsed ? "justify-center text-xl" : "gap-3"}`} aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"} title={collapsed ? "Expand" : "Collapse"}>
-            <span className="text-xl">{collapsed ? "›" : "‹"}</span>
-            {!collapsed && <span className="text-base font-medium">Collapse</span>}
-          </button>
-        </div>
+        </button>
       </div>
     </aside>
   );
@@ -5825,6 +6479,10 @@ export const clients = [
     balance: "$200",
     email: "jones@example.com",
     phone: "(555) 100-0001",
+    address: "300 W Tienken Rd",
+    city: "Rochester Hills",
+    state: "MI",
+    zip: "48306",
   },
   {
     id: "2",
@@ -5834,15 +6492,23 @@ export const clients = [
     balance: "$350",
     email: "brown@example.com",
     phone: "(555) 100-0002",
+    address: "1200 E Avon Rd",
+    city: "Rochester Hills",
+    state: "MI",
+    zip: "48307",
   },
   {
     id: "3",
     workspaceId: "landscaping",
     name: "Acme HOA",
     status: "Active",
-    balance: "$1,500",
+    balance: "$1500",
     email: "contact@acmehoa.com",
     phone: "(555) 100-0003",
+    address: "900 Livernois Rd",
+    city: "Rochester Hills",
+    state: "MI",
+    zip: "48307",
   },
   {
     id: "4",
@@ -5852,6 +6518,10 @@ export const clients = [
     balance: "$450",
     email: "john@example.com",
     phone: "(555) 100-0004",
+    address: "550 W Hamlin Rd",
+    city: "Rochester Hills",
+    state: "MI",
+    zip: "48307",
   },
   {
     id: "5",
@@ -5861,6 +6531,10 @@ export const clients = [
     balance: "$120",
     email: "office@sunsetapartments.com",
     phone: "(555) 100-0005",
+    address: "1400 Walton Blvd",
+    city: "Rochester Hills",
+    state: "MI",
+    zip: "48309",
   },
   {
     id: "6",
@@ -5870,6 +6544,10 @@ export const clients = [
     balance: "$800",
     email: "johnson@example.com",
     phone: "(555) 100-0006",
+    address: "1700 S Livernois Rd",
+    city: "Rochester Hills",
+    state: "MI",
+    zip: "48307",
   },
 
   // SNOW REMOVAL
@@ -5879,27 +6557,39 @@ export const clients = [
     workspaceId: "snow-removal",
     name: "Rochester Community Church",
     status: "Lead",
-    balance: "$3,500",
+    balance: "$3500",
     email: "office@church.org",
     phone: "(555) 200-0001",
+    address: "250 W Auburn Rd",
+    city: "Rochester Hills",
+    state: "MI",
+    zip: "48307",
   },
   {
     id: "8",
     workspaceId: "snow-removal",
     name: "Riverside Office Park",
     status: "Active",
-    balance: "$6,800",
+    balance: "$6800",
     email: "manager@riverside.com",
     phone: "(555) 200-0002",
+    address: "400 Water St",
+    city: "Rochester",
+    state: "MI",
+    zip: "48307",
   },
   {
     id: "9",
     workspaceId: "snow-removal",
     name: "Winter Ridge Condos",
     status: "Active",
-    balance: "$9,200",
+    balance: "$9200",
     email: "hoa@winterridge.com",
     phone: "(555) 200-0003",
+    address: "2200 Crooks Rd",
+    city: "Rochester Hills",
+    state: "MI",
+    zip: "48309",
   },
   {
     id: "10",
@@ -5909,15 +6599,23 @@ export const clients = [
     balance: "$650",
     email: "facilities@oaklandmedical.com",
     phone: "(555) 200-0004",
+    address: "1101 W University Dr",
+    city: "Rochester",
+    state: "MI",
+    zip: "48307",
   },
   {
     id: "11",
     workspaceId: "snow-removal",
     name: "North Plaza",
     status: "Active",
-    balance: "$2,400",
+    balance: "$2400",
     email: "management@northplaza.com",
     phone: "(555) 200-0005",
+    address: "1900 S Rochester Rd",
+    city: "Rochester Hills",
+    state: "MI",
+    zip: "48307",
   },
 
   // PROPERTIES
@@ -5927,9 +6625,13 @@ export const clients = [
     workspaceId: "properties",
     name: "Maple Grove Apartments",
     status: "Active",
-    balance: "$1,200",
+    balance: "$1200",
     email: "office@maplegrove.com",
     phone: "(555) 300-0001",
+    address: "1000 Barclay Cir",
+    city: "Rochester Hills",
+    state: "MI",
+    zip: "48307",
   },
   {
     id: "13",
@@ -5939,33 +6641,49 @@ export const clients = [
     balance: "$950",
     email: "manager@riverside.com",
     phone: "(555) 300-0002",
+    address: "400 Water St",
+    city: "Rochester",
+    state: "MI",
+    zip: "48307",
   },
   {
     id: "14",
     workspaceId: "properties",
     name: "Sunset Strip Mall",
     status: "Active",
-    balance: "$8,500",
+    balance: "$8500",
     email: "leasing@sunsetstripmall.com",
     phone: "(555) 300-0003",
+    address: "1200 Walton Blvd",
+    city: "Rochester Hills",
+    state: "MI",
+    zip: "48309",
   },
   {
     id: "15",
     workspaceId: "properties",
     name: "Green Valley HOA",
     status: "Active",
-    balance: "$2,100",
+    balance: "$2100",
     email: "board@greenvalleyhoa.com",
     phone: "(555) 300-0004",
+    address: "800 E Tienken Rd",
+    city: "Rochester Hills",
+    state: "MI",
+    zip: "48306",
   },
   {
     id: "16",
     workspaceId: "properties",
     name: "Johnson Commercial",
     status: "Active",
-    balance: "$4,750",
+    balance: "$4750",
     email: "admin@johnsoncommercial.com",
     phone: "(555) 300-0005",
+    address: "2100 Crooks Rd",
+    city: "Rochester Hills",
+    state: "MI",
+    zip: "48309",
   },
 ];
 ```
@@ -6085,6 +6803,8 @@ export type ClientRow = {
   state?: string;
   zip?: string;
   notes?: string;
+  latitude?: number;
+  longitude?: number;
 };
 
 export const clientStatuses = ["Lead", "Active", "Inactive"] as const;
@@ -6829,12 +7549,15 @@ export default nextConfig;
     "lint": "eslint"
   },
   "dependencies": {
+    "leaflet": "^1.9.4",
     "next": "16.2.9",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "react-leaflet": "^5.0.0"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@types/leaflet": "^1.9.21",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",

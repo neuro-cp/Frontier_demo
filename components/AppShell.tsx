@@ -29,7 +29,9 @@ const businessTypes = [
   "Other",
 ];
 
-function loadWorkspaceSettings(workspaceId: string): WorkspaceDisplaySettings | null {
+function loadWorkspaceSettings(
+  workspaceId: string
+): WorkspaceDisplaySettings | null {
   if (typeof window === "undefined") return null;
 
   const saved = localStorage.getItem("frontier-settings");
@@ -49,18 +51,24 @@ function loadWorkspaceSettings(workspaceId: string): WorkspaceDisplaySettings | 
   }
 }
 
-export default function AppShell({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+function getWorkspaceInitials(name: string) {
+  return name
+    .split(" ")
+    .filter(Boolean)
+    .map((word) => word[0]?.toUpperCase())
+    .join("");
+}
+
+export default function AppShell({ children }: { children: React.ReactNode }) {
   const [darkMode, setDarkMode] = useState(false);
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const [userOpen, setUserOpen] = useState(false);
   const [newWorkspaceOpen, setNewWorkspaceOpen] = useState(false);
+
   const [workspaceName, setWorkspaceName] = useState("");
   const [workspaceType, setWorkspaceType] = useState("Landscaping");
   const [customWorkspaceType, setCustomWorkspaceType] = useState("");
+
   const [displaySettings, setDisplaySettings] =
     useState<WorkspaceDisplaySettings | null>(null);
 
@@ -77,6 +85,9 @@ export default function AppShell({
     if (savedTheme === "dark") {
       setDarkMode(true);
       document.documentElement.classList.add("dark");
+    } else {
+      setDarkMode(false);
+      document.documentElement.classList.remove("dark");
     }
   }, []);
 
@@ -111,6 +122,9 @@ export default function AppShell({
   const displayedUserEmail =
     displaySettings?.userEmail?.trim() || "thomp3ns@gmail.com";
 
+  const displayedWorkspaceInitials =
+    getWorkspaceInitials(displayedWorkspaceName);
+
   function toggleDarkMode() {
     const nextMode = !darkMode;
 
@@ -142,18 +156,24 @@ export default function AppShell({
     if (!workspaceName.trim()) return;
 
     const resolvedType =
-      workspaceType === "Other" ? customWorkspaceType.trim() : workspaceType;
+      workspaceType === "Other"
+        ? customWorkspaceType.trim()
+        : workspaceType;
 
     if (!resolvedType) return;
 
-    addWorkspace({
+    const newWorkspace = {
       id: crypto.randomUUID(),
       name: workspaceName.trim(),
       type: resolvedType,
-    });
+    };
+
+    addWorkspace(newWorkspace);
+    setActiveWorkspace(newWorkspace);
 
     resetNewWorkspaceForm();
     setNewWorkspaceOpen(false);
+    setWorkspaceOpen(false);
   }
 
   function getWorkspaceDisplayName(workspace: {
@@ -175,26 +195,30 @@ export default function AppShell({
   }
 
   return (
-    <div className="flex h-screen w-full overflow-hidden bg-gray-100 text-gray-950 dark:bg-gray-950 dark:text-gray-100">
-      <Sidebar />
-
-      <div className="flex min-w-0 flex-1 flex-col bg-gray-100 dark:bg-gray-950">
-        <header className="flex h-20 items-center justify-between border-b border-gray-200 bg-white px-3 sm:px-6 lg:px-8 dark:border-gray-800 dark:bg-gray-900">
-          <div className="relative">
+    <div className="flex h-screen w-screen flex-col overflow-hidden bg-gray-100 text-gray-950 dark:bg-gray-950 dark:text-gray-100">
+      <header className="flex h-20 flex-shrink-0 items-center justify-between border-b border-gray-200 bg-white px-3 dark:border-gray-800 dark:bg-gray-900 sm:px-6 lg:px-8">
+        <div className="flex min-w-0 flex-1 items-center gap-3">
+          <div className="relative min-w-0">
             <button
               onClick={() => {
                 setWorkspaceOpen(!workspaceOpen);
                 setUserOpen(false);
               }}
-              className="flex max-w-[52vw] items-center gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3 shadow-sm hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:hover:bg-gray-800 sm:max-w-none"
+              className="flex max-w-[150px] items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-3 shadow-sm hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:hover:bg-gray-800 sm:max-w-[260px]"
             >
               <span className="text-blue-600">▤</span>
 
-              <span className="truncate font-semibold">
+              {/* Mobile: initials only */}
+              <span className="font-semibold sm:hidden">
+                {displayedWorkspaceInitials}
+              </span>
+
+              {/* Tablet/Desktop: full workspace name */}
+              <span className="hidden truncate font-semibold sm:inline">
                 {displayedWorkspaceName}
               </span>
 
-              <span className="text-gray-500">⌄</span>
+              
             </button>
 
             {workspaceOpen && (
@@ -222,7 +246,6 @@ export default function AppShell({
                       <span className="block truncate font-semibold">
                         {getWorkspaceDisplayName(workspace)}
                       </span>
-
                       <span className="block truncate text-sm text-gray-500 dark:text-gray-400">
                         {getWorkspaceDisplayType(workspace)}
                       </span>
@@ -238,127 +261,125 @@ export default function AppShell({
                   className="flex w-full items-center gap-4 border-t border-gray-200 px-4 py-4 text-left hover:bg-gray-100 dark:border-gray-700 dark:hover:bg-gray-800"
                 >
                   <span className="text-xl">+</span>
-
                   <span className="font-medium">New Workspace</span>
                 </button>
               </div>
             )}
           </div>
+        </div>
 
-          <div className="flex items-center gap-2 sm:gap-4 lg:gap-8">
+        <div className="flex flex-shrink-0 items-center gap-2 sm:gap-4">
+          <button
+            onClick={toggleDarkMode}
+            className="rounded-full px-3 py-2 text-xl hover:bg-gray-100 dark:hover:bg-gray-800"
+            aria-label="Toggle dark mode"
+          >
+            {darkMode ? "☀️" : "🌙"}
+          </button>
+
+          <div className="relative">
             <button
-              onClick={toggleDarkMode}
-              className="rounded-full px-3 py-2 text-xl hover:bg-gray-100 dark:hover:bg-gray-800"
-              aria-label="Toggle dark mode"
+              onClick={() => {
+                setUserOpen(!userOpen);
+                setWorkspaceOpen(false);
+              }}
+              className="flex items-center gap-2 rounded-lg px-2 py-2 hover:bg-gray-100 dark:hover:bg-gray-800"
             >
-              {darkMode ? "☀️" : "🌙"}
+              <span className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-100 text-blue-600 dark:bg-blue-950">
+                ♙
+              </span>
+              <span className="hidden max-w-32 truncate font-semibold lg:block">
+                {displayedUserName}
+              </span>
+              <span className="hidden text-gray-500 sm:inline">⌄</span>
             </button>
 
-            <div className="relative">
-              <button
-                onClick={() => {
-                  setUserOpen(!userOpen);
-                  setWorkspaceOpen(false);
-                }}
-                className="flex items-center gap-3 rounded-lg px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-800"
-              >
-                <span className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-100 text-blue-600 dark:bg-blue-950">
-                  ♙
-                </span>
-
-                <span className="hidden max-w-48 truncate font-semibold md:block">
-                  {displayedUserName}
-                </span>
-
-                <span className="text-gray-500">⌄</span>
-              </button>
-
-              {userOpen && (
-                <div className="absolute right-0 top-14 z-50 w-72 max-w-[90vw] overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-900">
-                  <div className="border-b border-gray-200 px-4 py-4 dark:border-gray-700">
-                    <div className="font-semibold">{displayedUserName}</div>
-                    <div className="mt-1 break-all text-sm text-gray-500 dark:text-gray-400">
-                      {displayedUserEmail}
-                    </div>
+            {userOpen && (
+              <div className="absolute right-0 top-14 z-50 w-72 max-w-[90vw] overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-900">
+                <div className="border-b border-gray-200 px-4 py-4 dark:border-gray-700">
+                  <div className="font-semibold">{displayedUserName}</div>
+                  <div className="mt-1 break-all text-sm text-gray-500 dark:text-gray-400">
+                    {displayedUserEmail}
                   </div>
-
-                  <div className="border-b border-gray-200 px-4 py-3 text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
-                    {displayedWorkspaceName}
-                    <br />
-                    {displayedWorkspaceType}
-                  </div>
-
-                  <button className="flex w-full items-center gap-4 px-4 py-4 text-left hover:bg-gray-100 dark:hover:bg-gray-800">
-                    <span className="text-xl">↪</span>
-
-                    <span className="font-medium">Sign Out</span>
-                  </button>
                 </div>
-              )}
-            </div>
+
+                <div className="border-b border-gray-200 px-4 py-3 text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
+                  {displayedWorkspaceName}
+                  <br />
+                  {displayedWorkspaceType}
+                </div>
+
+                <button className="flex w-full items-center gap-4 px-4 py-4 text-left hover:bg-gray-100 dark:hover:bg-gray-800">
+                  <span className="text-xl">↪</span>
+                  <span className="font-medium">Sign Out</span>
+                </button>
+              </div>
+            )}
           </div>
-        </header>
+        </div>
+      </header>
+
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+        <Sidebar />
 
         <main className="min-h-0 min-w-0 flex-1 overflow-y-auto p-3 sm:p-4 lg:p-6">
           {children}
         </main>
+      </div>
 
-        {newWorkspaceOpen && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4">
-            <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl dark:bg-gray-900">
-              <div className="mb-6 flex items-center justify-between">
-                <h2 className="text-xl font-bold">New Workspace</h2>
+      {newWorkspaceOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4">
+          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl dark:bg-gray-900">
+            <div className="mb-6 flex items-center justify-between">
+              <h2 className="text-xl font-bold">New Workspace</h2>
 
-                <button
-                  onClick={closeNewWorkspaceModal}
-                  className="text-2xl text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
-                >
-                  ×
-                </button>
-              </div>
+              <button
+                onClick={closeNewWorkspaceModal}
+                className="text-2xl text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+              >
+                ×
+              </button>
+            </div>
 
-              <div className="space-y-4">
+            <div className="space-y-4">
+              <input
+                type="text"
+                value={workspaceName}
+                onChange={(e) => setWorkspaceName(e.target.value)}
+                placeholder="Workspace Name"
+                className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800"
+              />
+
+              <select
+                value={workspaceType}
+                onChange={(e) => setWorkspaceType(e.target.value)}
+                className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800"
+              >
+                {businessTypes.map((type) => (
+                  <option key={type}>{type}</option>
+                ))}
+              </select>
+
+              {workspaceType === "Other" && (
                 <input
                   type="text"
-                  value={workspaceName}
-                  onChange={(event) => setWorkspaceName(event.target.value)}
-                  placeholder="Workspace Name"
+                  value={customWorkspaceType}
+                  onChange={(e) => setCustomWorkspaceType(e.target.value)}
+                  placeholder="Specify Business Type"
                   className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800"
                 />
+              )}
 
-                <select
-                  value={workspaceType}
-                  onChange={(event) => setWorkspaceType(event.target.value)}
-                  className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800"
-                >
-                  {businessTypes.map((type) => (
-                    <option key={type}>{type}</option>
-                  ))}
-                </select>
-
-                {workspaceType === "Other" && (
-                  <input
-                    type="text"
-                    value={customWorkspaceType}
-                    onChange={(event) =>
-                      setCustomWorkspaceType(event.target.value)
-                    }
-                    placeholder="Specify Business Type"
-                    className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800"
-                  />
-                )}
-
-                <button
-                  onClick={createWorkspace}
-                  className="w-full rounded-lg bg-blue-600 py-3 text-white hover:bg-blue-700"
-                >
-                  Create Workspace
-                </button>
-              </div>
+              <button
+                onClick={createWorkspace}
+                className="w-full rounded-lg bg-blue-600 py-3 text-white hover:bg-blue-700"
+              >
+                Create Workspace
+              </button>
             </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }
