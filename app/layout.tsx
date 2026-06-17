@@ -2,7 +2,9 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import AppShell from "@/components/AppShell";
+import { AuthSessionProvider } from "@/components/AuthSessionProvider";
 import { WorkspaceProvider } from "@/components/WorkspaceContext";
+import { getCurrentUser } from "@/lib/auth/session";
 import "leaflet/dist/leaflet.css";
 
 const geistSans = Geist({
@@ -20,22 +22,26 @@ export const metadata: Metadata = {
   description: "Business Operations Platform",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const user = await getCurrentUser();
+
   return (
     <html
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable}`}
     >
       <body>
-        <WorkspaceProvider>
-          <AppShell>
-            {children}
-          </AppShell>
-        </WorkspaceProvider>
+        <AuthSessionProvider initialUser={user}>
+          <WorkspaceProvider>
+            <AppShell>
+              {children}
+            </AppShell>
+          </WorkspaceProvider>
+        </AuthSessionProvider>
       </body>
     </html>
   );
