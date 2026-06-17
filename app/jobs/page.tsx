@@ -45,7 +45,7 @@ export default function JobsPage() {
   const [selectedJobs, setSelectedJobs] = useState<string[]>([]);
   const [newJobOpen, setNewJobOpen] = useState(false);
 
-  const [client, setClient] = useState("");
+  const [clientId, setClientId] = useState("");
   const [jobName, setJobName] = useState("");
   const [status, setStatus] = useState<JobStatus>("Lead");
   const [value, setValue] = useState("");
@@ -71,10 +71,18 @@ export default function JobsPage() {
     workspaceJobs.length > 0 &&
     workspaceJobs.every((job) => selectedJobs.includes(job.id));
 
-  function getClientByName(clientName: string) {
+  function getClientForJob(job: Job) {
+    if (job.clientId) {
+      const matchedById = workspaceClients.find(
+        (clientItem) => clientItem.id === job.clientId
+      );
+
+      if (matchedById) return matchedById;
+    }
+
     return workspaceClients.find(
       (clientItem) =>
-        clientItem.name.trim().toLowerCase() === clientName.trim().toLowerCase()
+        clientItem.name.trim().toLowerCase() === job.client.trim().toLowerCase()
     );
   }
 
@@ -94,7 +102,7 @@ export default function JobsPage() {
   }
 
   function resetForm() {
-    setClient("");
+    setClientId("");
     setJobName("");
     setStatus("Lead");
     setValue("");
@@ -158,7 +166,13 @@ export default function JobsPage() {
 
   function createJob(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!client.trim() || !jobName.trim()) return;
+    if (!clientId || !jobName.trim()) return;
+
+    const selectedClient = workspaceClients.find(
+      (clientItem) => clientItem.id === clientId
+    );
+
+    if (!selectedClient) return;
 
     const formattedValue = value.trim()
       ? value.trim().startsWith("$")
@@ -170,7 +184,8 @@ export default function JobsPage() {
       id: crypto.randomUUID(),
       workspaceId: activeWorkspace.id,
       name: jobName.trim(),
-      client,
+      clientId: selectedClient.id,
+      client: selectedClient.name,
       status,
       value: formattedValue,
       date,
@@ -222,14 +237,14 @@ export default function JobsPage() {
             <div>
               <label className="mb-2 block text-sm font-medium">Client</label>
               <select
-                value={client}
-                onChange={(event) => setClient(event.target.value)}
+                value={clientId}
+                onChange={(event) => setClientId(event.target.value)}
                 required
                 className="w-full rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800"
               >
                 <option value="">Select Client</option>
                 {workspaceClients.map((clientItem) => (
-                  <option key={clientItem.id} value={clientItem.name}>
+                  <option key={clientItem.id} value={clientItem.id}>
                     {clientItem.name}
                   </option>
                 ))}
@@ -364,7 +379,7 @@ export default function JobsPage() {
           <tbody>
             {workspaceJobs.length > 0 ? (
               workspaceJobs.map((job) => {
-                const matchedClient = getClientByName(job.client);
+                const matchedClient = getClientForJob(job);
                 const jobInvoices = getInvoicesForJob(job.id);
                 const invoiceTotal = getInvoiceTotalForJob(job.id);
                 const firstInvoice = jobInvoices[0];

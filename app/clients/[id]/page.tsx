@@ -35,7 +35,10 @@ export default function ClientPage() {
     return jobs.filter(
       (job) =>
         job.workspaceId === client.workspaceId &&
-        job.client.trim().toLowerCase() === client.name.trim().toLowerCase()
+        (job.clientId === client.id ||
+          (!job.clientId &&
+            job.client.trim().toLowerCase() ===
+              client.name.trim().toLowerCase()))
     );
   }, [client, jobs]);
 

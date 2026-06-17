@@ -5,6 +5,8 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
+import { clients as defaultClients } from "@/lib/clients";
+import { ClientRow } from "@/lib/frontierClients";
 import { jobs as defaultJobs, Job, JobMaterial, JobStatus } from "@/lib/jobs";
 import {
   formatCurrency,
@@ -39,6 +41,10 @@ export default function JobPage() {
     storageKeys.jobs,
     defaultJobs
   );
+  const [clientItems] = useStoredJsonState<ClientRow[]>(
+    storageKeys.clients,
+    defaultClients
+  );
   const [invoiceItems] = useStoredJsonState<InvoiceRow[]>(
     storageKeys.invoices,
     []
@@ -46,7 +52,7 @@ export default function JobPage() {
   const [editOpen, setEditOpen] = useState(false);
 
   const [editName, setEditName] = useState("");
-  const [editClient, setEditClient] = useState("");
+  const [editClientId, setEditClientId] = useState("");
   const [editStatus, setEditStatus] = useState<JobStatus>("Lead");
   const [editDate, setEditDate] = useState("");
   const [editValue, setEditValue] = useState("");
@@ -57,17 +63,37 @@ export default function JobPage() {
   const [editMaterialQuantity, setEditMaterialQuantity] = useState("");
 
   const job = jobItems.find((item) => item.id === id);
+  const workspaceClients = job
+    ? clientItems.filter((client) => client.workspaceId === job.workspaceId)
+    : [];
   const jobInvoices = invoiceItems.filter((invoice) => invoice.jobId === id);
   const invoiceTotal = jobInvoices.reduce(
     (total, invoice) => total + getInvoiceTotals(invoice).total,
     0
   );
 
+  function getClientForJob(jobItem: Job) {
+    if (jobItem.clientId) {
+      const matchedById = workspaceClients.find(
+        (client) => client.id === jobItem.clientId
+      );
+
+      if (matchedById) return matchedById;
+    }
+
+    return workspaceClients.find(
+      (client) =>
+        client.name.trim().toLowerCase() ===
+        jobItem.client.trim().toLowerCase()
+    );
+  }
+
   function openEditBox() {
     if (!job) return;
+    const matchedClient = getClientForJob(job);
 
     setEditName(job.name);
-    setEditClient(job.client);
+    setEditClientId(matchedClient?.id ?? "");
     setEditStatus(job.status);
     setEditDate(job.date);
     setEditValue(job.value.replace("$", "").replace(",", ""));
@@ -101,7 +127,13 @@ export default function JobPage() {
 
   function saveEditedJob() {
     if (!job) return;
-    if (!editName.trim() || !editClient.trim()) return;
+    if (!editName.trim() || !editClientId) return;
+
+    const selectedClient = workspaceClients.find(
+      (client) => client.id === editClientId
+    );
+
+    if (!selectedClient) return;
 
     const formattedValue = editValue.trim()
       ? editValue.trim().startsWith("$")
@@ -114,7 +146,8 @@ export default function JobPage() {
         ? {
             ...item,
             name: editName.trim(),
-            client: editClient.trim(),
+            clientId: selectedClient.id,
+            client: selectedClient.name,
             status: editStatus,
             date: editDate,
             value: formattedValue,
@@ -245,7 +278,14 @@ export default function JobPage() {
 
             <div className="space-y-4">
               <input type="text" value={editName} onChange={(event) => setEditName(event.target.value)} placeholder="Job Name" className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800" />
-              <input type="text" value={editClient} onChange={(event) => setEditClient(event.target.value)} placeholder="Client" className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800" />
+              <select value={editClientId} onChange={(event) => setEditClientId(event.target.value)} className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800">
+                <option value="">Select Client</option>
+                {workspaceClients.map((client) => (
+                  <option key={client.id} value={client.id}>
+                    {client.name}
+                  </option>
+                ))}
+              </select>
               <select value={editStatus} onChange={(event) => setEditStatus(event.target.value as JobStatus)} className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800">
                 {jobStatuses.map((statusItem) => <option key={statusItem}>{statusItem}</option>)}
               </select>
