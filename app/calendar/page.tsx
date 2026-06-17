@@ -134,6 +134,11 @@ export default function CalendarPage() {
     closeClientEventModal();
   }
 
+  function getClientEventDisplayName(event: ClientCalendarEvent) {
+    const client = workspaceClients.find((item) => item.id === event.clientId);
+    return client?.name ?? event.clientName;
+  }
+
   const currentMonthJobs = workspaceJobs.filter((job) => {
     const jobDate = new Date(`${job.date}T00:00:00`);
     return jobDate.getFullYear() === monthYear && jobDate.getMonth() === monthIndex;
@@ -193,7 +198,7 @@ export default function CalendarPage() {
                         <Link key={job.id} href={`/jobs/${job.id}`} className={`mt-1 block rounded px-2 py-1 text-xs font-medium text-white hover:opacity-90 ${getJobColor(job.status)}`}>{job.name}</Link>
                       ))}
                       {dayClientEvents.map((event) => (
-                        <Link key={event.id} href={`/clients/${event.clientId}`} className="mt-1 block rounded bg-teal-600 px-2 py-1 text-xs font-medium text-white hover:opacity-90">{event.title}: {event.clientName}</Link>
+                        <Link key={event.id} href={`/clients/${event.clientId}`} className="mt-1 block rounded bg-teal-600 px-2 py-1 text-xs font-medium text-white hover:opacity-90">{event.title}: {getClientEventDisplayName(event)}</Link>
                       ))}
                     </div>
                   );
@@ -217,7 +222,7 @@ export default function CalendarPage() {
                 ) : (
                   <Link key={`client-${item.event.id}`} href={`/clients/${item.event.clientId}`} className="block rounded-xl border border-teal-200 p-4 hover:bg-teal-50 dark:border-teal-900 dark:hover:bg-teal-950/30">
                     <div className="font-semibold text-teal-700 dark:text-teal-300">{item.event.title}</div>
-                    <div className="text-sm text-gray-500 dark:text-gray-400">{item.event.clientName} - {item.event.date}</div>
+                    <div className="text-sm text-gray-500 dark:text-gray-400">{getClientEventDisplayName(item.event)} - {item.event.date}</div>
                   </Link>
                 )
               )

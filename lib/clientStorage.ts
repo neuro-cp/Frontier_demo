@@ -19,8 +19,65 @@ export const storageKeys = {
 
 type StoredStateSetter<T> = T | ((current: T) => T);
 
+type StoredClientForMigration = {
+  id: string;
+  workspaceId: string;
+  name: string;
+};
+
+type StoredJobForMigration = {
+  client?: string;
+  clientId?: string;
+  workspaceId?: string;
+};
+
 function getStorageEventName(key: string) {
   return `frontier-storage:${key}`;
+}
+
+function repairLegacyJobClientIds(snapshot: string) {
+  if (typeof window === "undefined") return snapshot;
+
+  try {
+    const jobs = JSON.parse(snapshot) as StoredJobForMigration[];
+    const clients = JSON.parse(
+      window.localStorage.getItem(storageKeys.clients) ?? "[]"
+    ) as StoredClientForMigration[];
+
+    if (!Array.isArray(jobs) || !Array.isArray(clients)) return snapshot;
+
+    let changed = false;
+    const repairedJobs = jobs.map((job) => {
+      if (job.clientId || !job.client?.trim() || !job.workspaceId) return job;
+
+      const matchingClient = clients.find(
+        (client) =>
+          client.workspaceId === job.workspaceId &&
+          client.name.trim().toLowerCase() === job.client?.trim().toLowerCase()
+      );
+
+      if (!matchingClient) return job;
+
+      changed = true;
+      return { ...job, clientId: matchingClient.id };
+    });
+
+    if (!changed) return snapshot;
+
+    const repairedSnapshot = JSON.stringify(repairedJobs);
+    queueMicrotask(() => {
+      window.localStorage.setItem(storageKeys.jobs, repairedSnapshot);
+      window.dispatchEvent(new Event(getStorageEventName(storageKeys.jobs)));
+    });
+
+    return repairedSnapshot;
+  } catch {
+    return snapshot;
+  }
+}
+
+function maybeRepairStoredJsonSnapshot(key: string, snapshot: string) {
+  return key === storageKeys.jobs ? repairLegacyJobClientIds(snapshot) : snapshot;
 }
 
 export function readStoredJson<T>(key: string, fallback: T): T {
@@ -30,7 +87,7 @@ export function readStoredJson<T>(key: string, fallback: T): T {
   if (!saved) return fallback;
 
   try {
-    return JSON.parse(saved) as T;
+    return JSON.parse(maybeRepairStoredJsonSnapshot(key, saved)) as T;
   } catch {
     return fallback;
   }
@@ -64,7 +121,8 @@ export function useStoredJsonState<T>(
 
   const getSnapshot = useCallback(() => {
     if (typeof window === "undefined") return fallbackSnapshot;
-    return window.localStorage.getItem(key) ?? fallbackSnapshot;
+    const saved = window.localStorage.getItem(key) ?? fallbackSnapshot;
+    return maybeRepairStoredJsonSnapshot(key, saved);
   }, [fallbackSnapshot, key]);
 
   const subscribe = useCallback(
