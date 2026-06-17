@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 
 import { useWorkspace } from "@/components/WorkspaceContext";
+import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
 import {
   formatCurrency,
   getInvoiceClientName,
@@ -11,20 +12,17 @@ import {
   InvoiceRow,
   invoiceStatuses,
   InvoiceStatus,
-  loadSavedInvoices,
-  saveSavedInvoices,
 } from "@/lib/frontierInvoices";
 
 export default function InvoicesPage() {
   const { activeWorkspace } = useWorkspace();
 
-  const [invoices, setInvoices] = useState<InvoiceRow[]>([]);
+  const [invoices, setInvoices] = useStoredJsonState<InvoiceRow[]>(
+    storageKeys.invoices,
+    []
+  );
   const [selectedInvoices, setSelectedInvoices] = useState<string[]>([]);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
-
-  useEffect(() => {
-    setInvoices(loadSavedInvoices());
-  }, []);
 
   const workspaceInvoices = invoices.filter(
     (invoice) => invoice.workspaceId === activeWorkspace.id
@@ -36,7 +34,6 @@ export default function InvoicesPage() {
 
   function saveInvoices(updatedInvoices: InvoiceRow[]) {
     setInvoices(updatedInvoices);
-    saveSavedInvoices(updatedInvoices);
   }
 
   function toggleInvoice(id: string) {
@@ -177,7 +174,7 @@ export default function InvoicesPage() {
                         {invoice.jobName || "Open Job"}
                       </Link>
                     ) : (
-                      "—"
+                      "-"
                     )}
                   </td>
 

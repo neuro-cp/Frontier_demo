@@ -1,10 +1,12 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 
 import { useWorkspace } from "@/components/WorkspaceContext";
-import { ClientRow, loadClients } from "@/lib/frontierClients";
+import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
+import { clients as defaultClients } from "@/lib/clients";
+import { ClientRow } from "@/lib/frontierClients";
 import {
   buildLogisticsLocations,
   getClientFullAddress,
@@ -22,11 +24,10 @@ export default function LogisticsPage() {
 
   const [selectedStatus, setSelectedStatus] = useState("All");
   const [selectedLocationIds, setSelectedLocationIds] = useState<string[]>([]);
-  const [clients, setClients] = useState<ClientRow[]>([]);
-
-  useEffect(() => {
-    setClients(loadClients());
-  }, []);
+  const [clients] = useStoredJsonState<ClientRow[]>(
+    storageKeys.clients,
+    defaultClients
+  );
 
   const workspaceClients = useMemo(() => {
     return clients.filter(

@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 
 import { useWorkspace } from "@/components/WorkspaceContext";
+import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
 import { invoices as defaultInvoices } from "@/lib/invoices";
 import { expenses as defaultExpenses, Expense } from "@/lib/expenses";
 import {
@@ -13,9 +14,7 @@ import {
   InvoiceRow,
   InvoiceStatus,
   invoiceStatuses,
-  loadSavedInvoices,
   moneyToNumber,
-  saveSavedInvoices,
 } from "@/lib/frontierInvoices";
 
 type DefaultInvoice = (typeof defaultInvoices)[number];
@@ -77,10 +76,16 @@ function getFinancialInvoiceTotal(row: FinancialInvoice) {
 export default function FinancialsPage() {
   const { activeWorkspace } = useWorkspace();
 
-  const [savedInvoices, setSavedInvoices] = useState<InvoiceRow[]>([]);
+  const [savedInvoices, setSavedInvoices] = useStoredJsonState<InvoiceRow[]>(
+    storageKeys.invoices,
+    []
+  );
   const [defaultInvoiceItems, setDefaultInvoiceItems] =
     useState(defaultInvoices);
-  const [expenseItems, setExpenseItems] = useState<Expense[]>(defaultExpenses);
+  const [expenseItems, setExpenseItems] = useStoredJsonState<Expense[]>(
+    storageKeys.expenses,
+    defaultExpenses
+  );
 
   const [selectedInvoices, setSelectedInvoices] = useState<string[]>([]);
   const [selectedExpenses, setSelectedExpenses] = useState<string[]>([]);
@@ -89,20 +94,6 @@ export default function FinancialsPage() {
   const [expenseDescription, setExpenseDescription] = useState("");
   const [expenseCategory, setExpenseCategory] = useState("Materials");
   const [expenseAmount, setExpenseAmount] = useState("");
-
-  useEffect(() => {
-    setSavedInvoices(loadSavedInvoices());
-
-    const savedExpenses = localStorage.getItem("frontier-expenses");
-
-    if (savedExpenses) {
-      try {
-        setExpenseItems(JSON.parse(savedExpenses));
-      } catch {
-        setExpenseItems(defaultExpenses);
-      }
-    }
-  }, []);
 
   const generatedInvoiceRows: FinancialInvoice[] = savedInvoices
     .filter((invoice) => invoice.workspaceId === activeWorkspace.id)
@@ -128,12 +119,10 @@ export default function FinancialsPage() {
 
   function saveSavedInvoiceItems(updatedInvoices: InvoiceRow[]) {
     setSavedInvoices(updatedInvoices);
-    saveSavedInvoices(updatedInvoices);
   }
 
   function saveExpenses(updatedExpenses: Expense[]) {
     setExpenseItems(updatedExpenses);
-    localStorage.setItem("frontier-expenses", JSON.stringify(updatedExpenses));
   }
 
   function toggleInvoice(rowId: string) {
@@ -257,21 +246,21 @@ export default function FinancialsPage() {
         <SummaryCard
           title="Expenses"
           value={formatCurrency(totalExpenses)}
-          icon="↘"
+          icon="-"
           iconClass="bg-red-100 text-red-600 dark:bg-red-900/40 dark:text-red-300"
         />
 
         <SummaryCard
           title="Outstanding"
           value={formatCurrency(outstanding)}
-          icon="◷"
+          icon="-"
           iconClass="bg-orange-100 text-orange-600 dark:bg-orange-900/40 dark:text-orange-300"
         />
 
         <SummaryCard
           title="Profit"
           value={formatCurrency(profit)}
-          icon="↗"
+          icon="-"
           iconClass="bg-blue-100 text-blue-600 dark:bg-blue-900/40 dark:text-blue-300"
         />
       </div>
@@ -455,7 +444,7 @@ export default function FinancialsPage() {
           <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl dark:bg-gray-900">
             <div className="mb-6 flex items-center justify-between">
               <h2 className="text-xl font-bold text-gray-950 dark:text-gray-100">Add Expense</h2>
-              <button onClick={closeExpenseModal} className="text-2xl text-gray-500">×</button>
+              <button onClick={closeExpenseModal} className="text-2xl text-gray-500">-</button>
             </div>
 
             <div className="space-y-4">

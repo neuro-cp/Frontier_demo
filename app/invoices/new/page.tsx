@@ -1,21 +1,21 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 
 import { useWorkspace } from "@/components/WorkspaceContext";
+import { storageKeys, useStoredJsonState, writeStoredJson } from "@/lib/clientStorage";
 import { clients as defaultClients } from "@/lib/clients";
 import { jobs as defaultJobs, Job } from "@/lib/jobs";
-import { ClientRow, loadClients } from "@/lib/frontierClients";
-import { InvoiceSetupDraft, loadSavedInvoices } from "@/lib/frontierInvoices";
+import { ClientRow } from "@/lib/frontierClients";
+import { InvoiceRow, InvoiceSetupDraft } from "@/lib/frontierInvoices";
 
 function getTodayDate() {
   return new Date().toISOString().slice(0, 10);
 }
 
-function getNextInvoiceNumber() {
-  const savedInvoices = loadSavedInvoices();
+function getNextInvoiceNumber(savedInvoices: InvoiceRow[]) {
   const nextNumber = savedInvoices.length + 1;
 
   return `INV-${String(nextNumber).padStart(3, "0")}`;
@@ -36,40 +36,15 @@ function NewInvoiceContent() {
   const startingJobId = searchParams.get("jobId") || "";
   const { activeWorkspace } = useWorkspace();
 
-  const [clientItems, setClientItems] = useState<ClientRow[]>(defaultClients);
-  const [jobItems, setJobItems] = useState<Job[]>(defaultJobs);
-  const [selectedClientId, setSelectedClientId] = useState("new");
-  const [selectedJobId, setSelectedJobId] = useState("");
-  const [autoLoadedJobId, setAutoLoadedJobId] = useState("");
-
-  const [invoiceNumber, setInvoiceNumber] = useState("");
-  const [invoiceDate, setInvoiceDate] = useState(getTodayDate());
-
-  const [billToName, setBillToName] = useState("");
-  const [billToCompany, setBillToCompany] = useState("");
-  const [billToAddress, setBillToAddress] = useState("");
-  const [billToCity, setBillToCity] = useState("");
-  const [billToState, setBillToState] = useState("");
-  const [billToZip, setBillToZip] = useState("");
-  const [billToPhone, setBillToPhone] = useState("");
-  const [billToEmail, setBillToEmail] = useState("");
-
-  const [footerMessage, setFooterMessage] = useState("Thank you for your business!");
-  const [contactMessage, setContactMessage] = useState("Please contact us with any questions about this invoice.");
-
-  useEffect(() => {
-    setClientItems(loadClients());
-
-    const savedJobs = localStorage.getItem("frontier-jobs");
-
-    if (savedJobs) {
-      try {
-        setJobItems(JSON.parse(savedJobs));
-      } catch {
-        setJobItems(defaultJobs);
-      }
-    }
-  }, []);
+  const [clientItems] = useStoredJsonState<ClientRow[]>(
+    storageKeys.clients,
+    defaultClients
+  );
+  const [jobItems] = useStoredJsonState<Job[]>(storageKeys.jobs, defaultJobs);
+  const [savedInvoices] = useStoredJsonState<InvoiceRow[]>(
+    storageKeys.invoices,
+    []
+  );
 
   const workspaceClients = clientItems.filter(
     (client) => client.workspaceId === activeWorkspace.id
@@ -82,6 +57,43 @@ function NewInvoiceContent() {
   const workspaceJobs = jobItems
     .filter((job) => job.workspaceId === activeWorkspace.id)
     .sort((a, b) => a.name.localeCompare(b.name));
+
+  const startingJob = workspaceJobs.find((job) => job.id === startingJobId);
+  const startingClient = startingJob
+    ? workspaceClients.find(
+        (client) =>
+          client.name.trim().toLowerCase() ===
+          startingJob.client.trim().toLowerCase()
+      )
+    : undefined;
+
+  const [selectedClientId, setSelectedClientId] = useState(
+    startingClient?.id ?? "new"
+  );
+  const [selectedJobId, setSelectedJobId] = useState(startingJob?.id ?? "");
+
+  const [invoiceNumber, setInvoiceNumber] = useState("");
+  const [invoiceDate, setInvoiceDate] = useState(getTodayDate());
+
+  const [billToName, setBillToName] = useState(
+    startingClient?.name ?? startingJob?.client ?? ""
+  );
+  const [billToCompany, setBillToCompany] = useState("");
+  const [billToAddress, setBillToAddress] = useState(
+    startingClient?.address ?? ""
+  );
+  const [billToCity, setBillToCity] = useState(startingClient?.city ?? "");
+  const [billToState, setBillToState] = useState(
+    (startingClient?.state ?? "").toUpperCase()
+  );
+  const [billToZip, setBillToZip] = useState(startingClient?.zip ?? "");
+  const [billToPhone, setBillToPhone] = useState(
+    formatPhone(startingClient?.phone ?? "")
+  );
+  const [billToEmail, setBillToEmail] = useState(startingClient?.email ?? "");
+
+  const [footerMessage, setFooterMessage] = useState("Thank you for your business!");
+  const [contactMessage, setContactMessage] = useState("Please contact us with any questions about this invoice.");
 
   const companyPlaceholder = {
     companyName: `${activeWorkspace.name} Company`,
@@ -151,20 +163,13 @@ function NewInvoiceContent() {
     }
   }
 
-  useEffect(() => {
-    if (!startingJobId || autoLoadedJobId === startingJobId) return;
-    if (workspaceJobs.length === 0) return;
-
-    populateFromJob(startingJobId);
-    setAutoLoadedJobId(startingJobId);
-  }, [startingJobId, autoLoadedJobId, workspaceJobs]);
-
   function markManualBillToEdit() {
     setSelectedClientId("new");
   }
 
   function continueToBuilder() {
-    const resolvedInvoiceNumber = invoiceNumber.trim() || getNextInvoiceNumber();
+    const resolvedInvoiceNumber =
+      invoiceNumber.trim() || getNextInvoiceNumber(savedInvoices);
     const attachedJob = workspaceJobs.find((job) => job.id === selectedJobId);
 
     if (!invoiceDate.trim()) return;
@@ -195,7 +200,7 @@ function NewInvoiceContent() {
       contactMessage: contactMessage.trim(),
     };
 
-    localStorage.setItem("frontier-invoice-draft", JSON.stringify(draft));
+    writeStoredJson(storageKeys.invoiceDraft, draft);
     router.push("/invoices/new/build");
   }
 
@@ -233,7 +238,7 @@ function NewInvoiceContent() {
               <option value="">No attached job</option>
               {workspaceJobs.map((job) => (
                 <option key={job.id} value={job.id}>
-                  {job.name} — {job.client}
+                  {job.name} - {job.client}
                 </option>
               ))}
             </select>

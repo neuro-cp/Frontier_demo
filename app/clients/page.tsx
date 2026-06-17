@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 
 import { useWorkspace } from "@/components/WorkspaceContext";
+import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
 import { clients as defaultClients } from "@/lib/clients";
 
 type ClientRow = {
@@ -54,7 +55,10 @@ function getStatusClasses(status: string) {
 export default function ClientsPage() {
   const { activeWorkspace } = useWorkspace();
 
-  const [clientItems, setClientItems] = useState<ClientRow[]>(defaultClients);
+  const [clientItems, setClientItems] = useStoredJsonState<ClientRow[]>(
+    storageKeys.clients,
+    defaultClients
+  );
   const [selectedClients, setSelectedClients] = useState<string[]>([]);
   const [statusPriority, setStatusPriority] =
     useState<ClientStatusPriority>("default");
@@ -75,18 +79,6 @@ export default function ClientsPage() {
   const [clientState, setClientState] = useState("");
   const [clientZip, setClientZip] = useState("");
   const [clientNotes, setClientNotes] = useState("");
-
-  useEffect(() => {
-    const savedClients = localStorage.getItem("frontier-clients");
-
-    if (savedClients) {
-      try {
-        setClientItems(JSON.parse(savedClients));
-      } catch {
-        setClientItems(defaultClients);
-      }
-    }
-  }, []);
 
   const workspaceClients = clientItems.filter(
     (client) => client.workspaceId === activeWorkspace.id
@@ -114,7 +106,6 @@ export default function ClientsPage() {
 
   function saveClients(updatedClients: ClientRow[]) {
     setClientItems(updatedClients);
-    localStorage.setItem("frontier-clients", JSON.stringify(updatedClients));
   }
 
   function cycleStatusPriority() {
@@ -327,7 +318,7 @@ export default function ClientsPage() {
                 >
                   <span>Status</span>
                   <span className="text-xs">
-                    {statusPriority === "default" ? "↕" : "↑"}
+                    {statusPriority === "default" ? "-" : "-"}
                   </span>
                 </button>
 
@@ -387,7 +378,7 @@ export default function ClientsPage() {
                       </span>
                     </td>
 
-                    <td className="p-4">{client.phone || "—"}</td>
+                    <td className="p-4">{client.phone || "-"}</td>
 
                     <td className="p-4">
                       {client.email ? (
@@ -398,12 +389,12 @@ export default function ClientsPage() {
                           {client.email}
                         </a>
                       ) : (
-                        "—"
+                        "-"
                       )}
                     </td>
 
                     <td className="p-4">
-                      {addressParts.length > 0 ? addressParts.join(", ") : "—"}
+                      {addressParts.length > 0 ? addressParts.join(", ") : "-"}
                     </td>
 
                     <td className="p-4 text-right font-medium">
@@ -449,7 +440,7 @@ export default function ClientsPage() {
                 onClick={closeClientModals}
                 className="text-2xl text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
               >
-                ×
+                -
               </button>
             </div>
 

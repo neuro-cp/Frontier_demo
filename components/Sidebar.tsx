@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useState } from "react";
 
 const navItems = [
@@ -18,6 +19,7 @@ const navItems = [
 
 export default function Sidebar() {
   const [collapsed, setCollapsed] = useState(true);
+  const pathname = usePathname();
 
   return (
     <aside
@@ -26,32 +28,40 @@ export default function Sidebar() {
       }`}
     >
       <nav className="flex flex-1 flex-col gap-1 p-2">
-        {navItems.map((item) => (
-          <Link
-            key={item.href}
-            href={item.href}
-            title={collapsed ? item.label : undefined}
-            className={`group relative flex items-center rounded-xl px-3 py-2.5 text-gray-300 transition-colors hover:bg-blue-600 hover:text-white ${
-              collapsed ? "justify-center" : "gap-3"
-            }`}
-          >
-            <span className="w-8 text-center text-2xl leading-none">
-              {item.icon}
-            </span>
+        {navItems.map((item) => {
+          const active =
+            pathname === item.href || pathname.startsWith(`${item.href}/`);
 
-            {!collapsed && (
-              <span className="truncate text-base font-medium">
-                {item.label}
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              title={collapsed ? item.label : undefined}
+              aria-current={active ? "page" : undefined}
+              className={`group relative flex items-center rounded-lg px-3 py-2.5 transition-colors ${
+                active
+                  ? "bg-blue-600 text-white"
+                  : "text-gray-300 hover:bg-gray-800 hover:text-white"
+              } ${collapsed ? "justify-center" : "gap-3"}`}
+            >
+              <span className="w-8 text-center text-2xl leading-none">
+                {item.icon}
               </span>
-            )}
 
-            {collapsed && (
-              <span className="pointer-events-none absolute left-full z-50 ml-3 whitespace-nowrap rounded-lg bg-gray-800 px-3 py-2 text-sm text-white opacity-0 shadow-lg transition-opacity group-hover:opacity-100">
-                {item.label}
-              </span>
-            )}
-          </Link>
-        ))}
+              {!collapsed && (
+                <span className="truncate text-base font-medium">
+                  {item.label}
+                </span>
+              )}
+
+              {collapsed && (
+                <span className="pointer-events-none absolute left-full z-50 ml-3 whitespace-nowrap rounded-lg bg-gray-800 px-3 py-2 text-sm text-white opacity-0 shadow-lg transition-opacity group-hover:opacity-100">
+                  {item.label}
+                </span>
+              )}
+            </Link>
+          );
+        })}
       </nav>
 
       <div className="border-t border-gray-800 p-3">
@@ -59,15 +69,13 @@ export default function Sidebar() {
           onClick={() => setCollapsed(!collapsed)}
           aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
           title={collapsed ? "Expand" : "Collapse"}
-          className={`flex w-full items-center rounded-xl px-3 py-3 text-gray-300 transition-colors hover:bg-gray-800 hover:text-white ${
+          className={`flex w-full items-center rounded-lg px-3 py-3 text-gray-300 transition-colors hover:bg-gray-800 hover:text-white ${
             collapsed ? "justify-center" : "gap-3"
           }`}
         >
-          <span className="text-xl">{collapsed ? "›" : "‹"}</span>
+          <span className="text-xl">{collapsed ? ">" : "<"}</span>
 
-          {!collapsed && (
-            <span className="text-base font-medium">Collapse</span>
-          )}
+          {!collapsed && <span className="text-base font-medium">Collapse</span>}
         </button>
       </div>
     </aside>

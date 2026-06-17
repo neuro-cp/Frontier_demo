@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useWorkspace } from "@/components/WorkspaceContext";
+import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
 import PermissionsSettings from "./PermissionsSettings";
 
 type SettingsTab =
@@ -88,45 +89,47 @@ function getDefaultSettings(
   };
 }
 
-function loadAllSettings() {
-  if (typeof window === "undefined") return [];
-
-  const saved = localStorage.getItem("frontier-settings");
-  if (!saved) return [];
-
-  try {
-    const parsed = JSON.parse(saved);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveAllSettings(settings: WorkspaceSettings[]) {
-  localStorage.setItem("frontier-settings", JSON.stringify(settings));
-}
-
 export default function SettingsPage() {
   const { activeWorkspace } = useWorkspace();
-
-  const [tab, setTab] = useState<SettingsTab>("business");
-  const [allSettings, setAllSettings] = useState<WorkspaceSettings[]>([]);
-  const [settings, setSettings] = useState<WorkspaceSettings>(
-    getDefaultSettings(activeWorkspace.id, activeWorkspace.name)
+  const [allSettings, setAllSettings] = useStoredJsonState<WorkspaceSettings[]>(
+    storageKeys.settings,
+    []
   );
 
+  const initialSettings =
+    allSettings.find((item) => item.workspaceId === activeWorkspace.id) ??
+    getDefaultSettings(activeWorkspace.id, activeWorkspace.name);
+
+  return (
+    <SettingsWorkspacePanel
+      key={activeWorkspace.id}
+      activeWorkspaceId={activeWorkspace.id}
+      activeWorkspaceName={activeWorkspace.name}
+      allSettings={allSettings}
+      initialSettings={initialSettings}
+      setAllSettings={setAllSettings}
+    />
+  );
+}
+
+function SettingsWorkspacePanel({
+  activeWorkspaceId,
+  activeWorkspaceName,
+  allSettings,
+  initialSettings,
+  setAllSettings,
+}: {
+  activeWorkspaceId: string;
+  activeWorkspaceName: string;
+  allSettings: WorkspaceSettings[];
+  initialSettings: WorkspaceSettings;
+  setAllSettings: (settings: WorkspaceSettings[]) => void;
+}) {
+
+  const [tab, setTab] = useState<SettingsTab>("business");
+  const [settings, setSettings] = useState<WorkspaceSettings>(initialSettings);
+
   const [savedNotice, setSavedNotice] = useState("");
-
-  useEffect(() => {
-    const loadedSettings = loadAllSettings();
-    const currentSettings =
-      loadedSettings.find((item) => item.workspaceId === activeWorkspace.id) ??
-      getDefaultSettings(activeWorkspace.id, activeWorkspace.name);
-
-    setAllSettings(loadedSettings);
-    setSettings(currentSettings);
-    setSavedNotice("");
-  }, [activeWorkspace.id, activeWorkspace.name]);
 
   function updateSetting<K extends keyof WorkspaceSettings>(
     key: K,
@@ -145,13 +148,12 @@ export default function SettingsPage() {
 
   function saveSettings() {
     const withoutCurrentWorkspace = allSettings.filter(
-      (item) => item.workspaceId !== activeWorkspace.id
+      (item) => item.workspaceId !== activeWorkspaceId
     );
 
     const updatedSettings = [...withoutCurrentWorkspace, settings];
 
     setAllSettings(updatedSettings);
-    saveAllSettings(updatedSettings);
 
     showSavedNotice("Settings saved.");
 
@@ -160,17 +162,16 @@ export default function SettingsPage() {
 
   function resetWorkspaceSettings() {
     const resetSettings = getDefaultSettings(
-      activeWorkspace.id,
-      activeWorkspace.name
+      activeWorkspaceId,
+      activeWorkspaceName
     );
 
     const updatedSettings = allSettings.filter(
-      (item) => item.workspaceId !== activeWorkspace.id
+      (item) => item.workspaceId !== activeWorkspaceId
     );
 
     setSettings(resetSettings);
     setAllSettings(updatedSettings);
-    saveAllSettings(updatedSettings);
 
     showSavedNotice("Settings reset.");
 
@@ -257,7 +258,7 @@ export default function SettingsPage() {
           <h2 className="text-2xl font-bold">Business Profile</h2>
 
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            This should later feed the invoice “From” section automatically.
+            This should later feed the invoice -From- section automatically.
           </p>
 
           <div className="mt-6 grid grid-cols-1 gap-5 xl:grid-cols-2">
@@ -510,7 +511,7 @@ export default function SettingsPage() {
             <div>
               <label className={labelClass}>Workspace Name</label>
               <input
-                value={activeWorkspace.name}
+                value={activeWorkspaceName}
                 readOnly
                 className={inputClass}
               />
@@ -545,7 +546,7 @@ export default function SettingsPage() {
             <div>
               <label className={labelClass}>Workspace ID</label>
               <input
-                value={activeWorkspace.id}
+                value={activeWorkspaceId}
                 readOnly
                 className={inputClass}
               />
@@ -569,7 +570,7 @@ export default function SettingsPage() {
 
       {tab === "permissions" && (
         <PermissionsSettings
-          activeWorkspaceName={activeWorkspace.name}
+          activeWorkspaceName={activeWorkspaceName}
           setSavedNotice={showSavedNotice}
         />
       )}

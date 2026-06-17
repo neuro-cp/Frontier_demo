@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 
+import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
 import { clients as defaultClients } from "@/lib/clients";
 import { jobs as defaultJobs, Job } from "@/lib/jobs";
 import { ClientRow } from "@/lib/frontierClients";
@@ -11,41 +12,21 @@ import {
   formatCurrency,
   getInvoiceTotals,
   InvoiceRow,
-  loadSavedInvoices,
 } from "@/lib/frontierInvoices";
 
 export default function ClientPage() {
   const params = useParams();
   const id = String(params.id);
 
-  const [clients, setClients] = useState<ClientRow[]>(defaultClients);
-  const [jobs, setJobs] = useState<Job[]>(defaultJobs);
-  const [invoices, setInvoices] = useState<InvoiceRow[]>([]);
-  const [loaded, setLoaded] = useState(false);
-
-  useEffect(() => {
-    const savedClients = localStorage.getItem("frontier-clients");
-    const savedJobs = localStorage.getItem("frontier-jobs");
-
-    if (savedClients) {
-      try {
-        setClients(JSON.parse(savedClients));
-      } catch {
-        setClients(defaultClients);
-      }
-    }
-
-    if (savedJobs) {
-      try {
-        setJobs(JSON.parse(savedJobs));
-      } catch {
-        setJobs(defaultJobs);
-      }
-    }
-
-    setInvoices(loadSavedInvoices());
-    setLoaded(true);
-  }, []);
+  const [clients] = useStoredJsonState<ClientRow[]>(
+    storageKeys.clients,
+    defaultClients
+  );
+  const [jobs] = useStoredJsonState<Job[]>(storageKeys.jobs, defaultJobs);
+  const [invoices] = useStoredJsonState<InvoiceRow[]>(
+    storageKeys.invoices,
+    []
+  );
 
   const client = clients.find((clientItem) => clientItem.id === id);
 
@@ -74,12 +55,10 @@ export default function ClientPage() {
     0
   );
 
-  if (!loaded) return null;
-
   if (!client) {
     return (
       <div className="space-y-4 text-gray-950 dark:text-gray-100">
-        <Link href="/clients" className="text-blue-600 hover:underline dark:text-blue-400">← Back to Clients</Link>
+        <Link href="/clients" className="text-blue-600 hover:underline dark:text-blue-400">- Back to Clients</Link>
         <h1 className="text-3xl font-bold">Client not found</h1>
       </div>
     );
@@ -89,7 +68,7 @@ export default function ClientPage() {
 
   return (
     <div className="space-y-6 text-gray-950 dark:text-gray-100">
-      <Link href="/clients" className="text-blue-600 hover:underline dark:text-blue-400">← Back to Clients</Link>
+      <Link href="/clients" className="text-blue-600 hover:underline dark:text-blue-400">- Back to Clients</Link>
 
       <div className="rounded-lg bg-white p-6 shadow dark:bg-gray-900">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -101,9 +80,9 @@ export default function ClientPage() {
         </div>
 
         <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <p><strong>Phone:</strong> {client.phone || "—"}</p>
-          <p><strong>Email:</strong> {client.email || "—"}</p>
-          <p className="sm:col-span-2"><strong>Address:</strong> {addressParts.length > 0 ? addressParts.join(", ") : "—"}</p>
+          <p><strong>Phone:</strong> {client.phone || "-"}</p>
+          <p><strong>Email:</strong> {client.email || "-"}</p>
+          <p className="sm:col-span-2"><strong>Address:</strong> {addressParts.length > 0 ? addressParts.join(", ") : "-"}</p>
           {client.notes && <p className="sm:col-span-2"><strong>Notes:</strong> {client.notes}</p>}
         </div>
       </div>
@@ -117,7 +96,7 @@ export default function ClientPage() {
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <div className="font-semibold text-blue-600 dark:text-blue-400">{job.name}</div>
-                    <div className="text-sm text-gray-500 dark:text-gray-400">{job.status} · {job.date || "No date"}</div>
+                    <div className="text-sm text-gray-500 dark:text-gray-400">{job.status} - {job.date || "No date"}</div>
                   </div>
                   <div className="font-bold">{job.value}</div>
                 </div>
@@ -142,7 +121,7 @@ export default function ClientPage() {
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <div className="font-semibold text-blue-600 dark:text-blue-400">{invoice.invoiceNumber}</div>
-                    <div className="text-sm text-gray-500 dark:text-gray-400">{invoice.status} · {invoice.invoiceDate}</div>
+                    <div className="text-sm text-gray-500 dark:text-gray-400">{invoice.status} - {invoice.invoiceDate}</div>
                   </div>
                   <div className="font-bold">{formatCurrency(getInvoiceTotals(invoice).total)}</div>
                 </div>

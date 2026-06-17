@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import Link from "next/link";
 
 import StatCard from "../../components/Statcard";
 import { useWorkspace } from "@/components/WorkspaceContext";
+import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
 import { jobs as defaultJobs } from "@/lib/jobs";
 import { clients } from "@/lib/clients";
 import { invoices } from "@/lib/invoices";
@@ -21,19 +21,7 @@ function formatMoney(value: number) {
 export default function DashboardPage() {
   const { activeWorkspace } = useWorkspace();
 
-  const [jobItems, setJobItems] = useState(defaultJobs);
-
-  useEffect(() => {
-    const savedJobs = localStorage.getItem("frontier-jobs");
-
-    if (savedJobs) {
-      try {
-        setJobItems(JSON.parse(savedJobs));
-      } catch {
-        setJobItems(defaultJobs);
-      }
-    }
-  }, []);
+  const [jobItems] = useStoredJsonState(storageKeys.jobs, defaultJobs);
 
   const workspaceClients = clients.filter(
     (client) => client.workspaceId === activeWorkspace.id
@@ -70,12 +58,12 @@ export default function DashboardPage() {
   ).length;
 
   const recentActivity = [
-    `✓ ${activeClients} active client(s)`,
-    `✓ ${workspaceJobs.length} total job(s)`,
-    `✓ ${openQuotes} open quote(s)`,
-    `✓ ${scheduledJobs} scheduled job(s)`,
-    `✓ ${inventoryAlerts} inventory alert(s)`,
-    `✓ ${workspaceInvoices.length} invoice(s) in system`,
+    `- ${activeClients} active client(s)`,
+    `- ${workspaceJobs.length} total job(s)`,
+    `- ${openQuotes} open quote(s)`,
+    `- ${scheduledJobs} scheduled job(s)`,
+    `- ${inventoryAlerts} inventory alert(s)`,
+    `- ${workspaceInvoices.length} invoice(s) in system`,
   ];
 
   return (
@@ -103,7 +91,7 @@ export default function DashboardPage() {
           </Link>
 
           <Link
-            href="/financials"
+            href="/invoices/new"
             className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
           >
             + Invoice
@@ -111,15 +99,19 @@ export default function DashboardPage() {
 
           <button
             type="button"
-            className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-semibold text-white hover:bg-gray-800 dark:bg-gray-700 dark:hover:bg-gray-600"
+            disabled
+            title="Coming with document and voice capture workflows"
+            className="cursor-not-allowed rounded-lg bg-gray-300 px-4 py-2 text-sm font-semibold text-gray-600 dark:bg-gray-800 dark:text-gray-400"
           >
-            🎤 Speech
+            Speech
           </button>
           <button
             type="button"
-            className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-semibold text-white hover:bg-gray-800 dark:bg-gray-700 dark:hover:bg-gray-600"
+            disabled
+            title="Coming with document and image extraction workflows"
+            className="cursor-not-allowed rounded-lg bg-gray-300 px-4 py-2 text-sm font-semibold text-gray-600 dark:bg-gray-800 dark:text-gray-400"
           >
-            📷 Image
+            Image
           </button>
         </div>
       </div>

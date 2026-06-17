@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useWorkspace } from "@/components/WorkspaceContext";
+import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
 import { clients as defaultClients } from "@/lib/clients";
 import { jobs as defaultJobs } from "@/lib/jobs";
 
@@ -33,52 +34,6 @@ type JobLike = {
   client?: string;
 };
 
-function loadStoredDocuments(): StoredDocument[] {
-  if (typeof window === "undefined") return [];
-
-  const saved = localStorage.getItem("frontier-documents");
-  if (!saved) return [];
-
-  try {
-    const parsed = JSON.parse(saved);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveStoredDocuments(documents: StoredDocument[]) {
-  localStorage.setItem("frontier-documents", JSON.stringify(documents));
-}
-
-function loadStoredClients(): ClientLike[] {
-  if (typeof window === "undefined") return defaultClients as ClientLike[];
-
-  const saved = localStorage.getItem("frontier-clients");
-  if (!saved) return defaultClients as ClientLike[];
-
-  try {
-    const parsed = JSON.parse(saved);
-    return Array.isArray(parsed) ? parsed : (defaultClients as ClientLike[]);
-  } catch {
-    return defaultClients as ClientLike[];
-  }
-}
-
-function loadStoredJobs(): JobLike[] {
-  if (typeof window === "undefined") return defaultJobs as JobLike[];
-
-  const saved = localStorage.getItem("frontier-jobs");
-  if (!saved) return defaultJobs as JobLike[];
-
-  try {
-    const parsed = JSON.parse(saved);
-    return Array.isArray(parsed) ? parsed : (defaultJobs as JobLike[]);
-  } catch {
-    return defaultJobs as JobLike[];
-  }
-}
-
 function getJobDisplayName(job: JobLike) {
   return job.jobName || job.name || "Untitled job";
 }
@@ -87,9 +42,18 @@ export default function DocumentsPage() {
   const { activeWorkspace } = useWorkspace();
 
   const [isUploadOpen, setIsUploadOpen] = useState(false);
-  const [documents, setDocuments] = useState<StoredDocument[]>([]);
-  const [clients, setClients] = useState<ClientLike[]>([]);
-  const [jobs, setJobs] = useState<JobLike[]>([]);
+  const [documents, setDocuments] = useStoredJsonState<StoredDocument[]>(
+    storageKeys.documents,
+    []
+  );
+  const [clients] = useStoredJsonState<ClientLike[]>(
+    storageKeys.clients,
+    defaultClients as ClientLike[]
+  );
+  const [jobs] = useStoredJsonState<JobLike[]>(
+    storageKeys.jobs,
+    defaultJobs as JobLike[]
+  );
 
   const [documentName, setDocumentName] = useState("");
   const [detectedType, setDetectedType] = useState("Pending");
@@ -97,12 +61,6 @@ export default function DocumentsPage() {
   const [notes, setNotes] = useState("");
   const [clientId, setClientId] = useState("");
   const [jobId, setJobId] = useState("");
-
-  useEffect(() => {
-    setDocuments(loadStoredDocuments());
-    setClients(loadStoredClients());
-    setJobs(loadStoredJobs());
-  }, []);
 
   const workspaceDocuments = documents.filter(
     (document) => document.workspaceId === activeWorkspace.id
@@ -171,7 +129,6 @@ export default function DocumentsPage() {
     const updatedDocuments = [newDocument, ...documents];
 
     setDocuments(updatedDocuments);
-    saveStoredDocuments(updatedDocuments);
     closeUploadModal();
   }
 
@@ -181,18 +138,17 @@ export default function DocumentsPage() {
     );
 
     setDocuments(updatedDocuments);
-    saveStoredDocuments(updatedDocuments);
   }
 
   function getClientName(documentClientId: string) {
-    if (!documentClientId) return "—";
+    if (!documentClientId) return "-";
 
     const client = clients.find((item) => item.id === documentClientId);
     return client?.name ?? "Unknown client";
   }
 
   function getJobName(documentJobId: string) {
-    if (!documentJobId) return "—";
+    if (!documentJobId) return "-";
 
     const job = jobs.find((item) => item.id === documentJobId);
     return job ? getJobDisplayName(job) : "Unknown job";
@@ -211,7 +167,7 @@ export default function DocumentsPage() {
       </div>
 
       <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-200">
-        upload once → extract intended use and data → verify → choose whether to
+        upload once - extract intended use and data - verify - choose whether to
         create a client, job, quote, invoice, expense, or calendar item.
       </div>
 
@@ -298,7 +254,7 @@ export default function DocumentsPage() {
                 onClick={closeUploadModal}
                 className="text-2xl text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
               >
-                ×
+                -
               </button>
             </div>
 

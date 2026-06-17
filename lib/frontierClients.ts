@@ -1,4 +1,5 @@
 import { clients as defaultClients } from "@/lib/clients";
+import { readStoredJson, storageKeys, writeStoredJson } from "@/lib/clientStorage";
 import { formatCurrency } from "@/lib/frontierInvoices";
 
 export type ClientRow = {
@@ -33,13 +34,11 @@ export function safeParseClients(value: string | null): ClientRow[] {
 }
 
 export function loadClients() {
-  if (typeof window === "undefined") return defaultClients as ClientRow[];
-
-  return safeParseClients(localStorage.getItem("frontier-clients"));
+  return readStoredJson(storageKeys.clients, defaultClients as ClientRow[]);
 }
 
 export function saveClients(clients: ClientRow[]) {
-  localStorage.setItem("frontier-clients", JSON.stringify(clients));
+  writeStoredJson(storageKeys.clients, clients);
 }
 
 export function formatClientBalance(value: string) {

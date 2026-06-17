@@ -1,10 +1,16 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
 import { useWorkspace } from "@/components/WorkspaceContext";
+import {
+  readStoredJson,
+  removeStoredValue,
+  storageKeys,
+  useStoredJsonState,
+} from "@/lib/clientStorage";
 import { clients as defaultClients } from "@/lib/clients";
 
 
@@ -84,10 +90,6 @@ type InvoiceSetupDraft = Partial<InvoiceRow> & {
   lineItems?: InvoiceLineItem[];
 };
 
-const INVOICE_DRAFT_KEY = "frontier-invoice-draft";
-const INVOICES_KEY = "frontier-invoices";
-const CLIENTS_KEY = "frontier-clients";
-
 function moneyToNumber(value: string | number | undefined) {
   if (typeof value === "number") return value;
   if (!value) return 0;
@@ -114,102 +116,55 @@ function getEmptyLineItem(): InvoiceLineItem {
   };
 }
 
-function loadSavedInvoices(): InvoiceRow[] {
-  if (typeof window === "undefined") return [];
-
-  const saved = localStorage.getItem(INVOICES_KEY);
-
-  if (!saved) return [];
-
-  try {
-    return JSON.parse(saved) as InvoiceRow[];
-  } catch {
-    return [];
-  }
-}
-
-function saveSavedInvoices(invoices: InvoiceRow[]) {
-  localStorage.setItem(INVOICES_KEY, JSON.stringify(invoices));
-}
-
-function loadSavedClients(): ClientRow[] {
-  if (typeof window === "undefined") return [];
-
-  const saved = localStorage.getItem(CLIENTS_KEY);
-  if (!saved) return defaultClients as ClientRow[];
-
-  try {
-    return JSON.parse(saved) as ClientRow[];
-  } catch {
-    return defaultClients as ClientRow[];
-  }
-}
-
-function saveSavedClients(clients: ClientRow[]) {
-  localStorage.setItem(CLIENTS_KEY, JSON.stringify(clients));
-}
-
 function cleanText(value: string | undefined) {
   return value?.trim() ?? "";
+}
+
+function getFallbackDraft(activeWorkspace: { id: string; name: string }) {
+  return {
+    id: `invoice-${Date.now()}`,
+    workspaceId: activeWorkspace.id,
+    invoiceNumber: `INV-${Date.now().toString().slice(-5)}`,
+    invoiceDate: todayString(),
+    companyName: activeWorkspace.name ?? "",
+    companyAddress: "",
+    companyCity: "",
+    companyState: "",
+    companyZip: "",
+  } satisfies InvoiceSetupDraft;
 }
 
 export default function InvoiceBuilderPage() {
   const router = useRouter();
   const { activeWorkspace } = useWorkspace();
+  const [savedInvoices, setSavedInvoices] = useStoredJsonState<InvoiceRow[]>(
+    storageKeys.invoices,
+    []
+  );
+  const [savedClients, setSavedClients] = useStoredJsonState<ClientRow[]>(
+    storageKeys.clients,
+    defaultClients as ClientRow[]
+  );
 
-  const [draft, setDraft] = useState<InvoiceSetupDraft | null>(null);
-  const [lineItems, setLineItems] = useState<InvoiceLineItem[]>([getEmptyLineItem()]);
-  const [discountType, setDiscountType] = useState<DiscountType>("None");
-  const [discountValue, setDiscountValue] = useState("");
-  const [taxRate, setTaxRate] = useState("");
-  const [status, setStatus] = useState<InvoiceStatus>("Draft");
-
-  useEffect(() => {
-    const savedDraft = localStorage.getItem(INVOICE_DRAFT_KEY);
-
-    if (!savedDraft) {
-      const fallbackDraft: InvoiceSetupDraft = {
-        id: `invoice-${Date.now()}`,
-        workspaceId: activeWorkspace.id,
-        invoiceNumber: `INV-${Date.now().toString().slice(-5)}`,
-        invoiceDate: todayString(),
-        companyName: activeWorkspace.name ?? "",
-        companyAddress: "",
-        companyCity: "",
-        companyState: "",
-        companyZip: "",
-      };
-
-      setDraft(fallbackDraft);
-      return;
-    }
-
-    try {
-      const parsedDraft = JSON.parse(savedDraft) as InvoiceSetupDraft;
-      setDraft(parsedDraft);
-      setLineItems(
-        parsedDraft.lineItems && parsedDraft.lineItems.length > 0
-          ? parsedDraft.lineItems
-          : [getEmptyLineItem()]
-      );
-      setDiscountType(parsedDraft.discountType ?? "None");
-      setDiscountValue(parsedDraft.discountValue ?? "");
-      setTaxRate(parsedDraft.taxRate ?? "");
-      setStatus(parsedDraft.status ?? "Draft");
-    } catch {
-      setDraft({
-        id: `invoice-${Date.now()}`,
-        workspaceId: activeWorkspace.id,
-        invoiceNumber: `INV-${Date.now().toString().slice(-5)}`,
-        invoiceDate: todayString(),
-        companyName: activeWorkspace.name ?? "",
-        companyAddress: "",
-        companyCity: "",
-        companyState: "",
-        companyZip: "",
-      });
-    }
-  }, [activeWorkspace.id, activeWorkspace.name]);
+  const [draft] = useState<InvoiceSetupDraft>(() => {
+    return (
+      readStoredJson<InvoiceSetupDraft | null>(storageKeys.invoiceDraft, null) ??
+      getFallbackDraft(activeWorkspace)
+    );
+  });
+  const [lineItems, setLineItems] = useState<InvoiceLineItem[]>(
+    draft.lineItems && draft.lineItems.length > 0
+      ? draft.lineItems
+      : [getEmptyLineItem()]
+  );
+  const [discountType, setDiscountType] = useState<DiscountType>(
+    draft.discountType ?? "None"
+  );
+  const [discountValue, setDiscountValue] = useState(
+    draft.discountValue ?? ""
+  );
+  const [taxRate, setTaxRate] = useState(draft.taxRate ?? "");
+  const [status, setStatus] = useState<InvoiceStatus>(draft.status ?? "Draft");
 
   const totals = useMemo(() => {
     const subtotal = lineItems.reduce((sum, item) => {
@@ -261,7 +216,7 @@ export default function InvoiceBuilderPage() {
   }
 
   function upsertClientFromInvoice(invoice: InvoiceRow) {
-    const existingClients = loadSavedClients();
+    const existingClients = savedClients;
     const existingClientId = cleanText(invoice.sourceClientId);
 
     if (existingClientId) {
@@ -281,7 +236,7 @@ export default function InvoiceBuilderPage() {
           : client
       );
 
-      saveSavedClients(updatedClients);
+      setSavedClients(updatedClients);
       return existingClientId;
     }
 
@@ -312,7 +267,7 @@ export default function InvoiceBuilderPage() {
           : client
       );
 
-      saveSavedClients(updatedClients);
+      setSavedClients(updatedClients);
       return matchingClient.id;
     }
 
@@ -331,7 +286,7 @@ export default function InvoiceBuilderPage() {
       notes: `Created from ${invoice.invoiceNumber}`,
     };
 
-    saveSavedClients([...existingClients, newClient]);
+    setSavedClients([...existingClients, newClient]);
     return newClient.id;
   }
 
@@ -404,19 +359,14 @@ export default function InvoiceBuilderPage() {
       sourceClientId: resolvedClientId ?? invoiceBeforeClientUpdate.sourceClientId ?? "",
     };
 
-    const existingInvoices = loadSavedInvoices();
     const updatedInvoices = [
-      ...existingInvoices.filter((invoice) => invoice.id !== savedInvoice.id),
+      ...savedInvoices.filter((invoice) => invoice.id !== savedInvoice.id),
       savedInvoice,
     ];
 
-    saveSavedInvoices(updatedInvoices);
-    localStorage.removeItem(INVOICE_DRAFT_KEY);
+    setSavedInvoices(updatedInvoices);
+    removeStoredValue(storageKeys.invoiceDraft);
     router.push(`/invoices/${savedInvoice.id}`);
-  }
-
-  if (!draft) {
-    return <div className="p-6 text-sm text-gray-300">Loading invoice builder...</div>;
   }
 
   return (

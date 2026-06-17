@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Sidebar from "./Sidebar";
 import { useWorkspace } from "@/components/WorkspaceContext";
+import { storageKeys, useStoredJsonState, useStoredStringState } from "@/lib/clientStorage";
 
 type WorkspaceDisplaySettings = {
   workspaceId: string;
@@ -29,28 +30,6 @@ const businessTypes = [
   "Other",
 ];
 
-function loadWorkspaceSettings(
-  workspaceId: string
-): WorkspaceDisplaySettings | null {
-  if (typeof window === "undefined") return null;
-
-  const saved = localStorage.getItem("frontier-settings");
-  if (!saved) return null;
-
-  try {
-    const parsed = JSON.parse(saved);
-    if (!Array.isArray(parsed)) return null;
-
-    return (
-      parsed.find(
-        (item: WorkspaceDisplaySettings) => item.workspaceId === workspaceId
-      ) ?? null
-    );
-  } catch {
-    return null;
-  }
-}
-
 function getWorkspaceInitials(name: string) {
   return name
     .split(" ")
@@ -60,7 +39,11 @@ function getWorkspaceInitials(name: string) {
 }
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
-  const [darkMode, setDarkMode] = useState(false);
+  const [theme, setTheme] = useStoredStringState(storageKeys.theme, "dark");
+  const [allDisplaySettings] = useStoredJsonState<WorkspaceDisplaySettings[]>(
+    storageKeys.settings,
+    []
+  );
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const [userOpen, setUserOpen] = useState(false);
   const [newWorkspaceOpen, setNewWorkspaceOpen] = useState(false);
@@ -69,9 +52,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [workspaceType, setWorkspaceType] = useState("Landscaping");
   const [customWorkspaceType, setCustomWorkspaceType] = useState("");
 
-  const [displaySettings, setDisplaySettings] =
-    useState<WorkspaceDisplaySettings | null>(null);
-
   const {
     workspaces,
     activeWorkspace,
@@ -79,38 +59,16 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     addWorkspace,
   } = useWorkspace();
 
-  useEffect(() => {
-    const savedTheme = localStorage.getItem("frontier-theme");
+  const darkMode = theme !== "light";
 
-    if (savedTheme === "light") {
-      setDarkMode(false);
-      document.documentElement.classList.remove("dark");
-      return;
-    }
-
-    setDarkMode(true);
-    document.documentElement.classList.add("dark");
-    localStorage.setItem("frontier-theme", "dark");
-  }, []);
+  const displaySettings =
+    allDisplaySettings.find(
+      (item) => item.workspaceId === activeWorkspace.id
+    ) ?? null;
 
   useEffect(() => {
-    function refreshDisplaySettings() {
-      setDisplaySettings(loadWorkspaceSettings(activeWorkspace.id));
-    }
-
-    refreshDisplaySettings();
-
-    window.addEventListener("storage", refreshDisplaySettings);
-    window.addEventListener("frontier-settings-updated", refreshDisplaySettings);
-
-    return () => {
-      window.removeEventListener("storage", refreshDisplaySettings);
-      window.removeEventListener(
-        "frontier-settings-updated",
-        refreshDisplaySettings
-      );
-    };
-  }, [activeWorkspace.id]);
+    document.documentElement.classList.toggle("dark", darkMode);
+  }, [darkMode]);
 
   const displayedWorkspaceName =
     displaySettings?.workspaceNickname?.trim() || activeWorkspace.name;
@@ -129,16 +87,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   function toggleDarkMode() {
     const nextMode = !darkMode;
-
-    setDarkMode(nextMode);
-
-    if (nextMode) {
-      document.documentElement.classList.add("dark");
-      localStorage.setItem("frontier-theme", "dark");
-    } else {
-      document.documentElement.classList.remove("dark");
-      localStorage.setItem("frontier-theme", "light");
-    }
+    setTheme(nextMode ? "dark" : "light");
   }
 
   function resetNewWorkspaceForm() {
@@ -183,7 +132,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     name: string;
     type: string;
   }) {
-    const saved = loadWorkspaceSettings(workspace.id);
+    const saved = allDisplaySettings.find(
+      (item) => item.workspaceId === workspace.id
+    );
     return saved?.workspaceNickname?.trim() || workspace.name;
   }
 
@@ -192,7 +143,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     name: string;
     type: string;
   }) {
-    const saved = loadWorkspaceSettings(workspace.id);
+    const saved = allDisplaySettings.find(
+      (item) => item.workspaceId === workspace.id
+    );
     return saved?.businessType?.trim() || workspace.type;
   }
 
@@ -208,7 +161,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               }}
               className="flex max-w-[150px] items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-3 shadow-sm hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:hover:bg-gray-800 sm:max-w-[260px]"
             >
-              <span className="text-blue-600">▤</span>
+
 
               {/* Mobile: initials only */}
               <span className="font-semibold sm:hidden">
@@ -220,7 +173,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 {displayedWorkspaceName}
               </span>
 
-              
             </button>
 
             {workspaceOpen && (
@@ -242,7 +194,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                         : ""
                     }`}
                   >
-                    <span className="mt-1 text-xl">▤</span>
+
 
                     <span className="min-w-0">
                       <span className="block truncate font-semibold">
@@ -273,7 +225,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         <div className="flex flex-shrink-0 items-center gap-2 sm:gap-4">
           <button
             onClick={toggleDarkMode}
-            className="rounded-full px-3 py-2 text-xl hover:bg-gray-100 dark:hover:bg-gray-800"
+            className="flex h-12 w-12 items-center justify-center rounded-xl text-3xl hover:bg-gray-100 dark:hover:bg-gray-800"
             aria-label="Toggle dark mode"
           >
             {darkMode ? "☀️" : "🌙"}
@@ -287,13 +239,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               }}
               className="flex items-center gap-2 rounded-lg px-2 py-2 hover:bg-gray-100 dark:hover:bg-gray-800"
             >
-              <span className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-100 text-blue-600 dark:bg-blue-950">
-                ♙
+              <span className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-100 text-sm font-bold text-blue-600 dark:bg-blue-950">
+                NT
               </span>
               <span className="hidden max-w-32 truncate font-semibold lg:block">
                 {displayedUserName}
               </span>
-              <span className="hidden text-gray-500 sm:inline">⌄</span>
+              <span className="hidden text-gray-500 sm:inline">v</span>
             </button>
 
             {userOpen && (
@@ -312,7 +264,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 </div>
 
                 <button className="flex w-full items-center gap-4 px-4 py-4 text-left hover:bg-gray-100 dark:hover:bg-gray-800">
-                  <span className="text-xl">↪</span>
+                  <span className="text-xl">Out</span>
                   <span className="font-medium">Sign Out</span>
                 </button>
               </div>
@@ -339,7 +291,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 onClick={closeNewWorkspaceModal}
                 className="text-2xl text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
               >
-                ×
+                x
               </button>
             </div>
 

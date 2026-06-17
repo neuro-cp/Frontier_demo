@@ -1,16 +1,16 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 
+import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
 import {
   formatMoneyNumber,
   getInvoiceTotals,
   getInvoiceClientName,
   getLineTotal,
   InvoiceRow,
-  loadSavedInvoices,
   moneyToNumber,
 } from "@/lib/frontierInvoices";
 
@@ -22,27 +22,20 @@ export default function InvoiceDetailPage() {
   const params = useParams();
   const invoiceId = String(params.id);
 
-  const [invoices, setInvoices] = useState<InvoiceRow[]>([]);
-  const [loaded, setLoaded] = useState(false);
-
-  useEffect(() => {
-    setInvoices(loadSavedInvoices());
-    setLoaded(true);
-  }, []);
+  const [invoices] = useStoredJsonState<InvoiceRow[]>(
+    storageKeys.invoices,
+    []
+  );
 
   const invoice = useMemo(() => {
     return invoices.find((item) => item.id === invoiceId);
   }, [invoices, invoiceId]);
 
-  if (!loaded) {
-    return <div className="text-gray-400">Loading invoice...</div>;
-  }
-
   if (!invoice) {
     return (
       <div className="space-y-4 text-gray-950 dark:text-gray-100">
         <Link href="/invoices" className="text-blue-600 hover:underline dark:text-blue-400">
-          ← Back to Invoices
+          - Back to Invoices
         </Link>
 
         <h1 className="text-3xl font-bold">Invoice not found</h1>
@@ -69,7 +62,7 @@ export default function InvoiceDetailPage() {
       id: item.id,
       description:
         item.quantity > 1
-          ? `${item.description} — ${item.quantity} × $${formatMoneyNumber(
+          ? `${item.description} - ${item.quantity} - $${formatMoneyNumber(
               moneyToNumber(item.unitPrice)
             )}`
           : item.description,
@@ -103,7 +96,7 @@ export default function InvoiceDetailPage() {
       <div className="print-hidden flex flex-col gap-4 print:hidden sm:flex-row sm:items-center sm:justify-between">
         <div>
           <Link href="/invoices" className="text-blue-600 hover:underline dark:text-blue-400">
-            ← Back to Invoices
+            - Back to Invoices
           </Link>
 
           <h1 className="mt-3 text-3xl font-bold">

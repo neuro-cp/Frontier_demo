@@ -1,15 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 
+import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
 import { jobs as defaultJobs, Job, JobMaterial, JobStatus } from "@/lib/jobs";
 import {
   formatCurrency,
   getInvoiceTotals,
   InvoiceRow,
-  loadSavedInvoices,
 } from "@/lib/frontierInvoices";
 
 const jobStatuses: JobStatus[] = ["Lead", "Quoted", "Scheduled", "Completed", "Paid"];
@@ -35,9 +35,14 @@ export default function JobPage() {
   const params = useParams();
   const id = String(params.id);
 
-  const [jobItems, setJobItems] = useState<Job[]>(defaultJobs);
-  const [invoiceItems, setInvoiceItems] = useState<InvoiceRow[]>([]);
-  const [loaded, setLoaded] = useState(false);
+  const [jobItems, setJobItems] = useStoredJsonState<Job[]>(
+    storageKeys.jobs,
+    defaultJobs
+  );
+  const [invoiceItems] = useStoredJsonState<InvoiceRow[]>(
+    storageKeys.invoices,
+    []
+  );
   const [editOpen, setEditOpen] = useState(false);
 
   const [editName, setEditName] = useState("");
@@ -50,21 +55,6 @@ export default function JobPage() {
   const [editMaterials, setEditMaterials] = useState<JobMaterial[]>([]);
   const [editMaterialName, setEditMaterialName] = useState("");
   const [editMaterialQuantity, setEditMaterialQuantity] = useState("");
-
-  useEffect(() => {
-    const savedJobs = localStorage.getItem("frontier-jobs");
-
-    if (savedJobs) {
-      try {
-        setJobItems(JSON.parse(savedJobs));
-      } catch {
-        setJobItems(defaultJobs);
-      }
-    }
-
-    setInvoiceItems(loadSavedInvoices());
-    setLoaded(true);
-  }, []);
 
   const job = jobItems.find((item) => item.id === id);
   const jobInvoices = invoiceItems.filter((invoice) => invoice.jobId === id);
@@ -135,11 +125,8 @@ export default function JobPage() {
     );
 
     setJobItems(updatedJobs);
-    localStorage.setItem("frontier-jobs", JSON.stringify(updatedJobs));
     setEditOpen(false);
   }
-
-  if (!loaded) return null;
 
   if (!job) {
     return (
@@ -186,7 +173,7 @@ export default function JobPage() {
             <strong>Status:</strong>
             <span className={`rounded-full px-3 py-1 text-sm font-semibold ${getStatusClasses(job.status)}`}>{job.status}</span>
           </div>
-          <p><strong>Scheduled Date:</strong> {job.date || "—"}</p>
+          <p><strong>Scheduled Date:</strong> {job.date || "-"}</p>
           <p><strong>Estimated Value:</strong> {job.value}</p>
         </div>
       </div>
@@ -196,7 +183,7 @@ export default function JobPage() {
         {job.materials && job.materials.length > 0 ? (
           <ul className="ml-6 list-disc">
             {job.materials.map((material, index) => (
-              <li key={`${material.name}-${index}`}>{material.quantity} × {material.name}</li>
+              <li key={`${material.name}-${index}`}>{material.quantity} - {material.name}</li>
             ))}
           </ul>
         ) : (
@@ -229,7 +216,7 @@ export default function JobPage() {
                       {invoice.invoiceNumber}
                     </Link>
                     <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                      {invoice.status} · {invoice.invoiceDate}
+                      {invoice.status} - {invoice.invoiceDate}
                     </p>
                   </div>
                   <div className="text-lg font-bold">
@@ -253,7 +240,7 @@ export default function JobPage() {
           <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-xl bg-white p-6 shadow-xl dark:bg-gray-900">
             <div className="mb-6 flex items-center justify-between">
               <h2 className="text-xl font-bold text-gray-950 dark:text-gray-100">Edit Job</h2>
-              <button type="button" onClick={closeEditBox} className="text-2xl text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">×</button>
+              <button type="button" onClick={closeEditBox} className="text-2xl text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">-</button>
             </div>
 
             <div className="space-y-4">
@@ -277,7 +264,7 @@ export default function JobPage() {
                   {editMaterials.length > 0 ? (
                     editMaterials.map((material, index) => (
                       <div key={`${material.name}-${index}`} className="flex items-center justify-between rounded-lg bg-gray-100 p-3 dark:bg-gray-800">
-                        <span>{material.quantity} × {material.name}</span>
+                        <span>{material.quantity} - {material.name}</span>
                         <button type="button" onClick={() => removeEditMaterial(index)} className="text-sm text-red-600 hover:underline dark:text-red-400">Remove</button>
                       </div>
                     ))

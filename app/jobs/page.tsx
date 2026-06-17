@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 
 import { useWorkspace } from "@/components/WorkspaceContext";
+import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
 import { jobs as defaultJobs, Job, JobMaterial, JobStatus } from "@/lib/jobs";
 import { clients as defaultClients } from "@/lib/clients";
 import { ClientRow } from "@/lib/frontierClients";
@@ -11,7 +12,6 @@ import {
   formatCurrency,
   getInvoiceTotals,
   InvoiceRow,
-  loadSavedInvoices,
 } from "@/lib/frontierInvoices";
 
 function getStatusColor(status: JobStatus) {
@@ -34,8 +34,14 @@ function getStatusColor(status: JobStatus) {
 export default function JobsPage() {
   const { activeWorkspace } = useWorkspace();
 
-  const [jobItems, setJobItems] = useState<Job[]>(defaultJobs);
-  const [invoiceItems, setInvoiceItems] = useState<InvoiceRow[]>([]);
+  const [jobItems, setJobItems] = useStoredJsonState<Job[]>(
+    storageKeys.jobs,
+    defaultJobs
+  );
+  const [invoiceItems] = useStoredJsonState<InvoiceRow[]>(
+    storageKeys.invoices,
+    []
+  );
   const [selectedJobs, setSelectedJobs] = useState<string[]>([]);
   const [newJobOpen, setNewJobOpen] = useState(false);
 
@@ -45,33 +51,13 @@ export default function JobsPage() {
   const [value, setValue] = useState("");
   const [date, setDate] = useState("");
   const [notes, setNotes] = useState("");
-  const [clientItems, setClientItems] = useState<ClientRow[]>(defaultClients);
+  const [clientItems] = useStoredJsonState<ClientRow[]>(
+    storageKeys.clients,
+    defaultClients
+  );
   const [materialName, setMaterialName] = useState("");
   const [materialQuantity, setMaterialQuantity] = useState("");
   const [materials, setMaterials] = useState<JobMaterial[]>([]);
-
-  useEffect(() => {
-    const savedJobs = localStorage.getItem("frontier-jobs");
-    const savedClients = localStorage.getItem("frontier-clients");
-
-    if (savedJobs) {
-      try {
-        setJobItems(JSON.parse(savedJobs));
-      } catch {
-        setJobItems(defaultJobs);
-      }
-    }
-
-    if (savedClients) {
-      try {
-        setClientItems(JSON.parse(savedClients));
-      } catch {
-        setClientItems(defaultClients);
-      }
-    }
-
-    setInvoiceItems(loadSavedInvoices());
-  }, []);
 
   const workspaceClients = clientItems.filter(
     (clientItem) => clientItem.workspaceId === activeWorkspace.id
@@ -105,7 +91,6 @@ export default function JobsPage() {
 
   function saveJobs(updatedJobs: Job[]) {
     setJobItems(updatedJobs);
-    localStorage.setItem("frontier-jobs", JSON.stringify(updatedJobs));
   }
 
   function resetForm() {
@@ -230,7 +215,7 @@ export default function JobsPage() {
         <div className="rounded-lg bg-white p-6 shadow dark:bg-gray-900">
           <div className="mb-6 flex items-center justify-between">
             <h2 className="text-xl font-bold">Add New Job</h2>
-            <button type="button" onClick={closeNewJobBox} className="text-2xl text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">×</button>
+            <button type="button" onClick={closeNewJobBox} className="text-2xl text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">-</button>
           </div>
 
           <form onSubmit={createJob} className="space-y-6">
@@ -325,7 +310,7 @@ export default function JobsPage() {
                 {materials.length > 0 ? (
                   materials.map((material, index) => (
                     <div key={`${material.name}-${index}`} className="flex items-center justify-between rounded-lg bg-gray-100 p-3 dark:bg-gray-800">
-                      <span>{material.quantity} × {material.name}</span>
+                      <span>{material.quantity} - {material.name}</span>
                       <button type="button" onClick={() => removeMaterial(index)} className="text-sm text-red-600 hover:underline dark:text-red-400">Remove</button>
                     </div>
                   ))
@@ -417,7 +402,7 @@ export default function JobsPage() {
                       </span>
                     </td>
 
-                    <td className="p-4">{job.date || "—"}</td>
+                    <td className="p-4">{job.date || "-"}</td>
                     <td className="p-4 text-right font-medium">{job.value}</td>
                     <td className="p-4 text-right">
                       {firstInvoice ? (
@@ -426,7 +411,7 @@ export default function JobsPage() {
                             {firstInvoice.invoiceNumber}
                           </Link>
                           <div className="text-xs text-gray-500 dark:text-gray-400">
-                            {jobInvoices.length > 1 ? `${jobInvoices.length} invoices · ` : ""}
+                            {jobInvoices.length > 1 ? `${jobInvoices.length} invoices - ` : ""}
                             {formatCurrency(invoiceTotal)}
                           </div>
                         </div>

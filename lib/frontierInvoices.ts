@@ -1,3 +1,5 @@
+import { readStoredJson, storageKeys, writeStoredJson } from "@/lib/clientStorage";
+
 export const invoiceStatuses = ["Draft", "Sent", "Overdue", "Paid"] as const;
 export const discountTypes = ["None", "Percent", "Fixed"] as const;
 
@@ -76,7 +78,7 @@ export function formatMoneyNumber(value: number) {
 }
 
 export function getInvoiceClientName(invoice: Pick<InvoiceRow, "billToCompany" | "billToName">) {
-  return invoice.billToCompany || invoice.billToName || "—";
+  return invoice.billToCompany || invoice.billToName || "-";
 }
 
 export function getLineTotal(item: InvoiceLineItem) {
@@ -142,11 +144,9 @@ export function safeParseInvoices(value: string | null): InvoiceRow[] {
 }
 
 export function loadSavedInvoices() {
-  if (typeof window === "undefined") return [];
-
-  return safeParseInvoices(localStorage.getItem("frontier-invoices"));
+  return readStoredJson(storageKeys.invoices, [] as InvoiceRow[]);
 }
 
 export function saveSavedInvoices(invoices: InvoiceRow[]) {
-  localStorage.setItem("frontier-invoices", JSON.stringify(invoices));
+  writeStoredJson(storageKeys.invoices, invoices);
 }

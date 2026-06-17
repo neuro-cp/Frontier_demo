@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 
 import { jobs as defaultJobs } from "@/lib/jobs";
 import { clients as defaultClients } from "@/lib/clients";
 import { useWorkspace } from "@/components/WorkspaceContext";
+import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
 import { ClientRow } from "@/lib/frontierClients";
 
 type ClientCalendarEvent = {
@@ -49,45 +50,20 @@ export default function CalendarPage() {
   const { activeWorkspace } = useWorkspace();
 
   const [view, setView] = useState("month");
-  const [jobItems, setJobItems] = useState(defaultJobs);
-  const [clientItems, setClientItems] = useState<ClientRow[]>(defaultClients);
-  const [clientEvents, setClientEvents] = useState<ClientCalendarEvent[]>([]);
+  const [jobItems] = useStoredJsonState(storageKeys.jobs, defaultJobs);
+  const [clientItems] = useStoredJsonState<ClientRow[]>(
+    storageKeys.clients,
+    defaultClients
+  );
+  const [clientEvents, setClientEvents] = useStoredJsonState<
+    ClientCalendarEvent[]
+  >(storageKeys.clientCalendarEvents, []);
   const [currentMonth, setCurrentMonth] = useState(new Date(2026, 5, 1));
 
   const [clientEventOpen, setClientEventOpen] = useState(false);
   const [clientEventClientId, setClientEventClientId] = useState("");
   const [clientEventTitle, setClientEventTitle] = useState("");
   const [clientEventDate, setClientEventDate] = useState("");
-
-  useEffect(() => {
-    const savedJobs = localStorage.getItem("frontier-jobs");
-    const savedClients = localStorage.getItem("frontier-clients");
-    const savedClientEvents = localStorage.getItem("frontier-client-calendar-events");
-
-    if (savedJobs) {
-      try {
-        setJobItems(JSON.parse(savedJobs));
-      } catch {
-        setJobItems(defaultJobs);
-      }
-    }
-
-    if (savedClients) {
-      try {
-        setClientItems(JSON.parse(savedClients));
-      } catch {
-        setClientItems(defaultClients);
-      }
-    }
-
-    if (savedClientEvents) {
-      try {
-        setClientEvents(JSON.parse(savedClientEvents));
-      } catch {
-        setClientEvents([]);
-      }
-    }
-  }, []);
 
   const workspaceClients = clientItems.filter(
     (client) => client.workspaceId === activeWorkspace.id
@@ -129,7 +105,6 @@ export default function CalendarPage() {
 
   function saveClientEvents(updatedEvents: ClientCalendarEvent[]) {
     setClientEvents(updatedEvents);
-    localStorage.setItem("frontier-client-calendar-events", JSON.stringify(updatedEvents));
   }
 
   function closeClientEventModal() {
@@ -239,7 +214,7 @@ export default function CalendarPage() {
                 ) : (
                   <Link key={`client-${item.event.id}`} href={`/clients/${item.event.clientId}`} className="block rounded-xl border border-teal-200 p-4 hover:bg-teal-50 dark:border-teal-900 dark:hover:bg-teal-950/30">
                     <div className="font-semibold text-teal-700 dark:text-teal-300">{item.event.title}</div>
-                    <div className="text-sm text-gray-500 dark:text-gray-400">{item.event.clientName} · {item.event.date}</div>
+                    <div className="text-sm text-gray-500 dark:text-gray-400">{item.event.clientName} - {item.event.date}</div>
                   </Link>
                 )
               )
@@ -255,7 +230,7 @@ export default function CalendarPage() {
           <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl dark:bg-gray-900">
             <div className="mb-6 flex items-center justify-between">
               <h2 className="text-xl font-bold text-gray-950 dark:text-gray-100">Add Client to Calendar</h2>
-              <button type="button" onClick={closeClientEventModal} className="text-2xl text-gray-500">×</button>
+              <button type="button" onClick={closeClientEventModal} className="text-2xl text-gray-500">-</button>
             </div>
             <div className="space-y-4">
               <select value={clientEventClientId} onChange={(event) => setClientEventClientId(event.target.value)} className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800">

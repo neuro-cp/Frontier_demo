@@ -3,9 +3,13 @@
 import {
   createContext,
   useContext,
-  useEffect,
-  useState,
+  useMemo,
 } from "react";
+import {
+  storageKeys,
+  useStoredJsonState,
+  useStoredStringState,
+} from "@/lib/clientStorage";
 
 export type Workspace = {
   id: string;
@@ -46,59 +50,23 @@ export function WorkspaceProvider({
 }: {
   children: React.ReactNode;
 }) {
-  const [workspaces, setWorkspaces] =
-    useState<Workspace[]>(defaultWorkspaces);
+  const [workspaces, setWorkspaces] = useStoredJsonState<Workspace[]>(
+    storageKeys.workspaces,
+    defaultWorkspaces
+  );
+  const [activeWorkspaceId, setActiveWorkspaceId] = useStoredStringState(
+    storageKeys.activeWorkspace,
+    defaultWorkspaces[0].id
+  );
 
-  const [activeWorkspace, setActiveWorkspace] =
-    useState(defaultWorkspaces[0]);
-
-  useEffect(() => {
-    const savedWorkspaces =
-      localStorage.getItem("frontier-workspaces");
-
-    const savedActiveWorkspace =
-      localStorage.getItem("frontier-active-workspace");
-
-    if (savedWorkspaces) {
-      try {
-        const parsedWorkspaces: Workspace[] =
-          JSON.parse(savedWorkspaces);
-
-        setWorkspaces(parsedWorkspaces);
-
-        if (savedActiveWorkspace) {
-          const foundWorkspace =
-            parsedWorkspaces.find(
-              (workspace) =>
-                workspace.id === savedActiveWorkspace
-            );
-
-          if (foundWorkspace) {
-            setActiveWorkspace(foundWorkspace);
-          }
-        }
-      } catch (error) {
-        console.error(
-          "Failed to load workspaces",
-          error
-        );
-      }
-    }
-  }, []);
-
-  useEffect(() => {
-    localStorage.setItem(
-      "frontier-workspaces",
-      JSON.stringify(workspaces)
+  const activeWorkspace =
+    useMemo(
+      () =>
+        workspaces.find(
+          (workspace) => workspace.id === activeWorkspaceId
+        ) ?? workspaces[0] ?? defaultWorkspaces[0],
+      [activeWorkspaceId, workspaces]
     );
-  }, [workspaces]);
-
-  useEffect(() => {
-    localStorage.setItem(
-      "frontier-active-workspace",
-      activeWorkspace.id
-    );
-  }, [activeWorkspace]);
 
   function addWorkspace(workspace: Workspace) {
     setWorkspaces((current) => [
@@ -106,7 +74,11 @@ export function WorkspaceProvider({
       workspace,
     ]);
 
-    setActiveWorkspace(workspace);
+    setActiveWorkspaceId(workspace.id);
+  }
+
+  function setActiveWorkspace(workspace: Workspace) {
+    setActiveWorkspaceId(workspace.id);
   }
 
   return (
