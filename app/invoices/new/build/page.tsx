@@ -219,9 +219,17 @@ export default function InvoiceBuilderPage() {
     const existingClients = savedClients;
     const existingClientId = cleanText(invoice.sourceClientId);
 
-    if (existingClientId) {
+    const matchingClientById = existingClientId
+      ? existingClients.find(
+          (client) =>
+            client.id === existingClientId &&
+            client.workspaceId === invoice.workspaceId
+        )
+      : undefined;
+
+    if (matchingClientById) {
       const updatedClients = existingClients.map((client) =>
-        client.id === existingClientId
+        client.id === matchingClientById.id
           ? {
               ...client,
               status: client.status === "Lead" ? "Active" : client.status,
@@ -237,7 +245,7 @@ export default function InvoiceBuilderPage() {
       );
 
       setSavedClients(updatedClients);
-      return existingClientId;
+      return matchingClientById.id;
     }
 
     const clientName = cleanText(invoice.billToCompany) || cleanText(invoice.billToName);
