@@ -38,6 +38,7 @@ type WorkspaceContextValue = {
   activeWorkspace: Workspace;
   setActiveWorkspace: (workspace: Workspace) => void;
   addWorkspace: (workspace: Workspace) => void;
+  adminViewWorkspace: Workspace | null;
   isLoadingWorkspaces: boolean;
   workspaceError: string | null;
 };
@@ -106,6 +107,24 @@ export function WorkspaceProvider({
   const [databaseActiveWorkspaceId, setDatabaseActiveWorkspaceId] = useState<
     string | null
   >(null);
+  const [adminViewWorkspaceId] = useStoredStringState(
+    storageKeys.adminViewWorkspaceId,
+    ""
+  );
+  const [adminViewWorkspaceName] = useStoredStringState(
+    storageKeys.adminViewWorkspaceName,
+    ""
+  );
+  const [adminViewWorkspaceType] = useStoredStringState(
+    storageKeys.adminViewWorkspaceType,
+    ""
+  );
+  const [adminViewAdminUserId] = useStoredStringState(
+    storageKeys.adminViewAdminUserId,
+    ""
+  );
+  const [isPlatformAdminForViewMode, setIsPlatformAdminForViewMode] =
+    useState(false);
   const [isLoadingWorkspaces, setIsLoadingWorkspaces] = useState(false);
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
   const isDatabaseMode = Boolean(isSupabaseConfigured && user);
@@ -240,6 +259,50 @@ export function WorkspaceProvider({
     };
   }, [ensureSignedInWorkspace, isDatabaseMode, user]);
 
+  useEffect(() => {
+    if (!isDatabaseMode || !user || !adminViewWorkspaceId) {
+      return;
+    }
+
+    let cancelled = false;
+    const supabase = createBrowserSupabaseClient();
+
+    supabase.rpc("is_platform_admin").then(({ data, error }) => {
+      if (error) console.error("Unable to verify admin view mode.", error);
+      if (!cancelled) setIsPlatformAdminForViewMode(Boolean(data));
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [adminViewWorkspaceId, isDatabaseMode, user]);
+
+  const adminViewWorkspace = useMemo(() => {
+    if (
+      !isDatabaseMode ||
+      !user ||
+      adminViewAdminUserId !== user.id ||
+      !isPlatformAdminForViewMode ||
+      !adminViewWorkspaceId
+    ) {
+      return null;
+    }
+
+    return {
+      id: adminViewWorkspaceId,
+      name: adminViewWorkspaceName || "Admin View Workspace",
+      type: adminViewWorkspaceType || "Other",
+    };
+  }, [
+    adminViewAdminUserId,
+    adminViewWorkspaceId,
+    adminViewWorkspaceName,
+    adminViewWorkspaceType,
+    isDatabaseMode,
+    isPlatformAdminForViewMode,
+    user,
+  ]);
+
   const visibleWorkspaces = isDatabaseMode ? databaseWorkspaces : workspaces;
   const visibleActiveWorkspaceId = isDatabaseMode
     ? databaseActiveWorkspaceId
@@ -248,10 +311,11 @@ export function WorkspaceProvider({
   const activeWorkspace =
     useMemo(
       () =>
+        adminViewWorkspace ??
         visibleWorkspaces.find(
           (workspace) => workspace.id === visibleActiveWorkspaceId
         ) ?? visibleWorkspaces[0] ?? defaultWorkspaces[0],
-      [visibleActiveWorkspaceId, visibleWorkspaces]
+      [adminViewWorkspace, visibleActiveWorkspaceId, visibleWorkspaces]
     );
 
   const addWorkspace = useCallback(async (workspace: Workspace) => {
@@ -334,12 +398,14 @@ export function WorkspaceProvider({
       activeWorkspace,
       setActiveWorkspace,
       addWorkspace,
+      adminViewWorkspace,
       isLoadingWorkspaces,
       workspaceError,
     }),
     [
       activeWorkspace,
       addWorkspace,
+      adminViewWorkspace,
       isLoadingWorkspaces,
       setActiveWorkspace,
       visibleWorkspaces,

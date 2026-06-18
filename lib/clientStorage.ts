@@ -4,6 +4,11 @@ import { useCallback, useMemo, useSyncExternalStore } from "react";
 
 export const storageKeys = {
   activeWorkspace: "frontier-active-workspace",
+  adminViewAdminUserId: "frontier-admin-view-admin-user-id",
+  adminViewUserId: "frontier-admin-view-user-id",
+  adminViewWorkspaceId: "frontier-admin-view-workspace-id",
+  adminViewWorkspaceName: "frontier-admin-view-workspace-name",
+  adminViewWorkspaceType: "frontier-admin-view-workspace-type",
   clientCalendarEvents: "frontier-client-calendar-events",
   clients: "frontier-clients",
   documents: "frontier-documents",

@@ -5,7 +5,12 @@ import Link from "next/link";
 import Sidebar from "./Sidebar";
 import { useAuthSession } from "@/components/AuthSessionProvider";
 import { useWorkspace } from "@/components/WorkspaceContext";
-import { storageKeys, useStoredJsonState, useStoredStringState } from "@/lib/clientStorage";
+import {
+  removeStoredValue,
+  storageKeys,
+  useStoredJsonState,
+  useStoredStringState,
+} from "@/lib/clientStorage";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { defaultBusinessTypes } from "@/lib/workspaceOptions";
 
@@ -59,6 +64,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const {
     workspaces,
     activeWorkspace,
+    adminViewWorkspace,
     setActiveWorkspace,
     addWorkspace,
   } = useWorkspace();
@@ -187,8 +193,56 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     window.location.href = "/";
   }
 
+  async function exitAdminView() {
+    const workspaceId = adminViewWorkspace?.id ?? null;
+    const targetUserId =
+      window.localStorage.getItem(storageKeys.adminViewUserId) || null;
+
+    try {
+      await fetch("/api/frontier-admin/view-mode", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "exit",
+          workspaceId,
+          userId: targetUserId,
+        }),
+      });
+    } finally {
+      removeStoredValue(storageKeys.adminViewAdminUserId);
+      removeStoredValue(storageKeys.adminViewWorkspaceId);
+      removeStoredValue(storageKeys.adminViewWorkspaceName);
+      removeStoredValue(storageKeys.adminViewWorkspaceType);
+      removeStoredValue(storageKeys.adminViewUserId);
+      window.location.href = "/frontier-admin";
+    }
+  }
+
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-gray-100 text-gray-950 dark:bg-gray-950 dark:text-gray-100">
+      {adminViewWorkspace && (
+        <div className="relative z-[2100] flex flex-col gap-2 border-b border-amber-300 bg-amber-100 px-3 py-2 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100 sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:px-8">
+          <div className="font-semibold">
+            Admin View Mode: {adminViewWorkspace.name}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Link
+              href="/frontier-admin"
+              className="rounded-lg bg-amber-700 px-3 py-2 font-semibold text-white hover:bg-amber-800"
+            >
+              Back to Admin
+            </Link>
+            <button
+              type="button"
+              onClick={exitAdminView}
+              className="rounded-lg bg-gray-900 px-3 py-2 font-semibold text-white hover:bg-gray-800 dark:bg-gray-100 dark:text-gray-950"
+            >
+              Exit Admin View
+            </button>
+          </div>
+        </div>
+      )}
+
       <header className="relative z-[2000] flex h-20 flex-shrink-0 items-center justify-between border-b border-gray-200 bg-white px-3 dark:border-gray-800 dark:bg-gray-900 sm:px-6 lg:px-8">
         <div className="flex min-w-0 flex-1 items-center gap-3">
           <div className="relative min-w-0">
@@ -311,6 +365,15 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                       >
                         Frontier Admin
                       </Link>
+                    )}
+                    {isPlatformAdmin && adminViewWorkspace && (
+                      <button
+                        type="button"
+                        onClick={exitAdminView}
+                        className="px-4 py-3 text-left font-medium hover:bg-gray-100 dark:hover:bg-gray-800"
+                      >
+                        Exit Admin View
+                      </button>
                     )}
                     <button
                       type="button"

@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import AdminConsole from "@/app/frontier-admin/AdminConsole";
 import { maybeCreateServerSupabaseClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -15,13 +16,6 @@ type PlatformAdminSummary = {
   document_count: number;
   route_plan_count: number;
 };
-
-const futureViewModeLabels = {
-  owner: "Owner view",
-  employee: "Employee view",
-  clientPortal: "Client portal view",
-  customerToggle: "Customer view toggle",
-} as const;
 
 function AccessPanel({
   title,
@@ -43,25 +37,6 @@ function AccessPanel({
         </Link>
       </section>
     </main>
-  );
-}
-
-function CountCard({
-  label,
-  value,
-}: {
-  label: string;
-  value: number;
-}) {
-  return (
-    <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-gray-900">
-      <div className="text-sm font-medium text-gray-500 dark:text-gray-400">
-        {label}
-      </div>
-      <div className="mt-3 text-3xl font-bold text-gray-950 dark:text-gray-100">
-        {value.toLocaleString()}
-      </div>
-    </div>
   );
 }
 
@@ -108,56 +83,5 @@ export default async function FrontierAdminPage() {
     );
   }
 
-  const counts = [
-    { label: "Auth Users", value: data.auth_user_count },
-    { label: "Profiles", value: data.profile_count },
-    { label: "Workspaces", value: data.workspace_count },
-    { label: "Clients", value: data.client_count },
-    { label: "Jobs", value: data.job_count },
-    { label: "Invoices", value: data.invoice_count },
-    { label: "Documents", value: data.document_count },
-    { label: "Route Plans", value: data.route_plan_count },
-  ];
-
-  return (
-    <main className="space-y-6 text-gray-950 dark:text-gray-100">
-      <section className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <h1 className="text-3xl font-bold">Frontier Admin</h1>
-            <p className="mt-2 text-gray-500 dark:text-gray-400">
-              Signed in as {data.admin_email}
-            </p>
-          </div>
-          <span className="rounded-lg bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700 dark:bg-blue-950/40 dark:text-blue-200">
-            Platform access
-          </span>
-        </div>
-      </section>
-
-      <section className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-        {counts.map((item) => (
-          <CountCard key={item.label} label={item.label} value={item.value} />
-        ))}
-      </section>
-
-      <section className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
-        <h2 className="text-xl font-bold">Roadmap Hold</h2>
-        <p className="mt-2 text-gray-500 dark:text-gray-400">
-          Support tools and customer inspection are not built yet.
-        </p>
-
-        <div className="mt-5 flex flex-wrap gap-2">
-          {Object.values(futureViewModeLabels).map((label) => (
-            <span
-              key={label}
-              className="rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-500 dark:border-gray-800 dark:text-gray-400"
-            >
-              {label}
-            </span>
-          ))}
-        </div>
-      </section>
-    </main>
-  );
+  return <AdminConsole summary={data} />;
 }

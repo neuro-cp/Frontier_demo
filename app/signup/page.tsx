@@ -11,21 +11,41 @@ export default function SignupPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState("");
+  const [isCreating, setIsCreating] = useState(false);
+
+  function getAuthMessage(error: unknown) {
+    if (error instanceof Error) return error.message;
+    if (typeof error === "string") return error;
+    if (error && typeof error === "object" && "message" in error) {
+      const message = (error as { message?: unknown }).message;
+      if (typeof message === "string") return message;
+    }
+
+    return "Unable to create account. Please try again.";
+  }
 
   async function signup(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setMessage("");
-    const supabase = createBrowserSupabaseClient();
-    const { data, error } = await supabase.auth.signUp({ email, password });
-    if (error) {
-      setMessage(error.message);
-      return;
-    }
-    if (data.session) {
-      router.push("/dashboard");
-      router.refresh();
-    } else {
-      setMessage("Account created. Check your email to confirm your signup.");
+    setIsCreating(true);
+
+    try {
+      const supabase = createBrowserSupabaseClient();
+      const { data, error } = await supabase.auth.signUp({ email, password });
+      if (error) {
+        setMessage(getAuthMessage(error));
+        return;
+      }
+      if (data.session) {
+        router.push("/dashboard");
+        router.refresh();
+      } else {
+        setMessage("Account created. Check your email to confirm your signup.");
+      }
+    } catch (error) {
+      setMessage(getAuthMessage(error));
+    } finally {
+      setIsCreating(false);
     }
   }
 
@@ -34,9 +54,9 @@ export default function SignupPage() {
       <form onSubmit={signup} className="space-y-4 rounded-xl bg-white p-6 shadow dark:bg-gray-900">
         <h1 className="text-2xl font-bold">Create Account</h1>
         {message && <div className="rounded-lg bg-blue-50 p-3 text-sm text-blue-700 dark:bg-blue-950/40 dark:text-blue-300">{message}</div>}
-        <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" required className="w-full rounded-lg border p-3 dark:border-gray-700 dark:bg-gray-800" />
-        <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password" required className="w-full rounded-lg border p-3 dark:border-gray-700 dark:bg-gray-800" />
-        <button className="w-full rounded-lg bg-blue-600 py-3 font-semibold text-white">Create Account</button>
+        <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" required disabled={isCreating} className="w-full rounded-lg border p-3 disabled:cursor-not-allowed disabled:bg-gray-100 dark:border-gray-700 dark:bg-gray-800 dark:disabled:bg-gray-800/60" />
+        <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password" required disabled={isCreating} className="w-full rounded-lg border p-3 disabled:cursor-not-allowed disabled:bg-gray-100 dark:border-gray-700 dark:bg-gray-800 dark:disabled:bg-gray-800/60" />
+        <button disabled={isCreating} className="w-full rounded-lg bg-blue-600 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:bg-gray-400">{isCreating ? "Creating account..." : "Create Account"}</button>
         <Link href="/login" className="block text-sm text-blue-600">Already have an account?</Link>
       </form>
     </main>

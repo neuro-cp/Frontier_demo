@@ -1,5 +1,5 @@
 -- Frontier current live database schema snapshot
--- Generated from live Supabase database at 2026-06-17T22:49:52.794Z
+-- Generated from live Supabase database at 2026-06-18T00:11:47.820Z
 -- Scope: public application schema plus installed extensions. Supabase-managed auth/storage schemas are platform-owned.
 -- This is an audit snapshot, not a migration to apply automatically.
 
@@ -172,6 +172,16 @@ $function$;
 -- -----------------------------------------------------------------------------
 -- Tables and Columns
 -- -----------------------------------------------------------------------------
+create table public."admin_audit_logs" (
+  "id" uuid default gen_random_uuid() not null,
+  "admin_user_id" uuid not null,
+  "target_user_id" uuid,
+  "target_workspace_id" uuid,
+  "action" text not null,
+  "metadata" jsonb default '{}'::jsonb not null,
+  "created_at" timestamp with time zone default now() not null
+);
+
 create table public."ai_jobs" (
   "id" uuid default gen_random_uuid() not null,
   "workspace_id" uuid not null,
@@ -541,6 +551,10 @@ create table public."workspaces" (
 -- -----------------------------------------------------------------------------
 -- Constraints
 -- -----------------------------------------------------------------------------
+alter table admin_audit_logs add constraint "admin_audit_logs_pkey" PRIMARY KEY (id);
+alter table admin_audit_logs add constraint "admin_audit_logs_admin_user_id_fkey" FOREIGN KEY (admin_user_id) REFERENCES auth.users(id) ON DELETE CASCADE;
+alter table admin_audit_logs add constraint "admin_audit_logs_target_user_id_fkey" FOREIGN KEY (target_user_id) REFERENCES auth.users(id) ON DELETE SET NULL;
+alter table admin_audit_logs add constraint "admin_audit_logs_target_workspace_id_fkey" FOREIGN KEY (target_workspace_id) REFERENCES workspaces(id) ON DELETE SET NULL;
 alter table ai_jobs add constraint "ai_jobs_pkey" PRIMARY KEY (id);
 alter table ai_jobs add constraint "ai_jobs_approved_by_fkey" FOREIGN KEY (approved_by) REFERENCES profiles(id) ON DELETE SET NULL;
 alter table ai_jobs add constraint "ai_jobs_client_id_fkey" FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE SET NULL;
@@ -648,6 +662,10 @@ alter table workspaces add constraint "workspaces_created_by_fkey" FOREIGN KEY (
 -- -----------------------------------------------------------------------------
 -- Indexes
 -- -----------------------------------------------------------------------------
+CREATE INDEX admin_audit_logs_action_created_idx ON public.admin_audit_logs USING btree (action, created_at DESC);
+CREATE INDEX admin_audit_logs_admin_user_idx ON public.admin_audit_logs USING btree (admin_user_id);
+CREATE INDEX admin_audit_logs_target_user_idx ON public.admin_audit_logs USING btree (target_user_id);
+CREATE INDEX admin_audit_logs_target_workspace_idx ON public.admin_audit_logs USING btree (target_workspace_id);
 CREATE INDEX ai_jobs_document_idx ON public.ai_jobs USING btree (document_id);
 CREATE INDEX ai_jobs_status_idx ON public.ai_jobs USING btree (status);
 CREATE INDEX ai_jobs_workspace_idx ON public.ai_jobs USING btree (workspace_id);
@@ -739,6 +757,7 @@ create trigger "workspaces_set_updated_at" BEFORE UPDATE on public."workspaces" 
 -- -----------------------------------------------------------------------------
 -- Row Level Security
 -- -----------------------------------------------------------------------------
+alter table public."admin_audit_logs" enable row level security;
 alter table public."ai_jobs" enable row level security;
 alter table public."client_activity" enable row level security;
 alter table public."client_calendar_events" enable row level security;
@@ -769,6 +788,13 @@ alter table public."workspaces" enable row level security;
 -- -----------------------------------------------------------------------------
 -- Policies
 -- -----------------------------------------------------------------------------
+create policy "Platform admins can read admin audit logs"
+  on public."admin_audit_logs"
+  as permissive
+  for select
+  to "public"
+  using (is_platform_admin());
+
 create policy "Workspace members can delete AI jobs"
   on public."ai_jobs"
   as permissive
