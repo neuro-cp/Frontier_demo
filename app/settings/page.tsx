@@ -78,7 +78,7 @@ function getDefaultSettings(
 }
 
 export default function SettingsPage() {
-  const { activeWorkspace } = useWorkspace();
+  const { activeWorkspace, deleteWorkspace } = useWorkspace();
   const [allSettings, setAllSettings] = useStoredJsonState<WorkspaceSettings[]>(
     storageKeys.settings,
     []
@@ -96,6 +96,7 @@ export default function SettingsPage() {
       allSettings={allSettings}
       initialSettings={initialSettings}
       setAllSettings={setAllSettings}
+      deleteWorkspace={deleteWorkspace}
     />
   );
 }
@@ -106,16 +107,20 @@ function SettingsWorkspacePanel({
   allSettings,
   initialSettings,
   setAllSettings,
+  deleteWorkspace,
 }: {
   activeWorkspaceId: string;
   activeWorkspaceName: string;
   allSettings: WorkspaceSettings[];
   initialSettings: WorkspaceSettings;
   setAllSettings: (settings: WorkspaceSettings[]) => void;
+  deleteWorkspace: (workspaceId: string) => Promise<boolean>;
 }) {
 
   const [tab, setTab] = useState<SettingsTab>("business");
   const [settings, setSettings] = useState<WorkspaceSettings>(initialSettings);
+  const [deleteConfirmation, setDeleteConfirmation] = useState("");
+  const [isDeletingWorkspace, setIsDeletingWorkspace] = useState(false);
 
   const [savedNotice, setSavedNotice] = useState("");
 
@@ -164,6 +169,32 @@ function SettingsWorkspacePanel({
     showSavedNotice("Settings reset.");
 
     window.dispatchEvent(new Event("frontier-settings-updated"));
+  }
+
+  async function handleDeleteWorkspace() {
+    if (activeWorkspaceId === "create-workspace") return;
+    if (deleteConfirmation !== activeWorkspaceName) {
+      showSavedNotice("Type the workspace name exactly before deleting.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Delete workspace "${activeWorkspaceName}" and its related data? This cannot be undone.`
+    );
+
+    if (!confirmed) return;
+
+    setIsDeletingWorkspace(true);
+    const deleted = await deleteWorkspace(activeWorkspaceId);
+    setIsDeletingWorkspace(false);
+
+    if (!deleted) {
+      showSavedNotice("Workspace could not be deleted.");
+      return;
+    }
+
+    setDeleteConfirmation("");
+    showSavedNotice("Workspace deleted.");
   }
 
   const inputClass =
@@ -498,8 +529,13 @@ function SettingsWorkspacePanel({
       )}
 
       {tab === "workspace" && (
-        <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-gray-900 sm:p-6">
-          <h2 className="text-2xl font-bold">Workspace Configuration</h2>
+        <section className="space-y-6 rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-gray-900 sm:p-6">
+          <div>
+            <h2 className="text-2xl font-bold">Workspace Configuration</h2>
+            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+              The Reset button only resets settings for this workspace. It does not delete or reset workspaces.
+            </p>
+          </div>
 
           <div className="mt-6 grid grid-cols-1 gap-5 xl:grid-cols-2">
             <div>
@@ -559,6 +595,36 @@ function SettingsWorkspacePanel({
               />
             </div>
           </div>
+
+          {activeWorkspaceId !== "create-workspace" && (
+            <div className="rounded-xl border border-red-200 bg-red-50 p-5 dark:border-red-900 dark:bg-red-950/30">
+              <h3 className="text-lg font-bold text-red-800 dark:text-red-200">
+                Delete Workspace
+              </h3>
+              <p className="mt-2 text-sm text-red-700 dark:text-red-200">
+                This permanently deletes the workspace and database records tied to it. Type the workspace name to enable deletion.
+              </p>
+              <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-[1fr_auto]">
+                <input
+                  value={deleteConfirmation}
+                  onChange={(event) => setDeleteConfirmation(event.target.value)}
+                  placeholder={activeWorkspaceName}
+                  className={inputClass}
+                />
+                <button
+                  type="button"
+                  onClick={handleDeleteWorkspace}
+                  disabled={
+                    isDeletingWorkspace ||
+                    deleteConfirmation !== activeWorkspaceName
+                  }
+                  className="rounded-lg bg-red-600 px-5 py-3 font-semibold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-gray-400"
+                >
+                  {isDeletingWorkspace ? "Deleting..." : "Delete Workspace"}
+                </button>
+              </div>
+            </div>
+          )}
         </section>
       )}
 

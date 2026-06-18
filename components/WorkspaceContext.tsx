@@ -25,6 +25,12 @@ export type Workspace = {
   type: string;
 };
 
+const createWorkspacePlaceholder: Workspace = {
+  id: "create-workspace",
+  name: "Create Workspace",
+  type: "Setup",
+};
+
 const defaultWorkspaces: Workspace[] = [
   {
     id: "local-workspace",
@@ -37,7 +43,8 @@ type WorkspaceContextValue = {
   workspaces: Workspace[];
   activeWorkspace: Workspace;
   setActiveWorkspace: (workspace: Workspace) => void;
-  addWorkspace: (workspace: Workspace) => void;
+  addWorkspace: (workspace: Workspace) => void | Promise<void>;
+  deleteWorkspace: (workspaceId: string) => Promise<boolean>;
   adminViewWorkspace: Workspace | null;
   isLoadingWorkspaces: boolean;
   workspaceError: string | null;
@@ -164,47 +171,7 @@ export function WorkspaceProvider({
         .map(normalizeJoinedWorkspace)
         .filter((workspace): workspace is Workspace => Boolean(workspace));
 
-      if (loadedWorkspaces.length > 0) return loadedWorkspaces;
-
-      const firstWorkspace: Workspace = {
-        id: crypto.randomUUID(),
-        name: "Local Workspace",
-        type: "Other",
-      };
-
-      const { error: workspaceErrorResult } = await supabase
-        .from("workspaces")
-        .insert({
-          id: firstWorkspace.id,
-          name: firstWorkspace.name,
-          type: firstWorkspace.type,
-          created_by: supabaseUser.id,
-        });
-
-      if (workspaceErrorResult) throw workspaceErrorResult;
-
-      const { error: memberError } = await supabase
-        .from("workspace_members")
-        .insert({
-          workspace_id: firstWorkspace.id,
-          user_id: supabaseUser.id,
-          role: "Owner",
-          status: "Active",
-        });
-
-      if (memberError) throw memberError;
-
-      const { error: settingsError } = await supabase
-        .from("workspace_settings")
-        .insert({
-          workspace_id: firstWorkspace.id,
-          workspace_nickname: firstWorkspace.name,
-          business_type: firstWorkspace.type,
-        });
-
-      if (settingsError) throw settingsError;
-
-      return [firstWorkspace];
+      return loadedWorkspaces;
     },
     []
   );
@@ -232,11 +199,13 @@ export function WorkspaceProvider({
         const nextActiveWorkspace =
           loadedWorkspaces.find(
             (workspace) => workspace.id === savedActiveWorkspaceId
-          ) ?? loadedWorkspaces[0] ?? defaultWorkspaces[0];
+          ) ?? loadedWorkspaces[0] ?? null;
 
         setDatabaseWorkspaces(loadedWorkspaces);
-        setDatabaseActiveWorkspaceId(nextActiveWorkspace.id);
-        writeStoredString(storageKeys.activeWorkspace, nextActiveWorkspace.id);
+        setDatabaseActiveWorkspaceId(nextActiveWorkspace?.id ?? null);
+        if (nextActiveWorkspace) {
+          writeStoredString(storageKeys.activeWorkspace, nextActiveWorkspace.id);
+        }
       } catch (error) {
         if (cancelled) return;
 
@@ -314,8 +283,10 @@ export function WorkspaceProvider({
         adminViewWorkspace ??
         visibleWorkspaces.find(
           (workspace) => workspace.id === visibleActiveWorkspaceId
-        ) ?? visibleWorkspaces[0] ?? defaultWorkspaces[0],
-      [adminViewWorkspace, visibleActiveWorkspaceId, visibleWorkspaces]
+        ) ??
+        visibleWorkspaces[0] ??
+        (isDatabaseMode ? createWorkspacePlaceholder : defaultWorkspaces[0]),
+      [adminViewWorkspace, isDatabaseMode, visibleActiveWorkspaceId, visibleWorkspaces]
     );
 
   const addWorkspace = useCallback(async (workspace: Workspace) => {
@@ -382,6 +353,45 @@ export function WorkspaceProvider({
     writeStoredString(storageKeys.activeWorkspace, workspace.id);
   }, [isDatabaseMode, setActiveWorkspaceId, setWorkspaces, user]);
 
+  const deleteWorkspace = useCallback(async (workspaceId: string) => {
+    if (!isDatabaseMode || !user) {
+      setWorkspaces((current) => {
+        const nextWorkspaces = current.filter(
+          (workspace) => workspace.id !== workspaceId
+        );
+        const nextActiveWorkspace = nextWorkspaces[0] ?? defaultWorkspaces[0];
+        setActiveWorkspaceId(nextActiveWorkspace.id);
+        return nextWorkspaces.length > 0 ? nextWorkspaces : defaultWorkspaces;
+      });
+      return true;
+    }
+
+    const supabase = createBrowserSupabaseClient();
+    const { error } = await supabase
+      .from("workspaces")
+      .delete()
+      .eq("id", workspaceId);
+
+    if (error) {
+      setWorkspaceError(error.message);
+      return false;
+    }
+
+    setDatabaseWorkspaces((current) => {
+      const nextWorkspaces = current.filter(
+        (workspace) => workspace.id !== workspaceId
+      );
+      const nextActiveWorkspace = nextWorkspaces[0] ?? null;
+      setDatabaseActiveWorkspaceId(nextActiveWorkspace?.id ?? null);
+      if (nextActiveWorkspace) {
+        writeStoredString(storageKeys.activeWorkspace, nextActiveWorkspace.id);
+      }
+      return nextWorkspaces;
+    });
+
+    return true;
+  }, [isDatabaseMode, setActiveWorkspaceId, setWorkspaces, user]);
+
   const setActiveWorkspace = useCallback((workspace: Workspace) => {
     if (isDatabaseMode) {
       setDatabaseActiveWorkspaceId(workspace.id);
@@ -398,6 +408,7 @@ export function WorkspaceProvider({
       activeWorkspace,
       setActiveWorkspace,
       addWorkspace,
+      deleteWorkspace,
       adminViewWorkspace,
       isLoadingWorkspaces,
       workspaceError,
@@ -405,6 +416,7 @@ export function WorkspaceProvider({
     [
       activeWorkspace,
       addWorkspace,
+      deleteWorkspace,
       adminViewWorkspace,
       isLoadingWorkspaces,
       setActiveWorkspace,

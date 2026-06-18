@@ -23,8 +23,8 @@ type WorkspaceDisplaySettings = {
 };
 
 const localUserFallback = {
-  name: "Local User",
-  email: "local.user@frontier.local",
+  name: "Account",
+  email: "Sign in to save and sync workspaces",
 };
 
 function getWorkspaceInitials(name: string) {
@@ -37,7 +37,7 @@ function getWorkspaceInitials(name: string) {
 
 function getUserInitials(name: string) {
   const initials = getWorkspaceInitials(name);
-  return initials.slice(0, 2) || "LU";
+  return initials.slice(0, 2) || "A";
 }
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
@@ -86,6 +86,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     }
 
     let cancelled = false;
+    queueMicrotask(() => {
+      if (!cancelled) {
+        setUserOpen(false);
+      }
+    });
+
     const supabase = createBrowserSupabaseClient();
 
     supabase.rpc("is_platform_admin").then(({ data, error }) => {
@@ -103,11 +109,19 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     };
   }, [user]);
 
+  const localVisibleWorkspaces = user
+    ? workspaces
+    : workspaces.filter((workspace) => workspace.id !== "local-workspace");
+
   const displayedWorkspaceName =
-    displaySettings?.workspaceNickname?.trim() || activeWorkspace.name;
+    !user && activeWorkspace.id === "local-workspace"
+      ? "Create Workspace"
+      : displaySettings?.workspaceNickname?.trim() || activeWorkspace.name;
 
   const displayedWorkspaceType =
-    displaySettings?.businessType?.trim() || activeWorkspace.type;
+    !user && activeWorkspace.id === "local-workspace"
+      ? "Setup"
+      : displaySettings?.businessType?.trim() || activeWorkspace.type;
 
   const displayedUserName =
     user?.email || displaySettings?.userDisplayName?.trim() || localUserFallback.name;
@@ -118,6 +132,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const displayedWorkspaceInitials =
     getWorkspaceInitials(displayedWorkspaceName);
   const displayedUserInitials = getUserInitials(displayedUserName);
+  const hasWorkspaces = localVisibleWorkspaces.length > 0;
   const isPlatformAdmin =
     Boolean(user) &&
     platformAdminCheck?.userId === user?.id &&
@@ -141,7 +156,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     resetNewWorkspaceForm();
   }
 
-  function createWorkspace() {
+  async function createWorkspace() {
     if (!workspaceName.trim()) return;
 
     const resolvedType =
@@ -157,8 +172,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       type: resolvedType,
     };
 
-    addWorkspace(newWorkspace);
-    setActiveWorkspace(newWorkspace);
+    await addWorkspace(newWorkspace);
 
     resetNewWorkspaceForm();
     setNewWorkspaceOpen(false);
@@ -273,7 +287,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                   Workspaces
                 </div>
 
-                {workspaces.map((workspace) => (
+                {hasWorkspaces ? localVisibleWorkspaces.map((workspace) => (
                   <button
                     key={workspace.id}
                     onClick={() => {
@@ -297,7 +311,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                       </span>
                     </span>
                   </button>
-                ))}
+                )) : (
+                  <div className="px-4 py-5 text-sm text-gray-500 dark:text-gray-400">
+                    Create a workspace to start using Frontier.
+                  </div>
+                )}
 
                 <button
                   onClick={() => {
@@ -307,7 +325,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                   className="flex w-full items-center gap-4 border-t border-gray-200 px-4 py-4 text-left hover:bg-gray-100 dark:border-gray-700 dark:hover:bg-gray-800"
                 >
                   <span className="text-xl">+</span>
-                  <span className="font-medium">New Workspace</span>
+                  <span className="font-medium">Create Workspace</span>
                 </button>
               </div>
             )}
@@ -323,39 +341,38 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             {darkMode ? "☀️" : "🌙"}
           </button>
 
-          <div className="relative">
-            <button
-              onClick={() => {
-                setUserOpen(!userOpen);
-                setWorkspaceOpen(false);
-              }}
-              className="flex items-center gap-2 rounded-lg px-2 py-2 hover:bg-gray-100 dark:hover:bg-gray-800"
-            >
-              <span className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-100 text-sm font-bold text-blue-600 dark:bg-blue-950">
-                {displayedUserInitials}
-              </span>
-              <span className="hidden max-w-32 truncate font-semibold lg:block">
-                {displayedUserName}
-              </span>
-              <span className="hidden text-gray-500 sm:inline"></span>
-            </button>
+          {user ? (
+            <div className="relative">
+              <button
+                onClick={() => {
+                  setUserOpen(!userOpen);
+                  setWorkspaceOpen(false);
+                }}
+                className="flex items-center gap-2 rounded-full px-2 py-2 hover:bg-gray-100 dark:hover:bg-gray-800"
+              >
+                <span className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-100 text-sm font-bold text-blue-600 dark:bg-blue-950">
+                  {displayedUserInitials}
+                </span>
+                <span className="hidden max-w-48 truncate font-semibold lg:block">
+                  {displayedUserName}
+                </span>
+              </button>
 
-            {userOpen && (
-              <div className="absolute right-0 top-14 z-[2100] w-72 max-w-[90vw] overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-900">
-                <div className="border-b border-gray-200 px-4 py-4 dark:border-gray-700">
-                  <div className="font-semibold">{displayedUserName}</div>
-                  <div className="mt-1 break-all text-sm text-gray-500 dark:text-gray-400">
-                    {displayedUserEmail}
+              {userOpen && (
+                <div className="absolute right-0 top-14 z-[2100] w-72 max-w-[90vw] overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-900">
+                  <div className="border-b border-gray-200 px-4 py-4 dark:border-gray-700">
+                    <div className="font-semibold">{displayedUserName}</div>
+                    <div className="mt-1 break-all text-sm text-gray-500 dark:text-gray-400">
+                      {displayedUserEmail}
+                    </div>
                   </div>
-                </div>
 
-                <div className="border-b border-gray-200 px-4 py-3 text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
-                  {displayedWorkspaceName}
-                  <br />
-                  {displayedWorkspaceType}
-                </div>
+                  <div className="border-b border-gray-200 px-4 py-3 text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
+                    {displayedWorkspaceName}
+                    <br />
+                    {displayedWorkspaceType}
+                  </div>
 
-                {user ? (
                   <div className="grid grid-cols-1">
                     {isPlatformAdmin && (
                       <Link
@@ -383,15 +400,25 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                       <span className="font-medium">Sign Out</span>
                     </button>
                   </div>
-                ) : (
-                  <div className="grid grid-cols-1">
-                    <Link href="/login" className="px-4 py-3 font-medium hover:bg-gray-100 dark:hover:bg-gray-800">Sign In</Link>
-                    <Link href="/signup" className="px-4 py-3 font-medium hover:bg-gray-100 dark:hover:bg-gray-800">Create Account</Link>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <Link
+                href="/login"
+                className="rounded-full border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-950 hover:bg-gray-100 dark:border-gray-700 dark:bg-gray-100 dark:text-gray-950"
+              >
+                Log in
+              </Link>
+              <Link
+                href="/signup"
+                className="rounded-full border border-gray-700 px-4 py-2 text-sm font-semibold text-gray-100 hover:bg-gray-800"
+              >
+                Sign up for free
+              </Link>
+            </div>
+          )}
         </div>
       </header>
 

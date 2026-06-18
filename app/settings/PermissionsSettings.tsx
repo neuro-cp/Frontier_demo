@@ -61,6 +61,7 @@ export default function PermissionsSettings({
   const [inviteInstruction, setInviteInstruction] = useState("");
   const [isInviting, setIsInviting] = useState(false);
   const [members, setMembers] = useState<MemberRow[]>([]);
+  const [memberLoadError, setMemberLoadError] = useState("");
 
   const supabase = useMemo(() => (user ? createBrowserSupabaseClient() : null), [user]);
   const currentMember = members.find((member) => member.user_id === user?.id);
@@ -72,12 +73,18 @@ export default function PermissionsSettings({
     let cancelled = false;
     supabase
       .from("workspace_members")
-      .select("id, user_id, role, status, invited_email, created_at, profiles(email, display_name)")
+      .select("id, user_id, role, status, invited_email, created_at")
       .eq("workspace_id", activeWorkspaceId)
       .neq("status", "Removed")
       .then(({ data, error }) => {
-        if (error) console.error("Unable to load members.", error);
-        if (!cancelled) setMembers((data ?? []) as unknown as MemberRow[]);
+        if (cancelled) return;
+        if (error) {
+          setMemberLoadError(error.message || "Unable to load members.");
+          setMembers([]);
+          return;
+        }
+        setMemberLoadError("");
+        setMembers((data ?? []) as unknown as MemberRow[]);
       });
     return () => { cancelled = true; };
   }, [activeWorkspaceId, supabase]);
@@ -227,6 +234,13 @@ export default function PermissionsSettings({
     setMembers((current) => current.filter((item) => item.id !== member.id));
   }
 
+  function getMemberLabel(member: MemberRow) {
+    if (member.profiles?.email) return member.profiles.email;
+    if (member.invited_email) return member.invited_email;
+    if (member.user_id === user?.id && user.email) return user.email;
+    return member.user_id || "-";
+  }
+
   return (
     <section className="space-y-6">
       <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-gray-900 sm:p-6">
@@ -249,12 +263,18 @@ export default function PermissionsSettings({
         </div>
 
         <div className="mt-6 overflow-x-auto">
+          {memberLoadError && (
+            <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
+              {memberLoadError}
+            </div>
+          )}
+
           <table className="w-full min-w-[760px]">
             <thead><tr className="text-left text-sm text-gray-500"><th className="p-3">Email</th><th className="p-3">Role</th><th className="p-3">Status</th><th className="p-3">Created</th><th className="p-3 text-right">Actions</th></tr></thead>
             <tbody>
               {members.map((member) => (
                 <tr key={member.id} className="border-t border-gray-200 dark:border-gray-800">
-                  <td className="p-3">{member.profiles?.email || member.invited_email || member.user_id || "-"}</td>
+                  <td className="p-3">{getMemberLabel(member)}</td>
                   <td className="p-3">
                     <select value={member.role} onChange={(e) => updateRole(member, e.target.value as WorkspaceRole)} disabled={!canManageMembers} className={inputClass}>
                       <option>Owner</option><option>Manager</option><option>Employee</option>
