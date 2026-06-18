@@ -337,7 +337,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               <span className="hidden max-w-32 truncate font-semibold lg:block">
                 {displayedUserName}
               </span>
-              <span className="hidden text-gray-500 sm:inline">v</span>
+              <span className="hidden text-gray-500 sm:inline"></span>
             </button>
 
             {userOpen && (

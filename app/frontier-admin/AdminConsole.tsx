@@ -75,7 +75,18 @@ type WorkspaceDetail = {
   jobs: Array<{ id: string; name: string; status: string; client_name_snapshot: string | null; scheduled_date: string | null; created_at: string | null }>;
   invoices: Array<{ id: string; invoice_number: string; status: string; bill_to_name: string | null; bill_to_email: string | null; invoice_date: string | null; created_at: string | null }>;
   inventory: Array<{ id: string; name: string; current_qty: number | null; target_qty: number | null; created_at: string | null }>;
-  documents: Array<{ id: string; name: string; file_name: string | null; extraction_status: string | null; detected_type: string | null; mime_type: string | null; size_bytes: number | null; storage_bucket: string | null; storage_path: string | null; created_at: string | null }>;
+  documents: Array<{ id: string; name: string; file_name: string | null; status?: string | null; extraction_status: string | null; detected_type: string | null; uploaded_by?: string | null; mime_type: string | null; size_bytes: number | null; storage_bucket: string | null; storage_path: string | null; created_at: string | null }>;
+  routePlans: Array<{ id: string; name: string; total_distance_meters: number | null; total_duration_seconds: number | null; google_maps_url: string | null; created_at: string | null }>;
+};
+
+type AdminAuditLog = {
+  id: string;
+  admin_user_id: string;
+  target_user_id: string | null;
+  target_workspace_id: string | null;
+  action: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
 };
 
 function formatDate(value: string | null) {
@@ -117,8 +128,10 @@ export default function AdminConsole({ summary }: { summary: PlatformAdminSummar
   const [selectedUser, setSelectedUser] = useState<UserWorkspacesResponse | null>(null);
   const [workspaceDetail, setWorkspaceDetail] = useState<WorkspaceDetail | null>(null);
   const [message, setMessage] = useState("");
+  const [auditLogs, setAuditLogs] = useState<AdminAuditLog[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [isLoadingDetail, setIsLoadingDetail] = useState(false);
+  const [isLoadingAudit, setIsLoadingAudit] = useState(false);
 
   const counts = [
     { label: "Auth Users", value: summary.auth_user_count },
@@ -225,6 +238,22 @@ export default function AdminConsole({ summary }: { summary: PlatformAdminSummar
       router.refresh();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to enter admin view.");
+    }
+  }
+
+  async function loadAuditLogs() {
+    setIsLoadingAudit(true);
+    setMessage("");
+
+    try {
+      const data = await readJson<{ logs: AdminAuditLog[] }>(
+        await fetch("/api/frontier-admin/audit-logs")
+      );
+      setAuditLogs(data.logs);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to load audit logs.");
+    } finally {
+      setIsLoadingAudit(false);
     }
   }
 
@@ -393,9 +422,42 @@ export default function AdminConsole({ summary }: { summary: PlatformAdminSummar
           <AdminSimpleTable title="Jobs" empty="No jobs found." rows={workspaceDetail.jobs.map((job) => [job.name, job.status, job.client_name_snapshot ?? "-", job.scheduled_date ?? "-", formatDate(job.created_at)])} headers={["Name", "Status", "Client", "Scheduled", "Created"]} />
           <AdminSimpleTable title="Invoices" empty="No invoices found." rows={workspaceDetail.invoices.map((invoice) => [invoice.invoice_number, invoice.status, invoice.bill_to_name ?? "-", invoice.bill_to_email ?? "-", invoice.invoice_date ?? "-"])} headers={["Number", "Status", "Bill To", "Email", "Date"]} />
           <AdminSimpleTable title="Inventory" empty="No inventory found." rows={workspaceDetail.inventory.map((item) => [item.name, String(item.current_qty ?? "-"), String(item.target_qty ?? "-"), formatDate(item.created_at)])} headers={["Name", "Current", "Target", "Created"]} />
-          <AdminSimpleTable title="Document Metadata" empty="No documents found." rows={workspaceDetail.documents.map((document) => [document.file_name || document.name, document.extraction_status ?? "-", document.mime_type ?? "-", formatSize(document.size_bytes), document.storage_path ?? "-", formatDate(document.created_at)])} headers={["File", "Status", "MIME", "Size", "Storage Path", "Created"]} />
+          <AdminSimpleTable title="Route Plans" empty="No route plans found." rows={workspaceDetail.routePlans.map((route) => [route.name, route.total_distance_meters ? `${route.total_distance_meters} m` : "-", route.total_duration_seconds ? `${route.total_duration_seconds} sec` : "-", route.google_maps_url ? "Available" : "-", formatDate(route.created_at)])} headers={["Name", "Distance", "Duration", "Google Maps", "Created"]} />
+          <AdminSimpleTable title="Document Metadata" empty="No documents found." rows={workspaceDetail.documents.map((document) => [document.file_name || document.name, document.status || document.extraction_status || "Metadata available", document.mime_type ?? "-", formatSize(document.size_bytes), document.uploaded_by ?? "-", document.storage_path ?? "-", "File preview/download coming later", formatDate(document.created_at)])} headers={["File", "Status", "MIME", "Size", "Uploaded By", "Storage Path", "Preview", "Created"]} />
         </section>
       )}
+
+      <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-gray-900 sm:p-6">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-xl font-bold">Audit Logs</h2>
+            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+              Recent platform admin actions.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={loadAuditLogs}
+            disabled={isLoadingAudit}
+            className="rounded-lg bg-gray-900 px-4 py-2 font-semibold text-white disabled:cursor-not-allowed disabled:bg-gray-400 dark:bg-gray-100 dark:text-gray-950"
+          >
+            {isLoadingAudit ? "Loading..." : "Load Audit Logs"}
+          </button>
+        </div>
+        <AdminSimpleTable
+          title=""
+          empty="No audit logs loaded yet."
+          rows={auditLogs.map((log) => [
+            log.action,
+            log.admin_user_id,
+            log.target_user_id ?? "-",
+            log.target_workspace_id ?? "-",
+            JSON.stringify(log.metadata),
+            formatDate(log.created_at),
+          ])}
+          headers={["Action", "Admin User", "Target User", "Target Workspace", "Metadata", "Created"]}
+        />
+      </section>
 
       <section className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
         <h2 className="text-xl font-bold">Roadmap Hold</h2>

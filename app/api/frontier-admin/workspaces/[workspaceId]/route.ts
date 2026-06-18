@@ -37,6 +37,7 @@ export async function GET(
       invoicesResult,
       inventoryResult,
       documentsResult,
+      routePlansResult,
       settingsResult,
     ] = await Promise.all([
       serviceClient
@@ -72,7 +73,13 @@ export async function GET(
         .limit(100),
       serviceClient
         .from("documents")
-        .select("id, name, file_name, extraction_status, detected_type, mime_type, size_bytes, storage_bucket, storage_path, created_at")
+        .select("id, name, file_name, status, extraction_status, detected_type, uploaded_by, mime_type, size_bytes, storage_bucket, storage_path, created_at")
+        .eq("workspace_id", workspaceId)
+        .order("created_at", { ascending: false })
+        .limit(100),
+      serviceClient
+        .from("route_plans")
+        .select("id, name, total_distance_meters, total_duration_seconds, google_maps_url, created_at")
         .eq("workspace_id", workspaceId)
         .order("created_at", { ascending: false })
         .limit(100),
@@ -90,6 +97,7 @@ export async function GET(
       invoicesResult,
       inventoryResult,
       documentsResult,
+      routePlansResult,
       settingsResult,
     ];
     const failed = results.find((result) => result.error);
@@ -109,6 +117,7 @@ export async function GET(
       invoices: invoicesResult.data ?? [],
       inventory: inventoryResult.data ?? [],
       documents: documentsResult.data ?? [],
+      routePlans: routePlansResult.data ?? [],
     });
   } catch (error) {
     return serverErrorResponse(error);

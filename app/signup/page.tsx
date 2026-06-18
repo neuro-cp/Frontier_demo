@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
+import { getAuthErrorMessage } from "@/lib/auth/messages";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 
 export default function SignupPage() {
@@ -12,17 +13,6 @@ export default function SignupPage() {
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState("");
   const [isCreating, setIsCreating] = useState(false);
-
-  function getAuthMessage(error: unknown) {
-    if (error instanceof Error) return error.message;
-    if (typeof error === "string") return error;
-    if (error && typeof error === "object" && "message" in error) {
-      const message = (error as { message?: unknown }).message;
-      if (typeof message === "string") return message;
-    }
-
-    return "Unable to create account. Please try again.";
-  }
 
   async function signup(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -33,7 +23,9 @@ export default function SignupPage() {
       const supabase = createBrowserSupabaseClient();
       const { data, error } = await supabase.auth.signUp({ email, password });
       if (error) {
-        setMessage(getAuthMessage(error));
+        setMessage(
+          getAuthErrorMessage(error, "Unable to create account. Please try again.")
+        );
         return;
       }
       if (data.session) {
@@ -43,7 +35,9 @@ export default function SignupPage() {
         setMessage("Account created. Check your email to confirm your signup.");
       }
     } catch (error) {
-      setMessage(getAuthMessage(error));
+      setMessage(
+        getAuthErrorMessage(error, "Unable to create account. Please try again.")
+      );
     } finally {
       setIsCreating(false);
     }

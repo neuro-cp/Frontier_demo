@@ -1,5 +1,5 @@
 -- Frontier current live database schema snapshot
--- Generated from live Supabase database at 2026-06-18T00:11:47.820Z
+-- Generated from live Supabase database at 2026-06-18T02:59:36.683Z
 -- Scope: public application schema plus installed extensions. Supabase-managed auth/storage schemas are platform-owned.
 -- This is an audit snapshot, not a migration to apply automatically.
 
@@ -84,6 +84,27 @@ begin
   from public.platform_admins
   where platform_admins.user_id = auth.uid()
   limit 1;
+end;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.handle_new_auth_user()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+begin
+  insert into public.profiles (id, email, display_name)
+  values (
+    new.id,
+    lower(new.email),
+    coalesce(new.raw_user_meta_data ->> 'full_name', new.raw_user_meta_data ->> 'name', lower(new.email))
+  )
+  on conflict (id) do update
+    set email = excluded.email,
+        display_name = coalesce(public.profiles.display_name, excluded.display_name);
+
+  return new;
 end;
 $function$;
 
@@ -294,7 +315,9 @@ create table public."documents" (
   "notes" text,
   "extracted_json" jsonb,
   "created_at" timestamp with time zone default now() not null,
-  "updated_at" timestamp with time zone default now() not null
+  "updated_at" timestamp with time zone default now() not null,
+  "uploaded_by" uuid,
+  "status" text default 'Metadata available'::text not null
 );
 
 create table public."estimate_line_items" (
@@ -591,6 +614,7 @@ alter table documents add constraint "documents_estimate_id_fkey" FOREIGN KEY (e
 alter table documents add constraint "documents_expense_id_fkey" FOREIGN KEY (expense_id) REFERENCES expenses(id) ON DELETE SET NULL;
 alter table documents add constraint "documents_invoice_id_fkey" FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE SET NULL;
 alter table documents add constraint "documents_job_id_fkey" FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE SET NULL;
+alter table documents add constraint "documents_uploaded_by_fkey" FOREIGN KEY (uploaded_by) REFERENCES profiles(id) ON DELETE SET NULL;
 alter table documents add constraint "documents_workspace_id_fkey" FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE;
 alter table estimate_line_items add constraint "estimate_line_items_pkey" PRIMARY KEY (id);
 alter table estimate_line_items add constraint "estimate_line_items_estimate_id_fkey" FOREIGN KEY (estimate_id) REFERENCES estimates(id) ON DELETE CASCADE;
@@ -688,6 +712,8 @@ CREATE INDEX documents_estimate_idx ON public.documents USING btree (estimate_id
 CREATE INDEX documents_expense_idx ON public.documents USING btree (expense_id);
 CREATE INDEX documents_invoice_idx ON public.documents USING btree (invoice_id);
 CREATE INDEX documents_job_idx ON public.documents USING btree (job_id);
+CREATE INDEX documents_status_idx ON public.documents USING btree (status);
+CREATE INDEX documents_uploaded_by_idx ON public.documents USING btree (uploaded_by);
 CREATE INDEX documents_workspace_idx ON public.documents USING btree (workspace_id);
 CREATE INDEX estimate_line_items_estimate_idx ON public.estimate_line_items USING btree (estimate_id);
 CREATE INDEX estimate_line_items_workspace_idx ON public.estimate_line_items USING btree (workspace_id);
