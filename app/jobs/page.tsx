@@ -9,6 +9,7 @@ import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
 import type { Job, JobMaterial, JobStatus } from "@/lib/jobTypes";
 import type { ClientRow } from "@/lib/clientTypes";
 import { createClientsRepository } from "@/lib/db/clients";
+import { createInvoicesRepository } from "@/lib/db/invoices";
 import { createJobsRepository } from "@/lib/db/jobs";
 import {
   formatCurrency,
@@ -44,10 +45,13 @@ export default function JobsPage() {
     []
   );
   const [databaseJobItems, setDatabaseJobItems] = useState<Job[]>([]);
-  const [invoiceItems] = useStoredJsonState<InvoiceRow[]>(
+  const [localInvoiceItems, setLocalInvoiceItems] = useStoredJsonState<InvoiceRow[]>(
     storageKeys.invoices,
     []
   );
+  const [databaseInvoiceItems, setDatabaseInvoiceItems] = useState<InvoiceRow[]>([]);
+  const [isLoadingData, setIsLoadingData] = useState(false);
+  const [dataError, setDataError] = useState("");
   const [selectedJobs, setSelectedJobs] = useState<string[]>([]);
   const [newJobOpen, setNewJobOpen] = useState(false);
 
@@ -69,23 +73,37 @@ export default function JobsPage() {
   const supabase = useMemo(() => (isDatabaseMode ? createBrowserSupabaseClient() : null), [isDatabaseMode]);
   const jobsRepository = useMemo(() => createJobsRepository({ isSignedIn: isDatabaseMode, supabase, localJobs: localJobItems, setLocalJobs: setLocalJobItems }), [isDatabaseMode, localJobItems, setLocalJobItems, supabase]);
   const clientsRepository = useMemo(() => createClientsRepository({ isSignedIn: isDatabaseMode, supabase, localClients: localClientItems, setLocalClients: setLocalClientItems }), [isDatabaseMode, localClientItems, setLocalClientItems, supabase]);
+  const invoicesRepository = useMemo(() => createInvoicesRepository({ isSignedIn: isDatabaseMode, supabase, localInvoices: localInvoiceItems, setLocalInvoices: setLocalInvoiceItems }), [isDatabaseMode, localInvoiceItems, setLocalInvoiceItems, supabase]);
   const jobItems = isDatabaseMode ? databaseJobItems : localJobItems;
   const clientItems = isDatabaseMode ? databaseClientItems : localClientItems;
+  const invoiceItems = isDatabaseMode ? databaseInvoiceItems : localInvoiceItems;
 
   useEffect(() => {
     if (!isDatabaseMode) return;
     let cancelled = false;
+    queueMicrotask(() => {
+      if (!cancelled) {
+        setIsLoadingData(true);
+        setDataError("");
+      }
+    });
     Promise.all([
       jobsRepository.getJobs(activeWorkspace.id),
       clientsRepository.getClients(activeWorkspace.id),
-    ]).then(([jobs, clients]) => {
+      invoicesRepository.getInvoices(activeWorkspace.id),
+    ]).then(([jobs, clients, invoices]) => {
       if (!cancelled) {
         setDatabaseJobItems(jobs);
         setDatabaseClientItems(clients);
+        setDatabaseInvoiceItems(invoices);
       }
+    }).catch((error) => {
+      if (!cancelled) setDataError(error instanceof Error ? error.message : "Unable to load jobs.");
+    }).finally(() => {
+      if (!cancelled) setIsLoadingData(false);
     });
     return () => { cancelled = true; };
-  }, [activeWorkspace.id, clientsRepository, isDatabaseMode, jobsRepository]);
+  }, [activeWorkspace.id, clientsRepository, invoicesRepository, isDatabaseMode, jobsRepository]);
 
   const workspaceClients = clientItems.filter(
     (clientItem) => clientItem.workspaceId === activeWorkspace.id
@@ -169,10 +187,15 @@ export default function JobsPage() {
   }
 
   async function deleteSelectedJobs() {
-    const deleted = await Promise.all(selectedJobs.map((id) => jobsRepository.deleteJob(id)));
-    const deletedIds = selectedJobs.filter((_, i) => deleted[i]);
-    if (isDatabaseMode) setDatabaseJobItems((c) => c.filter((j) => !deletedIds.includes(j.id)));
-    setSelectedJobs([]);
+    try {
+      const deleted = await Promise.all(selectedJobs.map((id) => jobsRepository.deleteJob(id)));
+      const deletedIds = selectedJobs.filter((_, i) => deleted[i]);
+      if (isDatabaseMode) setDatabaseJobItems((c) => c.filter((j) => !deletedIds.includes(j.id)));
+      setSelectedJobs([]);
+      setDataError("");
+    } catch (error) {
+      setDataError(error instanceof Error ? error.message : "Unable to delete jobs.");
+    }
   }
 
   function addMaterial() {
@@ -219,10 +242,15 @@ export default function JobsPage() {
       notes,
     };
 
-    const created = await jobsRepository.createJob(newJob);
-    if (!created) return;
-    if (isDatabaseMode) setDatabaseJobItems((c) => [...c, created]);
-    closeNewJobBox();
+    try {
+      const created = await jobsRepository.createJob(newJob);
+      if (!created) return;
+      if (isDatabaseMode) setDatabaseJobItems((c) => [...c, created]);
+      setDataError("");
+      closeNewJobBox();
+    } catch (error) {
+      setDataError(error instanceof Error ? error.message : "Unable to create job.");
+    }
   }
 
   return (
@@ -251,6 +279,18 @@ export default function JobsPage() {
       {selectedJobs.length > 0 && (
         <div className="rounded-lg bg-gray-900 p-4 text-white">
           {selectedJobs.length} job{selectedJobs.length === 1 ? "" : "s"} selected
+        </div>
+      )}
+
+      {dataError && (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
+          {dataError}
+        </div>
+      )}
+
+      {isLoadingData && (
+        <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-700 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-300">
+          Loading jobs...
         </div>
       )}
 

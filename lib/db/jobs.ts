@@ -45,19 +45,21 @@ export function createJobsRepository({ isSignedIn, supabase, localJobs, setLocal
     async getJobs(workspaceId: string) {
       if (!useDb) return localJobs.filter((j) => j.workspaceId === workspaceId);
       const { data, error } = await supabase.from("jobs").select("*, job_materials(*)").eq("workspace_id", workspaceId).order("scheduled_date", { ascending: true });
-      if (error) return console.error("Unable to load jobs.", error), [];
+      if (error) throw new Error(error.message || "Unable to load jobs.");
       return ((data ?? []) as DbJob[]).map(dbToJob);
     },
-    async getJobById(id: string) {
-      if (!useDb) return localJobs.find((j) => j.id === id) ?? null;
-      const { data, error } = await supabase.from("jobs").select("*, job_materials(*)").eq("id", id).maybeSingle();
-      if (error) return console.error("Unable to load job.", error), null;
+    async getJobById(id: string, workspaceId?: string) {
+      if (!useDb) return localJobs.find((j) => j.id === id && (!workspaceId || j.workspaceId === workspaceId)) ?? null;
+      let query = supabase.from("jobs").select("*, job_materials(*)").eq("id", id);
+      if (workspaceId) query = query.eq("workspace_id", workspaceId);
+      const { data, error } = await query.maybeSingle();
+      if (error) throw new Error(error.message || "Unable to load job.");
       return data ? dbToJob(data as DbJob) : null;
     },
     async createJob(job: Job) {
       if (!useDb) return setLocalJobs((c) => [...c, job]), job;
       const { error } = await supabase.from("jobs").insert(jobToDb(job));
-      if (error) return console.error("Unable to create job.", error), null;
+      if (error) throw new Error(error.message || "Unable to create job.");
       await this.saveJobMaterials(job.id, job.workspaceId, job.materials);
       return job;
     },
@@ -65,20 +67,20 @@ export function createJobsRepository({ isSignedIn, supabase, localJobs, setLocal
       if (!useDb) return setLocalJobs((c) => c.map((j) => (j.id === id ? job : j))), job;
       const values = jobToDb(job); delete (values as { id?: string }).id;
       const { error } = await supabase.from("jobs").update(values).eq("id", id).eq("workspace_id", job.workspaceId);
-      if (error) return console.error("Unable to update job.", error), null;
+      if (error) throw new Error(error.message || "Unable to update job.");
       await this.saveJobMaterials(id, job.workspaceId, job.materials);
       return job;
     },
     async deleteJob(id: string) {
       if (!useDb) return setLocalJobs((c) => c.filter((j) => j.id !== id)), true;
       const { error } = await supabase.from("jobs").delete().eq("id", id);
-      if (error) return console.error("Unable to delete job.", error), false;
+      if (error) throw new Error(error.message || "Unable to delete job.");
       return true;
     },
     async getJobMaterials(jobId: string) {
       if (!useDb) return localJobs.find((j) => j.id === jobId)?.materials ?? [];
       const { data, error } = await supabase.from("job_materials").select("*").eq("job_id", jobId);
-      if (error) return console.error("Unable to load job materials.", error), [];
+      if (error) throw new Error(error.message || "Unable to load job materials.");
       return ((data ?? []) as DbMaterial[]).map((m) => ({ name: m.name, quantity: Number(m.quantity) }));
     },
     async saveJobMaterials(jobId: string, workspaceId: string, materials: JobMaterial[]) {
@@ -86,13 +88,13 @@ export function createJobsRepository({ isSignedIn, supabase, localJobs, setLocal
       await supabase.from("job_materials").delete().eq("job_id", jobId);
       if (materials.length === 0) return true;
       const { error } = await supabase.from("job_materials").insert(materials.map((m) => ({ workspace_id: workspaceId, job_id: jobId, name: m.name, quantity: m.quantity })));
-      if (error) return console.error("Unable to save job materials.", error), false;
+      if (error) throw new Error(error.message || "Unable to save job materials.");
       return true;
     },
     async deleteJobMaterials(jobId: string) {
       if (!useDb) return true;
       const { error } = await supabase.from("job_materials").delete().eq("job_id", jobId);
-      if (error) return console.error("Unable to delete job materials.", error), false;
+      if (error) throw new Error(error.message || "Unable to delete job materials.");
       return true;
     },
   };

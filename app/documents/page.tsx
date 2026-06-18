@@ -5,6 +5,16 @@ import { useAuthSession } from "@/components/AuthSessionProvider";
 import { useWorkspace } from "@/components/WorkspaceContext";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
 import { createDocumentsRepository, type StoredDocument } from "@/lib/db/documents";
+import { createInvoicesRepository } from "@/lib/db/invoices";
+import type { InvoiceRow } from "@/lib/frontierInvoices";
+import {
+  DOCUMENT_STORAGE_BUCKET,
+  buildDocumentStoragePath,
+  createDocumentDownloadUrl,
+  getDocumentEntity,
+  removeDocumentFile,
+  uploadDocumentFile,
+} from "@/lib/storage";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 
 type ClientLike = {
@@ -45,26 +55,49 @@ export default function DocumentsPage() {
     storageKeys.jobs,
     []
   );
+  const [localInvoices, setLocalInvoices] = useStoredJsonState<InvoiceRow[]>(
+    storageKeys.invoices,
+    []
+  );
+  const [databaseInvoices, setDatabaseInvoices] = useState<InvoiceRow[]>([]);
 
   const [documentName, setDocumentName] = useState("");
   const [detectedType, setDetectedType] = useState("Pending");
   const [fileName, setFileName] = useState("");
   const [mimeType, setMimeType] = useState("");
   const [sizeBytes, setSizeBytes] = useState(0);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [notes, setNotes] = useState("");
   const [clientId, setClientId] = useState("");
   const [jobId, setJobId] = useState("");
+  const [invoiceId, setInvoiceId] = useState("");
+  const [documentError, setDocumentError] = useState("");
+  const [isSavingDocument, setIsSavingDocument] = useState(false);
 
   const supabase = useMemo(() => (isDatabaseMode ? createBrowserSupabaseClient() : null), [isDatabaseMode]);
   const documentsRepo = useMemo(() => createDocumentsRepository({ isSignedIn: isDatabaseMode, supabase, localDocuments, setLocalDocuments }), [isDatabaseMode, localDocuments, setLocalDocuments, supabase]);
+  const invoicesRepo = useMemo(() => createInvoicesRepository({ isSignedIn: isDatabaseMode, supabase, localInvoices, setLocalInvoices }), [isDatabaseMode, localInvoices, setLocalInvoices, supabase]);
   const documents = isDatabaseMode ? databaseDocuments : localDocuments;
+  const invoices = isDatabaseMode ? databaseInvoices : localInvoices;
 
   useEffect(() => {
     if (!isDatabaseMode) return;
     let cancelled = false;
-    documentsRepo.getDocuments(activeWorkspace.id).then((items) => { if (!cancelled) setDatabaseDocuments(items); });
+    Promise.all([
+      documentsRepo.getDocuments(activeWorkspace.id),
+      invoicesRepo.getInvoices(activeWorkspace.id),
+    ])
+      .then(([items, invoiceItems]) => {
+        if (!cancelled) {
+          setDatabaseDocuments(items);
+          setDatabaseInvoices(invoiceItems);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) setDocumentError(error instanceof Error ? error.message : "Unable to load documents.");
+      });
     return () => { cancelled = true; };
-  }, [activeWorkspace.id, documentsRepo, isDatabaseMode]);
+  }, [activeWorkspace.id, documentsRepo, invoicesRepo, isDatabaseMode]);
 
   const workspaceDocuments = documents.filter(
     (document) => document.workspaceId === activeWorkspace.id
@@ -76,6 +109,9 @@ export default function DocumentsPage() {
 
   const workspaceJobs = jobs.filter(
     (job) => job.workspaceId === activeWorkspace.id
+  );
+  const workspaceInvoices = invoices.filter(
+    (invoice) => invoice.workspaceId === activeWorkspace.id
   );
 
   const selectedClient = workspaceClients.find(
@@ -102,9 +138,11 @@ export default function DocumentsPage() {
     setFileName("");
     setMimeType("");
     setSizeBytes(0);
+    setSelectedFile(null);
     setNotes("");
     setClientId("");
     setJobId("");
+    setInvoiceId("");
   }
 
   function closeUploadModal() {
@@ -119,35 +157,88 @@ export default function DocumentsPage() {
 
   async function saveUploadPlaceholder() {
     if (!documentName.trim()) return;
+    setDocumentError("");
+    setIsSavingDocument(true);
+
+    const documentId = crypto.randomUUID();
+    const entity = getDocumentEntity({ clientId, jobId, invoiceId });
+    const storageFileName = selectedFile ? `${documentId}-${selectedFile.name}` : fileName;
+    const storagePath = storageFileName
+      ? buildDocumentStoragePath({
+          workspaceId: activeWorkspace.id,
+          entityType: entity.entityType,
+          entityId: entity.entityId,
+          fileName: storageFileName,
+        })
+      : "";
 
     const newDocument: StoredDocument = {
-      id: crypto.randomUUID(),
+      id: documentId,
       workspaceId: activeWorkspace.id,
       name: documentName.trim(),
       detectedType,
       extractionStatus: "Waiting for extraction",
-      fileName: fileName || "No file selected",
-      mimeType,
-      sizeBytes,
-      storageBucket: "",
-      storagePath: "",
-      storageStatus: "Pending storage setup",
+      fileName: selectedFile?.name || fileName || "No file selected",
+      mimeType: selectedFile?.type || mimeType,
+      sizeBytes: selectedFile?.size || sizeBytes,
+      storageBucket: storagePath ? DOCUMENT_STORAGE_BUCKET : "",
+      storagePath,
+      storageStatus: storagePath ? "Stored" : "Pending storage setup",
       notes: notes.trim(),
       clientId,
       jobId,
+      invoiceId,
       createdAt: new Date().toISOString(),
+      uploadedBy: user?.id,
     };
 
-    const created = await documentsRepo.createDocument(newDocument);
-    if (!created) return;
-    if (isDatabaseMode) setDatabaseDocuments((current) => [created, ...current]);
-    closeUploadModal();
+    try {
+      if (isDatabaseMode && supabase && selectedFile && storagePath) {
+        await uploadDocumentFile({ supabase, path: storagePath, file: selectedFile });
+      }
+
+      const created = await documentsRepo.createDocument(newDocument);
+      if (!created) return;
+      if (isDatabaseMode) setDatabaseDocuments((current) => [created, ...current]);
+      closeUploadModal();
+    } catch (error) {
+      setDocumentError(error instanceof Error ? error.message : "Unable to save document.");
+    } finally {
+      setIsSavingDocument(false);
+    }
   }
 
   async function deleteDocument(documentId: string) {
-    const deleted = await documentsRepo.deleteDocument(documentId);
-    if (!deleted) return;
-    if (isDatabaseMode) setDatabaseDocuments((current) => current.filter((document) => document.id !== documentId));
+    setDocumentError("");
+    const document = workspaceDocuments.find((item) => item.id === documentId);
+    if (!window.confirm(`Delete "${document?.fileName || document?.name || "this document"}"? This cannot be undone.`)) return;
+
+    try {
+      if (isDatabaseMode && supabase && document?.storagePath) {
+        await removeDocumentFile({ supabase, path: document.storagePath });
+      }
+      const deleted = await documentsRepo.deleteDocument(documentId);
+      if (!deleted) return;
+      if (isDatabaseMode) setDatabaseDocuments((current) => current.filter((document) => document.id !== documentId));
+    } catch (error) {
+      setDocumentError(error instanceof Error ? error.message : "Unable to delete document.");
+    }
+  }
+
+  async function downloadDocument(document: StoredDocument) {
+    setDocumentError("");
+
+    try {
+      if (!isDatabaseMode || !supabase || !document.storagePath) {
+        setDocumentError("This document does not have a stored cloud file yet.");
+        return;
+      }
+
+      const url = await createDocumentDownloadUrl({ supabase, path: document.storagePath });
+      window.open(url, "_blank", "noopener,noreferrer");
+    } catch (error) {
+      setDocumentError(error instanceof Error ? error.message : "Unable to download document.");
+    }
   }
 
   function getClientName(documentClientId: string) {
@@ -180,6 +271,12 @@ export default function DocumentsPage() {
         upload once - extract intended use and data - verify - choose whether to
         create a client, job, quote, invoice, expense, or calendar item.
       </div>
+
+      {documentError && (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
+          {documentError}
+        </div>
+      )}
 
       <div className="overflow-x-auto rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
         <table className="min-w-[900px] w-full">
@@ -244,13 +341,22 @@ export default function DocumentsPage() {
                   </td>
 
                   <td className="px-6 py-4 text-right">
-                    <button
-                      type="button"
-                      onClick={() => deleteDocument(document.id)}
-                      className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700"
-                    >
-                      Delete
-                    </button>
+                    <div className="flex justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => downloadDocument(document)}
+                        className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold hover:bg-gray-100 dark:border-gray-700 dark:hover:bg-gray-800"
+                      >
+                        Download
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => deleteDocument(document.id)}
+                        className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700"
+                      >
+                        Delete
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))
@@ -379,6 +485,25 @@ export default function DocumentsPage() {
 
               <div>
                 <label className="mb-2 block text-base font-medium text-gray-900 dark:text-gray-100 sm:text-lg">
+                  Link Invoice
+                </label>
+
+                <select
+                  value={invoiceId}
+                  onChange={(event) => setInvoiceId(event.target.value)}
+                  className="w-full rounded-lg border border-gray-200 bg-white px-4 py-3 text-base text-gray-950 outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 sm:text-lg"
+                >
+                  <option value="">No invoice</option>
+                  {workspaceInvoices.map((invoice) => (
+                    <option key={invoice.id} value={invoice.id}>
+                      {invoice.invoiceNumber}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="mb-2 block text-base font-medium text-gray-900 dark:text-gray-100 sm:text-lg">
                   File
                 </label>
 
@@ -386,6 +511,7 @@ export default function DocumentsPage() {
                   type="file"
                   onChange={(event) => {
                     const file = event.target.files?.[0];
+                    setSelectedFile(file ?? null);
                     setFileName(file?.name ?? "");
                     setMimeType(file?.type ?? "");
                     setSizeBytes(file?.size ?? 0);
@@ -420,9 +546,10 @@ export default function DocumentsPage() {
                 <button
                   type="button"
                   onClick={saveUploadPlaceholder}
+                  disabled={isSavingDocument}
                   className="w-full rounded-lg bg-blue-600 px-6 py-3 text-base font-semibold text-white hover:bg-blue-700 sm:w-auto sm:text-lg"
                 >
-                  Save Upload Placeholder
+                  {isSavingDocument ? "Uploading..." : "Save Upload"}
                 </button>
               </div>
             </form>

@@ -1,6 +1,6 @@
 import { readStoredJson, storageKeys, writeStoredJson } from "@/lib/clientStorage";
 
-export const invoiceStatuses = ["Draft", "Sent", "Overdue", "Paid"] as const;
+export const invoiceStatuses = ["Estimate", "Draft", "Sent", "Overdue", "Paid"] as const;
 export const discountTypes = ["None", "Percent", "Fixed"] as const;
 
 export type InvoiceStatus = (typeof invoiceStatuses)[number];

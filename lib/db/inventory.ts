@@ -10,27 +10,27 @@ export function createInventoryRepository({ isSignedIn, supabase, localItems, se
     async getInventoryItems(workspaceId: string) {
       if (!useDb) return localItems.filter((i) => i.workspaceId === workspaceId);
       const { data, error } = await supabase.from("inventory_items").select("*").eq("workspace_id", workspaceId).order("name");
-      if (error) return console.error("Unable to load inventory.", error), [];
+      if (error) throw new Error(error.message || "Unable to load inventory.");
       return ((data ?? []) as DbItem[]).map(dbToItem);
     },
     async createInventoryItem(item: InventoryRow) {
       if (!useDb) return setLocalItems((c) => [...c, item]), item;
       const { data, error } = await supabase.from("inventory_items").insert({ workspace_id: item.workspaceId, name: item.name, current_qty: item.currentQty, target_qty: item.targetQty }).select("*").single();
-      if (error) return console.error("Unable to create inventory item.", error), null;
+      if (error) throw new Error(error.message || "Unable to create inventory item.");
       return dbToItem(data as DbItem);
     },
     async updateInventoryItem(item: InventoryRow) {
       if (!useDb) return setLocalItems((c) => c.map((i) => i.workspaceId === item.workspaceId && i.name.toLowerCase() === item.name.toLowerCase() ? item : i)), item;
       const query = supabase.from("inventory_items").update({ name: item.name, current_qty: item.currentQty, target_qty: item.targetQty });
       const { data, error } = item.id ? await query.eq("id", item.id).select("*").single() : await query.eq("workspace_id", item.workspaceId).ilike("name", item.name).select("*").single();
-      if (error) return console.error("Unable to update inventory.", error), null;
+      if (error) throw new Error(error.message || "Unable to update inventory.");
       return dbToItem(data as DbItem);
     },
     async deleteInventoryItem(item: InventoryRow) {
       if (!useDb) return setLocalItems((c) => c.filter((i) => !(i.workspaceId === item.workspaceId && i.name === item.name))), true;
       const query = supabase.from("inventory_items").delete();
       const { error } = item.id ? await query.eq("id", item.id) : await query.eq("workspace_id", item.workspaceId).eq("name", item.name);
-      if (error) return console.error("Unable to delete inventory.", error), false;
+      if (error) throw new Error(error.message || "Unable to delete inventory.");
       return true;
     },
   };

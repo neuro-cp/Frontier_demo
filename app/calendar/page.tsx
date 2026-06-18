@@ -10,6 +10,7 @@ import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
 import type { ClientRow } from "@/lib/clientTypes";
 import { createCalendarEventsRepository, type ClientCalendarEvent } from "@/lib/db/calendarEvents";
 import { createClientsRepository } from "@/lib/db/clients";
+import { createJobsRepository } from "@/lib/db/jobs";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 
 function getJobColor(status: string) {
@@ -46,7 +47,8 @@ export default function CalendarPage() {
   const isDatabaseMode = Boolean(isSupabaseConfigured && user);
 
   const [view, setView] = useState("month");
-  const [jobItems] = useStoredJsonState<Job[]>(storageKeys.jobs, []);
+  const [localJobItems, setLocalJobItems] = useStoredJsonState<Job[]>(storageKeys.jobs, []);
+  const [databaseJobItems, setDatabaseJobItems] = useState<Job[]>([]);
   const [localClientItems, setLocalClientItems] = useStoredJsonState<ClientRow[]>(
     storageKeys.clients,
     []
@@ -56,6 +58,8 @@ export default function CalendarPage() {
   >(storageKeys.clientCalendarEvents, []);
   const [databaseClientItems, setDatabaseClientItems] = useState<ClientRow[]>([]);
   const [databaseClientEvents, setDatabaseClientEvents] = useState<ClientCalendarEvent[]>([]);
+  const [isLoadingData, setIsLoadingData] = useState(false);
+  const [dataError, setDataError] = useState("");
   const [currentMonth, setCurrentMonth] = useState(() => {
     const today = new Date();
     return new Date(today.getFullYear(), today.getMonth(), 1);
@@ -69,17 +73,33 @@ export default function CalendarPage() {
   const supabase = useMemo(() => (isDatabaseMode ? createBrowserSupabaseClient() : null), [isDatabaseMode]);
   const eventsRepo = useMemo(() => createCalendarEventsRepository({ isSignedIn: isDatabaseMode, supabase, localEvents: localClientEvents, setLocalEvents: setLocalClientEvents }), [isDatabaseMode, localClientEvents, setLocalClientEvents, supabase]);
   const clientsRepo = useMemo(() => createClientsRepository({ isSignedIn: isDatabaseMode, supabase, localClients: localClientItems, setLocalClients: setLocalClientItems }), [isDatabaseMode, localClientItems, setLocalClientItems, supabase]);
+  const jobsRepo = useMemo(() => createJobsRepository({ isSignedIn: isDatabaseMode, supabase, localJobs: localJobItems, setLocalJobs: setLocalJobItems }), [isDatabaseMode, localJobItems, setLocalJobItems, supabase]);
   const clientItems = isDatabaseMode ? databaseClientItems : localClientItems;
   const clientEvents = isDatabaseMode ? databaseClientEvents : localClientEvents;
+  const jobItems = isDatabaseMode ? databaseJobItems : localJobItems;
 
   useEffect(() => {
     if (!isDatabaseMode) return;
     let cancelled = false;
-    Promise.all([clientsRepo.getClients(activeWorkspace.id), eventsRepo.getEvents(activeWorkspace.id)]).then(([clients, events]) => {
-      if (!cancelled) { setDatabaseClientItems(clients); setDatabaseClientEvents(events); }
+    queueMicrotask(() => {
+      if (!cancelled) {
+        setIsLoadingData(true);
+        setDataError("");
+      }
+    });
+    Promise.all([
+      clientsRepo.getClients(activeWorkspace.id),
+      eventsRepo.getEvents(activeWorkspace.id),
+      jobsRepo.getJobs(activeWorkspace.id),
+    ]).then(([clients, events, jobs]) => {
+      if (!cancelled) { setDatabaseClientItems(clients); setDatabaseClientEvents(events); setDatabaseJobItems(jobs); }
+    }).catch((error) => {
+      if (!cancelled) setDataError(error instanceof Error ? error.message : "Unable to load calendar.");
+    }).finally(() => {
+      if (!cancelled) setIsLoadingData(false);
     });
     return () => { cancelled = true; };
-  }, [activeWorkspace.id, clientsRepo, eventsRepo, isDatabaseMode]);
+  }, [activeWorkspace.id, clientsRepo, eventsRepo, isDatabaseMode, jobsRepo]);
 
   const workspaceClients = clientItems.filter(
     (client) => client.workspaceId === activeWorkspace.id
@@ -144,11 +164,16 @@ export default function CalendarPage() {
       date: clientEventDate,
     };
 
-    const created = await eventsRepo.createEvent(newEvent);
-    if (!created) return;
-    if (isDatabaseMode) setDatabaseClientEvents((current) => [...current, created]);
-    else saveClientEvents([...clientEvents, created]);
-    closeClientEventModal();
+    try {
+      const created = await eventsRepo.createEvent(newEvent);
+      if (!created) return;
+      if (isDatabaseMode) setDatabaseClientEvents((current) => [...current, created]);
+      else saveClientEvents([...clientEvents, created]);
+      setDataError("");
+      closeClientEventModal();
+    } catch (error) {
+      setDataError(error instanceof Error ? error.message : "Unable to create calendar event.");
+    }
   }
 
   function getClientEventDisplayName(event: ClientCalendarEvent) {
@@ -188,6 +213,18 @@ export default function CalendarPage() {
           <button type="button" onClick={() => setClientEventOpen(true)} className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700">+ Client Event</button>
         </div>
       </div>
+
+      {dataError && (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
+          {dataError}
+        </div>
+      )}
+
+      {isLoadingData && (
+        <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-700 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-300">
+          Loading calendar...
+        </div>
+      )}
 
       <div className="rounded-2xl bg-white p-4 shadow dark:bg-gray-900 sm:p-6">
         {view === "month" && (

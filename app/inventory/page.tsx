@@ -5,6 +5,7 @@ import { useAuthSession } from "@/components/AuthSessionProvider";
 import { useWorkspace } from "@/components/WorkspaceContext";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
 import { createInventoryRepository, type InventoryRow } from "@/lib/db/inventory";
+import { createJobsRepository } from "@/lib/db/jobs";
 import type { Job } from "@/lib/jobTypes";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 
@@ -18,7 +19,10 @@ export default function InventoryPage() {
     []
   );
   const [databaseInventoryItems, setDatabaseInventoryItems] = useState<InventoryRow[]>([]);
-  const [jobItems] = useStoredJsonState<Job[]>(storageKeys.jobs, []);
+  const [localJobItems, setLocalJobItems] = useStoredJsonState<Job[]>(storageKeys.jobs, []);
+  const [databaseJobItems, setDatabaseJobItems] = useState<Job[]>([]);
+  const [isLoadingData, setIsLoadingData] = useState(false);
+  const [dataError, setDataError] = useState("");
   const [selectedItems, setSelectedItems] = useState<string[]>([]);
 
   const [newItemOpen, setNewItemOpen] = useState(false);
@@ -33,14 +37,34 @@ export default function InventoryPage() {
 
   const supabase = useMemo(() => (isDatabaseMode ? createBrowserSupabaseClient() : null), [isDatabaseMode]);
   const inventoryRepo = useMemo(() => createInventoryRepository({ isSignedIn: isDatabaseMode, supabase, localItems: localInventoryItems, setLocalItems: setLocalInventoryItems }), [isDatabaseMode, localInventoryItems, setLocalInventoryItems, supabase]);
+  const jobsRepo = useMemo(() => createJobsRepository({ isSignedIn: isDatabaseMode, supabase, localJobs: localJobItems, setLocalJobs: setLocalJobItems }), [isDatabaseMode, localJobItems, setLocalJobItems, supabase]);
   const inventoryItems = isDatabaseMode ? databaseInventoryItems : localInventoryItems;
+  const jobItems = isDatabaseMode ? databaseJobItems : localJobItems;
 
   useEffect(() => {
     if (!isDatabaseMode) return;
     let cancelled = false;
-    inventoryRepo.getInventoryItems(activeWorkspace.id).then((items) => { if (!cancelled) setDatabaseInventoryItems(items); });
+    queueMicrotask(() => {
+      if (!cancelled) {
+        setIsLoadingData(true);
+        setDataError("");
+      }
+    });
+    Promise.all([
+      inventoryRepo.getInventoryItems(activeWorkspace.id),
+      jobsRepo.getJobs(activeWorkspace.id),
+    ]).then(([items, jobs]) => {
+      if (!cancelled) {
+        setDatabaseInventoryItems(items);
+        setDatabaseJobItems(jobs);
+      }
+    }).catch((error) => {
+      if (!cancelled) setDataError(error instanceof Error ? error.message : "Unable to load inventory.");
+    }).finally(() => {
+      if (!cancelled) setIsLoadingData(false);
+    });
     return () => { cancelled = true; };
-  }, [activeWorkspace.id, inventoryRepo, isDatabaseMode]);
+  }, [activeWorkspace.id, inventoryRepo, isDatabaseMode, jobsRepo]);
 
   const workspaceInventory = inventoryItems.filter(
     (item) => item.workspaceId === activeWorkspace.id
@@ -109,10 +133,15 @@ export default function InventoryPage() {
   }
 
   async function removeSelectedItems() {
-    const selected = inventoryItems.filter((item) => selectedItems.includes(item.name));
-    await Promise.all(selected.map((item) => inventoryRepo.deleteInventoryItem(item)));
-    saveInventory(inventoryItems.filter((item) => !selectedItems.includes(item.name)));
-    setSelectedItems([]);
+    try {
+      const selected = inventoryItems.filter((item) => selectedItems.includes(item.name));
+      await Promise.all(selected.map((item) => inventoryRepo.deleteInventoryItem(item)));
+      saveInventory(inventoryItems.filter((item) => !selectedItems.includes(item.name)));
+      setSelectedItems([]);
+      setDataError("");
+    } catch (error) {
+      setDataError(error instanceof Error ? error.message : "Unable to delete inventory.");
+    }
   }
 
   function resetNewItemForm() {
@@ -141,11 +170,16 @@ export default function InventoryPage() {
       workspaceId: activeWorkspace.id,
     };
 
-    const created = await inventoryRepo.createInventoryItem(newItem);
-    if (!created) return;
-    if (isDatabaseMode) setDatabaseInventoryItems((current) => [...current, created]);
-    else saveInventory([...inventoryItems, created]);
-    closeNewItemModal();
+    try {
+      const created = await inventoryRepo.createInventoryItem(newItem);
+      if (!created) return;
+      if (isDatabaseMode) setDatabaseInventoryItems((current) => [...current, created]);
+      else saveInventory([...inventoryItems, created]);
+      setDataError("");
+      closeNewItemModal();
+    } catch (error) {
+      setDataError(error instanceof Error ? error.message : "Unable to create inventory item.");
+    }
   }
 
   function openTargetEditor(item: InventoryRow) {
@@ -196,18 +230,23 @@ export default function InventoryPage() {
         )
       : [...inventoryItems, updatedItem];
 
-    const saved = await inventoryRepo.updateInventoryItem(updatedItem);
-    if (!saved) return;
-    if (isDatabaseMode) {
-      setDatabaseInventoryItems((current) =>
-        existingItem
-          ? current.map((item) => item.name.trim().toLowerCase() === editingItemName.trim().toLowerCase() ? saved : item)
-          : [...current, saved]
-      );
-    } else {
-      saveInventory(updatedItems);
+    try {
+      const saved = await inventoryRepo.updateInventoryItem(updatedItem);
+      if (!saved) return;
+      if (isDatabaseMode) {
+        setDatabaseInventoryItems((current) =>
+          existingItem
+            ? current.map((item) => item.name.trim().toLowerCase() === editingItemName.trim().toLowerCase() ? saved : item)
+            : [...current, saved]
+        );
+      } else {
+        saveInventory(updatedItems);
+      }
+      setDataError("");
+      closeTargetEditor();
+    } catch (error) {
+      setDataError(error instanceof Error ? error.message : "Unable to update inventory.");
     }
-    closeTargetEditor();
   }
 
   return (
@@ -226,6 +265,18 @@ export default function InventoryPage() {
       <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-200">
         Use the Actions column to update inventory quantities and thresholds.
       </div>
+
+      {dataError && (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
+          {dataError}
+        </div>
+      )}
+
+      {isLoadingData && (
+        <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-700 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-300">
+          Loading inventory...
+        </div>
+      )}
 
       <div className="overflow-x-auto rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
         <table className="min-w-[1180px] w-full">

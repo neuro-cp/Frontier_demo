@@ -51,39 +51,45 @@ export function createInvoicesRepository({ isSignedIn, supabase, localInvoices, 
   const useDb = isSignedIn && supabase;
   async function saveLines(invoice: InvoiceRow) {
     if (!useDb) return;
-    await supabase.from("invoice_line_items").delete().eq("invoice_id", invoice.id);
-    if (invoice.lineItems.length) await supabase.from("invoice_line_items").insert(invoice.lineItems.map((l: InvoiceLineItem, index) => ({ id: l.id, workspace_id: invoice.workspaceId, invoice_id: invoice.id, description: l.description, quantity: l.quantity, unit_price_cents: moneyStringToCents(l.unitPrice), sort_order: index })));
+    const { error: deleteError } = await supabase.from("invoice_line_items").delete().eq("invoice_id", invoice.id);
+    if (deleteError) throw new Error(deleteError.message || "Unable to replace invoice lines.");
+    if (invoice.lineItems.length) {
+      const { error } = await supabase.from("invoice_line_items").insert(invoice.lineItems.map((l: InvoiceLineItem, index) => ({ id: l.id, workspace_id: invoice.workspaceId, invoice_id: invoice.id, description: l.description, quantity: l.quantity, unit_price_cents: moneyStringToCents(l.unitPrice), sort_order: index })));
+      if (error) throw new Error(error.message || "Unable to save invoice lines.");
+    }
   }
   return {
     async getInvoices(workspaceId: string) {
       if (!useDb) return localInvoices.filter((i) => i.workspaceId === workspaceId);
       const { data, error } = await supabase.from("invoices").select(selectInvoice).eq("workspace_id", workspaceId).order("invoice_date", { ascending: false });
-      if (error) return console.error("Unable to load invoices.", error), [];
+      if (error) throw new Error(error.message || "Unable to load invoices.");
       return (data ?? []).map(dbToInvoice);
     },
-    async getInvoiceById(id: string) {
-      if (!useDb) return localInvoices.find((i) => i.id === id) ?? null;
-      const { data, error } = await supabase.from("invoices").select(selectInvoice).eq("id", id).maybeSingle();
-      if (error) return console.error("Unable to load invoice.", error), null;
+    async getInvoiceById(id: string, workspaceId?: string) {
+      if (!useDb) return localInvoices.find((i) => i.id === id && (!workspaceId || i.workspaceId === workspaceId)) ?? null;
+      let query = supabase.from("invoices").select(selectInvoice).eq("id", id);
+      if (workspaceId) query = query.eq("workspace_id", workspaceId);
+      const { data, error } = await query.maybeSingle();
+      if (error) throw new Error(error.message || "Unable to load invoice.");
       return data ? dbToInvoice(data) : null;
     },
     async createInvoice(invoice: InvoiceRow) {
       if (!useDb) return setLocalInvoices((c) => [...c, invoice]), invoice;
       const { error } = await supabase.from("invoices").insert(invoiceToDb(invoice));
-      if (error) return console.error("Unable to create invoice.", error), null;
+      if (error) throw new Error(error.message || "Unable to create invoice.");
       await saveLines(invoice); return invoice;
     },
     async updateInvoice(invoice: InvoiceRow) {
       if (!useDb) return setLocalInvoices((c) => c.map((i) => i.id === invoice.id ? invoice : i)), invoice;
       const values = invoiceToDb(invoice); delete (values as { id?: string }).id;
       const { error } = await supabase.from("invoices").update(values).eq("id", invoice.id);
-      if (error) return console.error("Unable to update invoice.", error), null;
+      if (error) throw new Error(error.message || "Unable to update invoice.");
       await saveLines(invoice); return invoice;
     },
     async deleteInvoice(id: string) {
       if (!useDb) return setLocalInvoices((c) => c.filter((i) => i.id !== id)), true;
       const { error } = await supabase.from("invoices").delete().eq("id", id);
-      if (error) return console.error("Unable to delete invoice.", error), false;
+      if (error) throw new Error(error.message || "Unable to delete invoice.");
       return true;
     },
   };

@@ -1,19 +1,24 @@
 "use client";
 
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
 import StatCard from "../../components/Statcard";
+import { useAuthSession } from "@/components/AuthSessionProvider";
 import { useWorkspace } from "@/components/WorkspaceContext";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
 import type { Job } from "@/lib/jobTypes";
 import type { ClientRow } from "@/lib/clientTypes";
 import type { Expense } from "@/lib/expenseTypes";
+import { createClientsRepository } from "@/lib/db/clients";
+import { createExpensesRepository, type ExpenseRow } from "@/lib/db/expenses";
+import { createInventoryRepository, type InventoryRow } from "@/lib/db/inventory";
+import { createInvoicesRepository } from "@/lib/db/invoices";
+import { createJobsRepository } from "@/lib/db/jobs";
 import { getInvoiceTotals, InvoiceRow } from "@/lib/frontierInvoices";
-
-type DashboardInventoryItem = {
-  workspaceId: string;
-  warning: boolean;
-};
+import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 
 function moneyToNumber(value: string) {
   return Number(value.replace(/[$,]/g, ""));
@@ -25,24 +30,67 @@ function formatMoney(value: number) {
 
 export default function DashboardPage() {
   const { activeWorkspace } = useWorkspace();
+  const { isSupabaseConfigured, user } = useAuthSession();
+  const isDatabaseMode = Boolean(isSupabaseConfigured && user);
 
-  const [jobItems] = useStoredJsonState<Job[]>(storageKeys.jobs, []);
-  const [clientItems] = useStoredJsonState<ClientRow[]>(
+  const [localJobItems, setLocalJobItems] = useStoredJsonState<Job[]>(storageKeys.jobs, []);
+  const [localClientItems, setLocalClientItems] = useStoredJsonState<ClientRow[]>(
     storageKeys.clients,
     []
   );
-  const [invoiceItems] = useStoredJsonState<InvoiceRow[]>(
+  const [localInvoiceItems, setLocalInvoiceItems] = useStoredJsonState<InvoiceRow[]>(
     storageKeys.invoices,
     []
   );
-  const [inventoryItems] = useStoredJsonState<DashboardInventoryItem[]>(
+  const [localInventoryItems, setLocalInventoryItems] = useStoredJsonState<InventoryRow[]>(
     storageKeys.inventory,
     []
   );
-  const [expenseItems] = useStoredJsonState<Expense[]>(
+  const [localExpenseItems, setLocalExpenseItems] = useStoredJsonState<Expense[]>(
     storageKeys.expenses,
     []
   );
+  const [databaseJobItems, setDatabaseJobItems] = useState<Job[]>([]);
+  const [databaseClientItems, setDatabaseClientItems] = useState<ClientRow[]>([]);
+  const [databaseInvoiceItems, setDatabaseInvoiceItems] = useState<InvoiceRow[]>([]);
+  const [databaseInventoryItems, setDatabaseInventoryItems] = useState<InventoryRow[]>([]);
+  const [databaseExpenseItems, setDatabaseExpenseItems] = useState<ExpenseRow[]>([]);
+
+  const supabase = useMemo(() => (isDatabaseMode ? createBrowserSupabaseClient() : null), [isDatabaseMode]);
+  const jobsRepo = useMemo(() => createJobsRepository({ isSignedIn: isDatabaseMode, supabase, localJobs: localJobItems, setLocalJobs: setLocalJobItems }), [isDatabaseMode, localJobItems, setLocalJobItems, supabase]);
+  const clientsRepo = useMemo(() => createClientsRepository({ isSignedIn: isDatabaseMode, supabase, localClients: localClientItems, setLocalClients: setLocalClientItems }), [isDatabaseMode, localClientItems, setLocalClientItems, supabase]);
+  const invoicesRepo = useMemo(() => createInvoicesRepository({ isSignedIn: isDatabaseMode, supabase, localInvoices: localInvoiceItems, setLocalInvoices: setLocalInvoiceItems }), [isDatabaseMode, localInvoiceItems, setLocalInvoiceItems, supabase]);
+  const inventoryRepo = useMemo(() => createInventoryRepository({ isSignedIn: isDatabaseMode, supabase, localItems: localInventoryItems, setLocalItems: setLocalInventoryItems }), [isDatabaseMode, localInventoryItems, setLocalInventoryItems, supabase]);
+  const expensesRepo = useMemo(() => createExpensesRepository({ isSignedIn: isDatabaseMode, supabase, localExpenses: localExpenseItems as ExpenseRow[], setLocalExpenses: setLocalExpenseItems as (value: ExpenseRow[] | ((current: ExpenseRow[]) => ExpenseRow[])) => void }), [isDatabaseMode, localExpenseItems, setLocalExpenseItems, supabase]);
+
+  useEffect(() => {
+    if (!isDatabaseMode) return;
+    let cancelled = false;
+    Promise.all([
+      jobsRepo.getJobs(activeWorkspace.id),
+      clientsRepo.getClients(activeWorkspace.id),
+      invoicesRepo.getInvoices(activeWorkspace.id),
+      inventoryRepo.getInventoryItems(activeWorkspace.id),
+      expensesRepo.getExpenses(activeWorkspace.id),
+    ]).then(([jobs, clients, invoices, inventory, expenses]) => {
+      if (!cancelled) {
+        setDatabaseJobItems(jobs);
+        setDatabaseClientItems(clients);
+        setDatabaseInvoiceItems(invoices);
+        setDatabaseInventoryItems(inventory);
+        setDatabaseExpenseItems(expenses);
+      }
+    }).catch((error) => {
+      console.error("Unable to load dashboard data.", error);
+    });
+    return () => { cancelled = true; };
+  }, [activeWorkspace.id, clientsRepo, expensesRepo, inventoryRepo, invoicesRepo, isDatabaseMode, jobsRepo]);
+
+  const jobItems = isDatabaseMode ? databaseJobItems : localJobItems;
+  const clientItems = isDatabaseMode ? databaseClientItems : localClientItems;
+  const invoiceItems = isDatabaseMode ? databaseInvoiceItems : localInvoiceItems;
+  const inventoryItems = isDatabaseMode ? databaseInventoryItems : localInventoryItems;
+  const expenseItems = isDatabaseMode ? databaseExpenseItems : localExpenseItems;
 
   const workspaceClients = clientItems.filter(
     (client) => client.workspaceId === activeWorkspace.id

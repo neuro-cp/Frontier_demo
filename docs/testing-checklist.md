@@ -61,6 +61,22 @@
 - Add/select client locations where available.
 - Confirm Google Maps route export is only enabled with at least two stops.
 
+## Core DB Migration
+
+- Sign out and confirm clients, jobs, invoices, inventory, and calendar still use localStorage fallback.
+- Sign in and create a workspace.
+- Create a client, refresh, and confirm it persists from Supabase.
+- Create a job linked to that client with materials and a scheduled date.
+- Open the job detail page and confirm client, materials, date, notes, and status render.
+- Open Calendar and confirm the DB-backed scheduled job appears in month, week, and agenda views.
+- Open Inventory and confirm scheduled/completed job materials appear as reserved job material rows.
+- Add a real inventory item matching a job material and confirm reserved/available/suggested order values update.
+- Create an invoice from the job and confirm the job/client link is preserved.
+- Open the invoice detail page and confirm print/email controls still render.
+- Mark an invoice Paid and confirm Financials revenue/outstanding totals update from Supabase data.
+- Switch workspaces and confirm clients, jobs, invoices, inventory, and calendar data are isolated.
+- Try opening a client/job/invoice id from a different workspace and confirm it does not load.
+
 ## Known Limits
 
 - Admin console is read-only.

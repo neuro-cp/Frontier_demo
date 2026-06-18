@@ -33,7 +33,12 @@ export function forbiddenResponse(message = "Access denied.") {
 }
 
 export function serverErrorResponse(error: unknown) {
-  const message = error instanceof Error ? error.message : "Server error.";
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === "object" && error !== null && "message" in error
+        ? String(error.message)
+        : "Server error.";
   return NextResponse.json({ error: message }, { status: 500 });
 }
 

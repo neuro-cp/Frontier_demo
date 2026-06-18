@@ -6,10 +6,13 @@ import { useParams } from "next/navigation";
 
 import { useAuthSession } from "@/components/AuthSessionProvider";
 import { useWorkspace } from "@/components/WorkspaceContext";
+import DocumentAttachments from "@/app/documents/DocumentAttachments";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
 import type { Job } from "@/lib/jobTypes";
 import type { ClientRow } from "@/lib/clientTypes";
 import { createClientsRepository } from "@/lib/db/clients";
+import { createInvoicesRepository } from "@/lib/db/invoices";
+import { createJobsRepository } from "@/lib/db/jobs";
 import {
   formatCurrency,
   getInvoiceTotals,
@@ -31,11 +34,13 @@ export default function ClientPage() {
   const [databaseClient, setDatabaseClient] = useState<ClientRow | null>(null);
   const [isLoadingClient, setIsLoadingClient] = useState(false);
   const [clientLoadError, setClientLoadError] = useState<string | null>(null);
-  const [jobs] = useStoredJsonState<Job[]>(storageKeys.jobs, []);
-  const [invoices] = useStoredJsonState<InvoiceRow[]>(
+  const [localJobs, setLocalJobs] = useStoredJsonState<Job[]>(storageKeys.jobs, []);
+  const [localInvoices, setLocalInvoices] = useStoredJsonState<InvoiceRow[]>(
     storageKeys.invoices,
     []
   );
+  const [databaseJobs, setDatabaseJobs] = useState<Job[]>([]);
+  const [databaseInvoices, setDatabaseInvoices] = useState<InvoiceRow[]>([]);
 
   const supabase = useMemo(
     () => (isDatabaseMode ? createBrowserSupabaseClient() : null),
@@ -50,6 +55,26 @@ export default function ClientPage() {
         setLocalClients,
       }),
     [isDatabaseMode, localClients, setLocalClients, supabase]
+  );
+  const jobsRepository = useMemo(
+    () =>
+      createJobsRepository({
+        isSignedIn: isDatabaseMode,
+        supabase,
+        localJobs,
+        setLocalJobs,
+      }),
+    [isDatabaseMode, localJobs, setLocalJobs, supabase]
+  );
+  const invoicesRepository = useMemo(
+    () =>
+      createInvoicesRepository({
+        isSignedIn: isDatabaseMode,
+        supabase,
+        localInvoices,
+        setLocalInvoices,
+      }),
+    [isDatabaseMode, localInvoices, setLocalInvoices, supabase]
   );
 
   useEffect(() => {
@@ -69,6 +94,16 @@ export default function ClientPage() {
       if (!cancelled) {
         setDatabaseClient(loadedClient);
         setClientLoadError(null);
+        if (loadedClient) {
+          const [jobs, invoices] = await Promise.all([
+            jobsRepository.getJobs(loadedClient.workspaceId),
+            invoicesRepository.getInvoices(loadedClient.workspaceId),
+          ]);
+          if (!cancelled) {
+            setDatabaseJobs(jobs);
+            setDatabaseInvoices(invoices);
+          }
+        }
       }
     }
 
@@ -89,11 +124,13 @@ export default function ClientPage() {
     return () => {
       cancelled = true;
     };
-  }, [activeWorkspace.id, clientsRepository, id, isDatabaseMode]);
+  }, [activeWorkspace.id, clientsRepository, id, invoicesRepository, isDatabaseMode, jobsRepository]);
 
   const client = isDatabaseMode
     ? databaseClient
     : localClients.find((clientItem) => clientItem.id === id);
+  const jobs = isDatabaseMode ? databaseJobs : localJobs;
+  const invoices = isDatabaseMode ? databaseInvoices : localInvoices;
 
   const clientJobs = useMemo(() => {
     if (!client) return [];
@@ -214,6 +251,12 @@ export default function ClientPage() {
           <p className="text-gray-500 dark:text-gray-400">No invoices found for this client.</p>
         )}
       </div>
+
+      <DocumentAttachments
+        workspaceId={client.workspaceId}
+        clientId={client.id}
+        title="Client Documents"
+      />
     </div>
   );
 }

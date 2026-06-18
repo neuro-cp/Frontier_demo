@@ -93,6 +93,7 @@ export default function ClientsPage() {
     []
   );
   const [databaseClientItems, setDatabaseClientItems] = useState<ClientRow[]>([]);
+  const [isLoadingClients, setIsLoadingClients] = useState(false);
   const [clientLoadError, setClientLoadError] = useState<string | null>(null);
   const [jobItems] = useStoredJsonState<ClientLinkedJob[]>(
     storageKeys.jobs,
@@ -155,11 +156,12 @@ export default function ClientsPage() {
     let cancelled = false;
 
     async function loadClients() {
+      setIsLoadingClients(true);
+      setClientLoadError(null);
       const clients = await clientsRepository.getClients(activeWorkspace.id);
 
       if (!cancelled) {
         setDatabaseClientItems(clients);
-        setClientLoadError(null);
       }
     }
 
@@ -167,7 +169,13 @@ export default function ClientsPage() {
       console.error("Unable to load clients.", error);
 
       if (!cancelled) {
-        setClientLoadError("Unable to load clients.");
+        setClientLoadError(
+          error instanceof Error ? error.message : "Unable to load clients."
+        );
+      }
+    }).finally(() => {
+      if (!cancelled) {
+        setIsLoadingClients(false);
       }
     });
 
@@ -333,15 +341,22 @@ export default function ClientsPage() {
       notes: clientNotes.trim(),
     };
 
-    const createdClient = await clientsRepository.createClient(newClient);
+    try {
+      const createdClient = await clientsRepository.createClient(newClient);
 
-    if (!createdClient) return;
+      if (!createdClient) return;
 
-    if (isDatabaseMode) {
-      setDatabaseClientItems((current) => [...current, createdClient]);
+      if (isDatabaseMode) {
+        setDatabaseClientItems((current) => [...current, createdClient]);
+      }
+
+      setClientLoadError(null);
+      closeClientModals();
+    } catch (error) {
+      setClientLoadError(
+        error instanceof Error ? error.message : "Unable to create client."
+      );
     }
-
-    closeClientModals();
   }
 
   function openEditClient(client: ClientRow) {
@@ -388,45 +403,59 @@ export default function ClientsPage() {
       notes: clientNotes.trim(),
     };
 
-    const savedClient = await clientsRepository.updateClient(updatedClient);
+    try {
+      const savedClient = await clientsRepository.updateClient(updatedClient);
 
-    if (!savedClient) return;
+      if (!savedClient) return;
 
-    if (isDatabaseMode) {
-      setDatabaseClientItems((current) =>
-        current.map((client) =>
-          client.id === savedClient.id ? savedClient : client
-        )
+      if (isDatabaseMode) {
+        setDatabaseClientItems((current) =>
+          current.map((client) =>
+            client.id === savedClient.id ? savedClient : client
+          )
+        );
+      }
+
+      setClientLoadError(null);
+      closeClientModals();
+    } catch (error) {
+      setClientLoadError(
+        error instanceof Error ? error.message : "Unable to update client."
       );
     }
-
-    closeClientModals();
   }
 
   async function removeSelectedClients() {
-    const deleteResults = await Promise.all(
-      selectedClientRows.map(async (client) => ({
-        id: client.id,
-        deleted: await clientsRepository.deleteClient(
-          client.id,
-          client.workspaceId
-        ),
-      }))
-    );
-    const deletedClientIds = deleteResults
-      .filter((result) => result.deleted)
-      .map((result) => result.id);
+    try {
+      const deleteResults = await Promise.all(
+        selectedClientRows.map(async (client) => ({
+          id: client.id,
+          deleted: await clientsRepository.deleteClient(
+            client.id,
+            client.workspaceId
+          ),
+        }))
+      );
+      const deletedClientIds = deleteResults
+        .filter((result) => result.deleted)
+        .map((result) => result.id);
 
-    if (isDatabaseMode) {
-      setDatabaseClientItems((current) =>
-        current.filter((client) => !deletedClientIds.includes(client.id))
+      if (isDatabaseMode) {
+        setDatabaseClientItems((current) =>
+          current.filter((client) => !deletedClientIds.includes(client.id))
+        );
+      }
+
+      setSelectedClients((current) =>
+        current.filter((clientId) => !deletedClientIds.includes(clientId))
+      );
+      setClientLoadError(null);
+      setShowDeleteModal(false);
+    } catch (error) {
+      setClientLoadError(
+        error instanceof Error ? error.message : "Unable to delete clients."
       );
     }
-
-    setSelectedClients((current) =>
-      current.filter((clientId) => !deletedClientIds.includes(clientId))
-    );
-    setShowDeleteModal(false);
   }
 
   return (
@@ -462,6 +491,12 @@ export default function ClientsPage() {
       {clientLoadError && (
         <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
           {clientLoadError}
+        </div>
+      )}
+
+      {isLoadingClients && (
+        <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-700 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-300">
+          Loading clients...
         </div>
       )}
 

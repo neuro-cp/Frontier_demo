@@ -4,10 +4,12 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 
+import DocumentAttachments from "@/app/documents/DocumentAttachments";
 import { useAuthSession } from "@/components/AuthSessionProvider";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
 import type { ClientRow } from "@/lib/clientTypes";
 import { createClientsRepository } from "@/lib/db/clients";
+import { createInvoicesRepository } from "@/lib/db/invoices";
 import { createJobsRepository } from "@/lib/db/jobs";
 import type { Job, JobMaterial, JobStatus } from "@/lib/jobTypes";
 import {
@@ -52,10 +54,13 @@ export default function JobPage() {
   );
   const [databaseJob, setDatabaseJob] = useState<Job | null>(null);
   const [databaseClients, setDatabaseClients] = useState<ClientRow[]>([]);
-  const [invoiceItems] = useStoredJsonState<InvoiceRow[]>(
+  const [localInvoiceItems, setLocalInvoiceItems] = useStoredJsonState<InvoiceRow[]>(
     storageKeys.invoices,
     []
   );
+  const [databaseInvoices, setDatabaseInvoices] = useState<InvoiceRow[]>([]);
+  const [isLoadingJob, setIsLoadingJob] = useState(false);
+  const [dataError, setDataError] = useState("");
   const [editOpen, setEditOpen] = useState(false);
 
   const [editName, setEditName] = useState("");
@@ -72,19 +77,40 @@ export default function JobPage() {
   const supabase = useMemo(() => (isDatabaseMode ? createBrowserSupabaseClient() : null), [isDatabaseMode]);
   const jobsRepository = useMemo(() => createJobsRepository({ isSignedIn: isDatabaseMode, supabase, localJobs: localJobItems, setLocalJobs: setLocalJobItems }), [isDatabaseMode, localJobItems, setLocalJobItems, supabase]);
   const clientsRepository = useMemo(() => createClientsRepository({ isSignedIn: isDatabaseMode, supabase, localClients: localClientItems, setLocalClients: setLocalClientItems }), [isDatabaseMode, localClientItems, setLocalClientItems, supabase]);
+  const invoicesRepository = useMemo(() => createInvoicesRepository({ isSignedIn: isDatabaseMode, supabase, localInvoices: localInvoiceItems, setLocalInvoices: setLocalInvoiceItems }), [isDatabaseMode, localInvoiceItems, setLocalInvoiceItems, supabase]);
   const job = isDatabaseMode ? databaseJob : localJobItems.find((item) => item.id === id);
   const clientItems = isDatabaseMode ? databaseClients : localClientItems;
+  const invoiceItems = isDatabaseMode ? databaseInvoices : localInvoiceItems;
 
   useEffect(() => {
     if (!isDatabaseMode) return;
     let cancelled = false;
+    queueMicrotask(() => {
+      if (!cancelled) {
+        setIsLoadingJob(true);
+        setDataError("");
+      }
+    });
     jobsRepository.getJobById(id).then(async (loadedJob) => {
       if (cancelled) return;
       setDatabaseJob(loadedJob);
-      if (loadedJob) setDatabaseClients(await clientsRepository.getClients(loadedJob.workspaceId));
+      if (loadedJob) {
+        const [clients, invoices] = await Promise.all([
+          clientsRepository.getClients(loadedJob.workspaceId),
+          invoicesRepository.getInvoices(loadedJob.workspaceId),
+        ]);
+        if (!cancelled) {
+          setDatabaseClients(clients);
+          setDatabaseInvoices(invoices);
+        }
+      }
+    }).catch((error) => {
+      if (!cancelled) setDataError(error instanceof Error ? error.message : "Unable to load job.");
+    }).finally(() => {
+      if (!cancelled) setIsLoadingJob(false);
     });
     return () => { cancelled = true; };
-  }, [clientsRepository, id, isDatabaseMode, jobsRepository]);
+  }, [clientsRepository, id, invoicesRepository, isDatabaseMode, jobsRepository]);
   const workspaceClients = job
     ? clientItems.filter((client) => client.workspaceId === job.workspaceId)
     : [];
@@ -175,10 +201,23 @@ export default function JobPage() {
       materials: editMaterials,
     };
 
-    const saved = await jobsRepository.updateJob(job.id, updatedJob);
-    if (!saved) return;
-    if (isDatabaseMode) setDatabaseJob(saved);
-    setEditOpen(false);
+    try {
+      const saved = await jobsRepository.updateJob(job.id, updatedJob);
+      if (!saved) return;
+      if (isDatabaseMode) setDatabaseJob(saved);
+      setDataError("");
+      setEditOpen(false);
+    } catch (error) {
+      setDataError(error instanceof Error ? error.message : "Unable to update job.");
+    }
+  }
+
+  if (isLoadingJob) {
+    return (
+      <div className="space-y-4 p-6 text-gray-950 dark:text-gray-100">
+        <h1 className="text-3xl font-bold">Loading job...</h1>
+      </div>
+    );
   }
 
   if (!job) {
@@ -186,7 +225,7 @@ export default function JobPage() {
       <div className="space-y-4 p-6 text-gray-950 dark:text-gray-100">
         <h1 className="text-3xl font-bold">Job not found</h1>
         <p className="text-gray-500 dark:text-gray-400">
-          This job does not exist in the current saved job list.
+          {dataError || "This job does not exist in the current saved job list."}
         </p>
       </div>
     );
@@ -194,6 +233,11 @@ export default function JobPage() {
 
   return (
     <div className="space-y-6 text-gray-950 dark:text-gray-100">
+      {dataError && (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
+          {dataError}
+        </div>
+      )}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className="text-3xl font-bold">{job.name}</h1>
@@ -287,6 +331,12 @@ export default function JobPage() {
           <p className="text-gray-500 dark:text-gray-400">No invoices attached to this job.</p>
         )}
       </div>
+
+      <DocumentAttachments
+        workspaceId={job.workspaceId}
+        jobId={job.id}
+        title="Job Documents"
+      />
 
       {editOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4">

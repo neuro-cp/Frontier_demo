@@ -116,8 +116,7 @@ export function createClientsRepository({
         .order("name", { ascending: true });
 
       if (error) {
-        console.error("Unable to load clients.", error);
-        return [];
+        throw new Error(error.message || "Unable to load clients.");
       }
 
       return ((data ?? []) as ClientDatabaseRow[]).map(
@@ -151,8 +150,7 @@ export function createClientsRepository({
       const { data, error } = await query.maybeSingle();
 
       if (error) {
-        console.error("Unable to load client.", error);
-        return null;
+        throw new Error(error.message || "Unable to load client.");
       }
 
       return data ? mapDatabaseClientToClientRow(data as ClientDatabaseRow) : null;
@@ -173,8 +171,7 @@ export function createClientsRepository({
         .single();
 
       if (error) {
-        console.error("Unable to create client.", error);
-        return null;
+        throw new Error(error.message || "Unable to create client.");
       }
 
       return mapDatabaseClientToClientRow(data as ClientDatabaseRow);
@@ -203,8 +200,7 @@ export function createClientsRepository({
         .single();
 
       if (error) {
-        console.error("Unable to update client.", error);
-        return null;
+        throw new Error(error.message || "Unable to update client.");
       }
 
       return mapDatabaseClientToClientRow(data as ClientDatabaseRow);
@@ -227,8 +223,7 @@ export function createClientsRepository({
       const { error } = await query;
 
       if (error) {
-        console.error("Unable to delete client.", error);
-        return false;
+        throw new Error(error.message || "Unable to delete client.");
       }
 
       return true;

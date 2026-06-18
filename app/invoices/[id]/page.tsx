@@ -2,8 +2,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 
+import DocumentAttachments from "@/app/documents/DocumentAttachments";
 import { useAuthSession } from "@/components/AuthSessionProvider";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
 import { createInvoicesRepository } from "@/lib/db/invoices";
@@ -13,6 +14,8 @@ import {
   getInvoiceClientName,
   getLineTotal,
   InvoiceRow,
+  invoiceStatuses,
+  InvoiceStatus,
   moneyToNumber,
 } from "@/lib/frontierInvoices";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
@@ -23,6 +26,7 @@ const amountColumnWidth = "144px";
 
 export default function InvoiceDetailPage() {
   const params = useParams();
+  const router = useRouter();
   const invoiceId = String(params.id);
   const { isSupabaseConfigured, user } = useAuthSession();
   const isDatabaseMode = Boolean(isSupabaseConfigured && user);
@@ -32,6 +36,8 @@ export default function InvoiceDetailPage() {
     []
   );
   const [databaseInvoice, setDatabaseInvoice] = useState<InvoiceRow | null>(null);
+  const [isLoadingInvoice, setIsLoadingInvoice] = useState(false);
+  const [invoiceError, setInvoiceError] = useState("");
 
   const supabase = useMemo(() => (isDatabaseMode ? createBrowserSupabaseClient() : null), [isDatabaseMode]);
   const invoicesRepo = useMemo(() => createInvoicesRepository({ isSignedIn: isDatabaseMode, supabase, localInvoices, setLocalInvoices }), [isDatabaseMode, localInvoices, setLocalInvoices, supabase]);
@@ -43,9 +49,73 @@ export default function InvoiceDetailPage() {
   useEffect(() => {
     if (!isDatabaseMode) return;
     let cancelled = false;
-    invoicesRepo.getInvoiceById(invoiceId).then((item) => { if (!cancelled) setDatabaseInvoice(item); });
+    queueMicrotask(() => {
+      if (!cancelled) {
+        setIsLoadingInvoice(true);
+        setInvoiceError("");
+      }
+    });
+    invoicesRepo.getInvoiceById(invoiceId).then((item) => { if (!cancelled) setDatabaseInvoice(item); }).catch((error) => {
+      if (!cancelled) setInvoiceError(error instanceof Error ? error.message : "Unable to load invoice.");
+    }).finally(() => {
+      if (!cancelled) setIsLoadingInvoice(false);
+    });
     return () => { cancelled = true; };
   }, [invoiceId, invoicesRepo, isDatabaseMode]);
+
+  async function updateInvoiceStatus(nextStatus: InvoiceStatus) {
+    if (!invoice) return;
+
+    try {
+      const saved = await invoicesRepo.updateInvoice({ ...invoice, status: nextStatus });
+      if (isDatabaseMode) setDatabaseInvoice(saved);
+      else setLocalInvoices((current) => current.map((item) => item.id === invoice.id ? saved : item));
+      setInvoiceError("");
+    } catch (error) {
+      setInvoiceError(error instanceof Error ? error.message : "Unable to update invoice status.");
+    }
+  }
+
+  function getNextInvoiceNumber() {
+    const today = new Date();
+    const stamp = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, "0")}${String(today.getDate()).padStart(2, "0")}`;
+    return `INV-${stamp}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
+  }
+
+  async function duplicateInvoice() {
+    if (!invoice) return;
+
+    const duplicated: InvoiceRow = {
+      ...invoice,
+      id: crypto.randomUUID(),
+      invoiceNumber: getNextInvoiceNumber(),
+      invoiceDate: new Date().toISOString().slice(0, 10),
+      status: invoice.status === "Estimate" ? "Estimate" : "Draft",
+      lineItems: invoice.lineItems.map((item) => ({
+        ...item,
+        id: crypto.randomUUID(),
+      })),
+    };
+
+    try {
+      const saved = await invoicesRepo.createInvoice(duplicated);
+      setInvoiceError("");
+      router.push(`/invoices/${saved.id}`);
+    } catch (error) {
+      setInvoiceError(error instanceof Error ? error.message : "Unable to duplicate invoice.");
+    }
+  }
+
+  if (isLoadingInvoice) {
+    return (
+      <div className="space-y-4 text-gray-950 dark:text-gray-100">
+        <Link href="/invoices" className="text-blue-600 hover:underline dark:text-blue-400">
+          - Back to Invoices
+        </Link>
+        <h1 className="text-3xl font-bold">Loading invoice...</h1>
+      </div>
+    );
+  }
 
   if (!invoice) {
     return (
@@ -55,6 +125,9 @@ export default function InvoiceDetailPage() {
         </Link>
 
         <h1 className="text-3xl font-bold">Invoice not found</h1>
+        {invoiceError && (
+          <p className="text-sm text-red-600 dark:text-red-400">{invoiceError}</p>
+        )}
       </div>
     );
   }
@@ -109,6 +182,11 @@ export default function InvoiceDetailPage() {
 
   return (
     <div className="space-y-6 text-gray-950 dark:text-gray-100">
+      {invoiceError && (
+        <div className="print-hidden rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700 print:hidden dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
+          {invoiceError}
+        </div>
+      )}
       <div className="print-hidden flex flex-col gap-4 print:hidden sm:flex-row sm:items-center sm:justify-between">
         <div>
           <Link href="/invoices" className="text-blue-600 hover:underline dark:text-blue-400">
@@ -130,6 +208,36 @@ export default function InvoiceDetailPage() {
         </div>
 
         <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={duplicateInvoice}
+            className="rounded-lg border border-gray-300 px-4 py-2 font-semibold hover:bg-gray-100 dark:border-gray-700 dark:hover:bg-gray-800"
+          >
+            Duplicate
+          </button>
+
+          {invoice.status === "Estimate" && (
+            <button
+              type="button"
+              onClick={() => updateInvoiceStatus("Draft")}
+              className="rounded-lg border border-blue-600 px-4 py-2 font-semibold text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-950/30"
+            >
+              Convert to Invoice
+            </button>
+          )}
+
+          {invoiceStatuses.filter((status) => status !== "Estimate").map((status) => (
+            <button
+              key={status}
+              type="button"
+              onClick={() => updateInvoiceStatus(status)}
+              disabled={invoice.status === status}
+              className="rounded-lg border border-gray-300 px-4 py-2 font-semibold hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:hover:bg-gray-800"
+            >
+              Mark {status}
+            </button>
+          ))}
+
           <a
             href={gmailHref}
             target="_blank"
@@ -295,6 +403,14 @@ export default function InvoiceDetailPage() {
             {invoice.companyEmail}
           </p>
         </div>
+      </div>
+
+      <div className="print-hidden print:hidden">
+        <DocumentAttachments
+          workspaceId={invoice.workspaceId}
+          invoiceId={invoice.id}
+          title="Invoice Documents"
+        />
       </div>
     </div>
   );

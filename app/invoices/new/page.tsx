@@ -72,6 +72,8 @@ function NewInvoiceContent() {
   const [databaseClientItems, setDatabaseClientItems] = useState<ClientRow[]>([]);
   const [databaseJobItems, setDatabaseJobItems] = useState<Job[]>([]);
   const [databaseSavedInvoices, setDatabaseSavedInvoices] = useState<InvoiceRow[]>([]);
+  const [isLoadingData, setIsLoadingData] = useState(false);
+  const [dataError, setDataError] = useState("");
   const [workspaceSettings] = useStoredJsonState<WorkspaceInvoiceSettings[]>(
     storageKeys.settings,
     []
@@ -88,8 +90,18 @@ function NewInvoiceContent() {
   useEffect(() => {
     if (!isDatabaseMode) return;
     let cancelled = false;
+    queueMicrotask(() => {
+      if (!cancelled) {
+        setIsLoadingData(true);
+        setDataError("");
+      }
+    });
     Promise.all([clientsRepo.getClients(activeWorkspace.id), jobsRepo.getJobs(activeWorkspace.id), invoicesRepo.getInvoices(activeWorkspace.id)]).then(([clients, jobs, invoices]) => {
       if (!cancelled) { setDatabaseClientItems(clients); setDatabaseJobItems(jobs); setDatabaseSavedInvoices(invoices); }
+    }).catch((error) => {
+      if (!cancelled) setDataError(error instanceof Error ? error.message : "Unable to load invoice setup data.");
+    }).finally(() => {
+      if (!cancelled) setIsLoadingData(false);
     });
     return () => { cancelled = true; };
   }, [activeWorkspace.id, clientsRepo, invoicesRepo, isDatabaseMode, jobsRepo]);
@@ -148,6 +160,28 @@ function NewInvoiceContent() {
     formatPhone(startingClient?.phone ?? "")
   );
   const [billToEmail, setBillToEmail] = useState(startingClient?.email ?? "");
+
+  useEffect(() => {
+    if (!startingJob || selectedJobId === startingJob.id) return;
+
+    queueMicrotask(() => {
+      setSelectedJobId(startingJob.id);
+      if (startingClient) {
+        setSelectedClientId(startingClient.id);
+        setBillToName(startingClient.name ?? "");
+        setBillToCompany("");
+        setBillToAddress(startingClient.address ?? "");
+        setBillToCity(startingClient.city ?? "");
+        setBillToState((startingClient.state ?? "").toUpperCase());
+        setBillToZip(startingClient.zip ?? "");
+        setBillToPhone(formatPhone(startingClient.phone ?? ""));
+        setBillToEmail(startingClient.email ?? "");
+      } else {
+        setSelectedClientId("new");
+        setBillToName(startingJob.client);
+      }
+    });
+  }, [selectedJobId, startingClient, startingJob]);
 
   const [footerMessage, setFooterMessage] = useState("Thank you for your business!");
   const [contactMessage, setContactMessage] = useState("Please contact us with any questions about this invoice.");
@@ -282,6 +316,16 @@ function NewInvoiceContent() {
       </div>
 
       <div className="rounded-xl bg-white p-4 shadow dark:bg-gray-900 sm:p-6">
+        {dataError && (
+          <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
+            {dataError}
+          </div>
+        )}
+        {isLoadingData && (
+          <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-700 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-300">
+            Loading invoice setup...
+          </div>
+        )}
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_1fr_180px]">
           <div>
             <label className={labelClass}>Attach to Job</label>

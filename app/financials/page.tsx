@@ -82,6 +82,7 @@ export default function FinancialsPage() {
   );
   const [dbInvoices, setDbInvoices] = useState<InvoiceRow[]>([]);
   const [dbExpenses, setDbExpenses] = useState<ExpenseRow[]>([]);
+  const [dataError, setDataError] = useState("");
 
   const [selectedInvoices, setSelectedInvoices] = useState<string[]>([]);
   const [selectedExpenses, setSelectedExpenses] = useState<string[]>([]);
@@ -100,8 +101,13 @@ export default function FinancialsPage() {
   useEffect(() => {
     if (!isDatabaseMode) return;
     let cancelled = false;
+    queueMicrotask(() => {
+      if (!cancelled) setDataError("");
+    });
     Promise.all([invoicesRepo.getInvoices(activeWorkspace.id), expensesRepo.getExpenses(activeWorkspace.id)]).then(([invoices, expenses]) => {
       if (!cancelled) { setDbInvoices(invoices); setDbExpenses(expenses); }
+    }).catch((error) => {
+      if (!cancelled) setDataError(error instanceof Error ? error.message : "Unable to load financials.");
     });
     return () => { cancelled = true; };
   }, [activeWorkspace.id, expensesRepo, invoicesRepo, isDatabaseMode]);
@@ -140,27 +146,45 @@ export default function FinancialsPage() {
     );
   }
 
-  function removeSelectedInvoices() {
-    saveSavedInvoiceItems(
-      savedInvoices.filter((invoice) => !selectedInvoices.includes(invoice.id))
-    );
+  async function removeSelectedInvoices() {
+    try {
+      if (isDatabaseMode) {
+        await Promise.all(selectedInvoices.map((id) => invoicesRepo.deleteInvoice(id)));
+      }
+      saveSavedInvoiceItems(
+        savedInvoices.filter((invoice) => !selectedInvoices.includes(invoice.id))
+      );
 
-    setSelectedInvoices([]);
+      setSelectedInvoices([]);
+      setDataError("");
+    } catch (error) {
+      setDataError(error instanceof Error ? error.message : "Unable to remove invoices.");
+    }
   }
 
   async function removeSelectedExpenses() {
-    const selected = workspaceExpenses.filter((expense) => selectedExpenses.includes(expense.id ?? `${expense.workspaceId}-${expense.description}`));
-    const deleted = await Promise.all(selected.map((expense) => expensesRepo.deleteExpense(expense)));
-    const deletedIds = selected.filter((_, i) => deleted[i]).map((e) => e.id ?? `${e.workspaceId}-${e.description}`);
-    if (isDatabaseMode) setDbExpenses((current) => current.filter((expense) => !deletedIds.includes(expense.id ?? `${expense.workspaceId}-${expense.description}`)));
-    setSelectedExpenses([]);
+    try {
+      const selected = workspaceExpenses.filter((expense) => selectedExpenses.includes(expense.id ?? `${expense.workspaceId}-${expense.description}`));
+      const deleted = await Promise.all(selected.map((expense) => expensesRepo.deleteExpense(expense)));
+      const deletedIds = selected.filter((_, i) => deleted[i]).map((e) => e.id ?? `${e.workspaceId}-${e.description}`);
+      if (isDatabaseMode) setDbExpenses((current) => current.filter((expense) => !deletedIds.includes(expense.id ?? `${expense.workspaceId}-${expense.description}`)));
+      setSelectedExpenses([]);
+      setDataError("");
+    } catch (error) {
+      setDataError(error instanceof Error ? error.message : "Unable to remove expenses.");
+    }
   }
 
   async function updateInvoiceStatus(row: FinancialInvoice, status: InvoiceStatus) {
     const updated = { ...row.invoice, status };
-    const saved = await invoicesRepo.updateInvoice(updated);
-    if (!saved) return;
-    saveSavedInvoiceItems(savedInvoices.map((invoice) => invoice.id === saved.id ? saved : invoice));
+    try {
+      const saved = await invoicesRepo.updateInvoice(updated);
+      if (!saved) return;
+      saveSavedInvoiceItems(savedInvoices.map((invoice) => invoice.id === saved.id ? saved : invoice));
+      setDataError("");
+    } catch (error) {
+      setDataError(error instanceof Error ? error.message : "Unable to update invoice.");
+    }
   }
 
   function closeExpenseModal() {
@@ -176,11 +200,15 @@ export default function FinancialsPage() {
     const amount = Number(expenseAmount);
     if (Number.isNaN(amount) || amount <= 0) return;
 
-    const created = await expensesRepo.createExpense({ description: expenseDescription.trim(), category: expenseCategory, amount: formatCurrency(amount), workspaceId: activeWorkspace.id });
-    if (!created) return;
-    if (isDatabaseMode) setDbExpenses((current) => [created, ...current]);
-
-    closeExpenseModal();
+    try {
+      const created = await expensesRepo.createExpense({ description: expenseDescription.trim(), category: expenseCategory, amount: formatCurrency(amount), workspaceId: activeWorkspace.id });
+      if (!created) return;
+      if (isDatabaseMode) setDbExpenses((current) => [created, ...current]);
+      setDataError("");
+      closeExpenseModal();
+    } catch (error) {
+      setDataError(error instanceof Error ? error.message : "Unable to add expense.");
+    }
   }
 
   const revenue = workspaceInvoices
@@ -200,6 +228,12 @@ export default function FinancialsPage() {
 
   return (
     <div className="space-y-8">
+      {dataError && (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
+          {dataError}
+        </div>
+      )}
+
       <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
         <SummaryCard
           title="Revenue"

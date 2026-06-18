@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
@@ -19,7 +19,7 @@ import type { InvoiceRow as SharedInvoiceRow } from "@/lib/frontierInvoices";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 
 
-type InvoiceStatus = "Draft" | "Sent" | "Overdue" | "Paid";
+type InvoiceStatus = "Estimate" | "Draft" | "Sent" | "Overdue" | "Paid";
 type DiscountType = "None" | "Percent" | "Fixed";
 
 type InvoiceLineItem = {
@@ -114,7 +114,7 @@ function todayString() {
 
 function getEmptyLineItem(): InvoiceLineItem {
   return {
-    id: `line-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    id: crypto.randomUUID(),
     description: "",
     quantity: 1,
     unitPrice: "",
@@ -127,7 +127,7 @@ function cleanText(value: string | undefined) {
 
 function getFallbackDraft(activeWorkspace: { id: string; name: string }) {
   return {
-    id: `invoice-${Date.now()}`,
+    id: crypto.randomUUID(),
     workspaceId: activeWorkspace.id,
     invoiceNumber: `INV-${Date.now().toString().slice(-5)}`,
     invoiceDate: todayString(),
@@ -152,6 +152,8 @@ export default function InvoiceBuilderPage() {
     storageKeys.clients,
     []
   );
+  const [databaseClients, setDatabaseClients] = useState<SharedClientRow[]>([]);
+  const [saveError, setSaveError] = useState("");
   const supabase = useMemo(() => (isDatabaseMode ? createBrowserSupabaseClient() : null), [isDatabaseMode]);
   const invoicesRepo = useMemo(() => createInvoicesRepository({ isSignedIn: isDatabaseMode, supabase, localInvoices: savedInvoices as unknown as SharedInvoiceRow[], setLocalInvoices: setSavedInvoices as unknown as (value: SharedInvoiceRow[] | ((current: SharedInvoiceRow[]) => SharedInvoiceRow[])) => void }), [isDatabaseMode, savedInvoices, setSavedInvoices, supabase]);
   const clientsRepo = useMemo(() => createClientsRepository({ isSignedIn: isDatabaseMode, supabase, localClients: savedClients as SharedClientRow[], setLocalClients: setSavedClients as unknown as (value: SharedClientRow[] | ((current: SharedClientRow[]) => SharedClientRow[])) => void }), [isDatabaseMode, savedClients, setSavedClients, supabase]);
@@ -175,6 +177,17 @@ export default function InvoiceBuilderPage() {
   );
   const [taxRate, setTaxRate] = useState(draft.taxRate ?? "");
   const [status, setStatus] = useState<InvoiceStatus>(draft.status ?? "Draft");
+
+  useEffect(() => {
+    if (!isDatabaseMode) return;
+    let cancelled = false;
+    clientsRepo.getClients(activeWorkspace.id).then((clients) => {
+      if (!cancelled) setDatabaseClients(clients);
+    }).catch((error) => {
+      if (!cancelled) setSaveError(error instanceof Error ? error.message : "Unable to load clients.");
+    });
+    return () => { cancelled = true; };
+  }, [activeWorkspace.id, clientsRepo, isDatabaseMode]);
 
   const totals = useMemo(() => {
     const subtotal = lineItems.reduce((sum, item) => {
@@ -226,7 +239,7 @@ export default function InvoiceBuilderPage() {
   }
 
   async function upsertClientFromInvoice(invoice: InvoiceRow) {
-    const existingClients = savedClients;
+    const existingClients = isDatabaseMode ? databaseClients : savedClients;
     const existingClientId = cleanText(invoice.sourceClientId);
 
     const matchingClientById = existingClientId
@@ -255,7 +268,10 @@ export default function InvoiceBuilderPage() {
       );
 
       if (!isDatabaseMode) setSavedClients(updatedClients);
-      else await clientsRepo.updateClient(updatedClients.find((client) => client.id === matchingClientById.id) as SharedClientRow);
+      else {
+        const saved = await clientsRepo.updateClient(updatedClients.find((client) => client.id === matchingClientById.id) as SharedClientRow);
+        if (saved) setDatabaseClients((current) => current.map((client) => client.id === saved.id ? saved : client));
+      }
       return matchingClientById.id;
     }
 
@@ -288,12 +304,15 @@ export default function InvoiceBuilderPage() {
       );
 
       if (!isDatabaseMode) setSavedClients(updatedClients);
-      else await clientsRepo.updateClient(updatedClients.find((client) => client.id === matchingClient.id) as SharedClientRow);
+      else {
+        const saved = await clientsRepo.updateClient(updatedClients.find((client) => client.id === matchingClient.id) as SharedClientRow);
+        if (saved) setDatabaseClients((current) => current.map((client) => client.id === saved.id ? saved : client));
+      }
       return matchingClient.id;
     }
 
     const newClient: ClientRow = {
-      id: `client-${Date.now()}`,
+      id: crypto.randomUUID(),
       workspaceId: invoice.workspaceId,
       name: clientName,
       status: "Active",
@@ -307,8 +326,9 @@ export default function InvoiceBuilderPage() {
       notes: `Created from ${invoice.invoiceNumber}`,
     };
 
-    await clientsRepo.createClient(newClient as SharedClientRow);
+    const created = await clientsRepo.createClient(newClient as SharedClientRow);
     if (!isDatabaseMode) setSavedClients([...existingClients, newClient]);
+    else if (created) setDatabaseClients((current) => [...current, created]);
     return newClient.id;
   }
 
@@ -374,23 +394,29 @@ export default function InvoiceBuilderPage() {
       contactMessage: draft.contactMessage ?? "",
     };
 
-    const resolvedClientId = await upsertClientFromInvoice(invoiceBeforeClientUpdate);
+    setSaveError("");
 
-    const savedInvoice: InvoiceRow = {
-      ...invoiceBeforeClientUpdate,
-      sourceClientId: resolvedClientId ?? invoiceBeforeClientUpdate.sourceClientId ?? "",
-    };
+    try {
+      const resolvedClientId = await upsertClientFromInvoice(invoiceBeforeClientUpdate);
 
-    const updatedInvoices = [
-      ...savedInvoices.filter((invoice) => invoice.id !== savedInvoice.id),
-      savedInvoice,
-    ];
+      const savedInvoice: InvoiceRow = {
+        ...invoiceBeforeClientUpdate,
+        sourceClientId: resolvedClientId ?? invoiceBeforeClientUpdate.sourceClientId ?? "",
+      };
 
-    const saved = await invoicesRepo.createInvoice(savedInvoice as unknown as SharedInvoiceRow);
-    if (!saved) return;
-    if (!isDatabaseMode) setSavedInvoices(updatedInvoices);
-    removeStoredValue(storageKeys.invoiceDraft);
-    router.push(`/invoices/${savedInvoice.id}`);
+      const updatedInvoices = [
+        ...savedInvoices.filter((invoice) => invoice.id !== savedInvoice.id),
+        savedInvoice,
+      ];
+
+      const saved = await invoicesRepo.createInvoice(savedInvoice as unknown as SharedInvoiceRow);
+      if (!saved) return;
+      if (!isDatabaseMode) setSavedInvoices(updatedInvoices);
+      removeStoredValue(storageKeys.invoiceDraft);
+      router.push(`/invoices/${savedInvoice.id}`);
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : "Unable to save invoice.");
+    }
   }
 
   return (
@@ -419,6 +445,12 @@ export default function InvoiceBuilderPage() {
           </div>
         </div>
 
+        {saveError && (
+          <div className="rounded-lg border border-red-900 bg-red-950/50 p-3 text-sm text-red-200">
+            {saveError}
+          </div>
+        )}
+
         <div className="grid gap-4 rounded-2xl border border-gray-800 bg-gray-950 p-4 sm:grid-cols-4">
           <div>
             <p className="text-xs uppercase text-gray-500">Invoice</p>
@@ -436,6 +468,7 @@ export default function InvoiceBuilderPage() {
               className="mt-1 w-full rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-white"
             >
               <option>Draft</option>
+              <option>Estimate</option>
               <option>Sent</option>
               <option>Overdue</option>
               <option>Paid</option>

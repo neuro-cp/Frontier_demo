@@ -27,6 +27,8 @@ export default function InvoicesPage() {
     []
   );
   const [databaseInvoices, setDatabaseInvoices] = useState<InvoiceRow[]>([]);
+  const [isLoadingInvoices, setIsLoadingInvoices] = useState(false);
+  const [invoiceError, setInvoiceError] = useState("");
   const [selectedInvoices, setSelectedInvoices] = useState<string[]>([]);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
 
@@ -37,7 +39,17 @@ export default function InvoicesPage() {
   useEffect(() => {
     if (!isDatabaseMode) return;
     let cancelled = false;
-    invoicesRepo.getInvoices(activeWorkspace.id).then((items) => { if (!cancelled) setDatabaseInvoices(items); });
+    queueMicrotask(() => {
+      if (!cancelled) {
+        setIsLoadingInvoices(true);
+        setInvoiceError("");
+      }
+    });
+    invoicesRepo.getInvoices(activeWorkspace.id).then((items) => { if (!cancelled) setDatabaseInvoices(items); }).catch((error) => {
+      if (!cancelled) setInvoiceError(error instanceof Error ? error.message : "Unable to load invoices.");
+    }).finally(() => {
+      if (!cancelled) setIsLoadingInvoices(false);
+    });
     return () => { cancelled = true; };
   }, [activeWorkspace.id, invoicesRepo, isDatabaseMode]);
 
@@ -68,19 +80,29 @@ export default function InvoicesPage() {
   }
 
   async function removeSelectedInvoices() {
-    const deleted = await Promise.all(selectedInvoices.map((id) => invoicesRepo.deleteInvoice(id)));
-    const deletedIds = selectedInvoices.filter((_, index) => deleted[index]);
-    saveInvoices(invoices.filter((invoice) => !deletedIds.includes(invoice.id)));
-    setSelectedInvoices([]);
-    setShowDeleteModal(false);
+    try {
+      const deleted = await Promise.all(selectedInvoices.map((id) => invoicesRepo.deleteInvoice(id)));
+      const deletedIds = selectedInvoices.filter((_, index) => deleted[index]);
+      saveInvoices(invoices.filter((invoice) => !deletedIds.includes(invoice.id)));
+      setSelectedInvoices([]);
+      setShowDeleteModal(false);
+      setInvoiceError("");
+    } catch (error) {
+      setInvoiceError(error instanceof Error ? error.message : "Unable to delete invoices.");
+    }
   }
 
   async function updateInvoiceStatus(id: string, nextStatus: InvoiceStatus) {
     const invoice = invoices.find((item) => item.id === id);
     if (!invoice) return;
-    const saved = await invoicesRepo.updateInvoice({ ...invoice, status: nextStatus });
-    if (!saved) return;
-    saveInvoices(invoices.map((item) => item.id === id ? saved : item));
+    try {
+      const saved = await invoicesRepo.updateInvoice({ ...invoice, status: nextStatus });
+      if (!saved) return;
+      saveInvoices(invoices.map((item) => item.id === id ? saved : item));
+      setInvoiceError("");
+    } catch (error) {
+      setInvoiceError(error instanceof Error ? error.message : "Unable to update invoice.");
+    }
   }
 
   return (
@@ -111,6 +133,18 @@ export default function InvoicesPage() {
         <div className="rounded-lg bg-gray-900 p-4 text-white">
           {selectedInvoices.length} invoice
           {selectedInvoices.length === 1 ? "" : "s"} selected
+        </div>
+      )}
+
+      {invoiceError && (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
+          {invoiceError}
+        </div>
+      )}
+
+      {isLoadingInvoices && (
+        <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-700 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-300">
+          Loading invoices...
         </div>
       )}
 
