@@ -16,6 +16,7 @@ import {
   InvoiceStatus,
 } from "@/lib/frontierInvoices";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
+import { getWorkspaceDisplayName } from "@/lib/workspaceDisplay";
 
 export default function InvoicesPage() {
   const { activeWorkspace } = useWorkspace();
@@ -56,6 +57,7 @@ export default function InvoicesPage() {
   const workspaceInvoices = invoices.filter(
     (invoice) => invoice.workspaceId === activeWorkspace.id
   );
+  const workspaceDisplayName = getWorkspaceDisplayName(activeWorkspace);
 
   const totalOutstanding = workspaceInvoices
     .filter((invoice) => invoice.status !== "Paid")
@@ -164,7 +166,7 @@ export default function InvoicesPage() {
         <div className="rounded-xl bg-white p-4 shadow dark:bg-gray-900">
           <p className="text-sm text-gray-500 dark:text-gray-400">Workspace</p>
           <p className="mt-1 truncate text-2xl font-bold">
-            {activeWorkspace.name}
+            {workspaceDisplayName}
           </p>
         </div>
       </div>
@@ -252,7 +254,7 @@ export default function InvoicesPage() {
                   colSpan={7}
                   className="p-10 text-center text-lg text-gray-500 dark:text-gray-400"
                 >
-                  No invoices found for {activeWorkspace.name}
+                  No invoices found for {workspaceDisplayName}
                 </td>
               </tr>
             )}

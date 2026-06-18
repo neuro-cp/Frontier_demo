@@ -12,6 +12,7 @@ import { createCalendarEventsRepository, type ClientCalendarEvent } from "@/lib/
 import { createClientsRepository } from "@/lib/db/clients";
 import { createJobsRepository } from "@/lib/db/jobs";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
+import { getWorkspaceDisplayName } from "@/lib/workspaceDisplay";
 
 function getJobColor(status: string) {
   switch (status) {
@@ -109,6 +110,7 @@ export default function CalendarPage() {
     .filter((job) => job.workspaceId === activeWorkspace.id)
     .filter((job) => job.date)
     .sort((a, b) => a.date.localeCompare(b.date));
+  const workspaceDisplayName = getWorkspaceDisplayName(activeWorkspace);
 
   const workspaceClientEvents = clientEvents
     .filter((event) => event.workspaceId === activeWorkspace.id)
@@ -281,7 +283,7 @@ export default function CalendarPage() {
                 )
               )
             ) : (
-              <div className="text-center text-lg text-gray-500 dark:text-gray-400">No calendar items for {activeWorkspace.name}</div>
+              <div className="text-center text-lg text-gray-500 dark:text-gray-400">No calendar items for {workspaceDisplayName}</div>
             )}
           </div>
         )}

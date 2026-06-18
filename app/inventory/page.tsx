@@ -8,6 +8,7 @@ import { createInventoryRepository, type InventoryRow } from "@/lib/db/inventory
 import { createJobsRepository } from "@/lib/db/jobs";
 import type { Job } from "@/lib/jobTypes";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
+import { getWorkspaceDisplayName } from "@/lib/workspaceDisplay";
 
 export default function InventoryPage() {
   const { activeWorkspace } = useWorkspace();
@@ -69,6 +70,7 @@ export default function InventoryPage() {
   const workspaceInventory = inventoryItems.filter(
     (item) => item.workspaceId === activeWorkspace.id
   );
+  const workspaceDisplayName = getWorkspaceDisplayName(activeWorkspace);
 
   const activeMaterialJobs = jobItems.filter(
     (job) =>
@@ -338,7 +340,7 @@ export default function InventoryPage() {
                 );
               })
             ) : (
-              <tr><td colSpan={9} className="px-6 py-16 text-center text-xl text-gray-500 dark:text-gray-400">No inventory items or scheduled job materials for {activeWorkspace.name}</td></tr>
+              <tr><td colSpan={9} className="px-6 py-16 text-center text-xl text-gray-500 dark:text-gray-400">No inventory items or scheduled job materials for {workspaceDisplayName}</td></tr>
             )}
           </tbody>
         </table>

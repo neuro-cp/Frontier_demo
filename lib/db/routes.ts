@@ -1,5 +1,6 @@
 "use client";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { assertUuid, isUuid } from "@/lib/db/ids";
 export type RoutePlan = { id: string; workspaceId: string; name: string; googleMapsUrl?: string; totalDistanceMeters?: number | null; totalDurationSeconds?: number | null; notes?: string; stops: RouteStop[] };
 export type RouteStop = { id?: string; clientId: string; stopOrder: number; latitude: number | null; longitude: number | null; addressSnapshot: string };
 type DbRouteStop = { id: string; client_id: string | null; stop_order: number; latitude: number | null; longitude: number | null; address_snapshot: string | null };
@@ -36,20 +37,25 @@ export function createRoutesRepository({ isSignedIn, supabase }: { isSignedIn: b
   return {
     async getRoutes(workspaceId: string) {
       if (!useDb) return [] as RoutePlan[];
+      if (!isUuid(workspaceId)) return [];
       const { data, error } = await supabase.from("route_plans").select("*, route_plan_stops(*)").eq("workspace_id", workspaceId).order("created_at", { ascending: false });
       if (error) throw new Error(error.message || "Unable to load routes.");
       return ((data ?? []) as DbRoute[]).map(dbToRoute);
     },
     async createRoute(route: RoutePlan) {
       if (!useDb) return route;
+      assertUuid(route.workspaceId, "Workspace");
       return saveRouteWithStops(route);
     },
     async updateRoute(route: RoutePlan) {
       if (!useDb) return route;
+      assertUuid(route.workspaceId, "Workspace");
+      assertUuid(route.id, "Route");
       return saveRouteWithStops(route);
     },
     async deleteRoute(id: string) {
       if (!useDb) return true;
+      if (!isUuid(id)) return true;
       const { error } = await supabase.from("route_plans").delete().eq("id", id);
       if (error) throw new Error(error.message || "Unable to delete route.");
       return true;

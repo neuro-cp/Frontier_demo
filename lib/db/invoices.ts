@@ -1,6 +1,7 @@
 "use client";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { InvoiceLineItem, InvoiceRow } from "@/lib/frontierInvoices";
+import { assertUuid, isUuid } from "@/lib/db/ids";
 import { centsToMoneyString, moneyStringToCents } from "@/lib/db/money";
 type Setter<T> = (value: T | ((current: T) => T)) => void;
 type DbInvoiceLine = {
@@ -70,12 +71,15 @@ export function createInvoicesRepository({ isSignedIn, supabase, localInvoices, 
   return {
     async getInvoices(workspaceId: string) {
       if (!useDb) return localInvoices.filter((i) => i.workspaceId === workspaceId);
+      if (!isUuid(workspaceId)) return [];
       const { data, error } = await supabase.from("invoices").select(selectInvoice).eq("workspace_id", workspaceId).order("invoice_date", { ascending: false });
       if (error) throw new Error(error.message || "Unable to load invoices.");
       return (data ?? []).map(dbToInvoice);
     },
     async getInvoiceById(id: string, workspaceId?: string) {
       if (!useDb) return localInvoices.find((i) => i.id === id && (!workspaceId || i.workspaceId === workspaceId)) ?? null;
+      if (!isUuid(id)) return null;
+      if (workspaceId && !isUuid(workspaceId)) return null;
       let query = supabase.from("invoices").select(selectInvoice).eq("id", id);
       if (workspaceId) query = query.eq("workspace_id", workspaceId);
       const { data, error } = await query.maybeSingle();
@@ -84,14 +88,18 @@ export function createInvoicesRepository({ isSignedIn, supabase, localInvoices, 
     },
     async createInvoice(invoice: InvoiceRow) {
       if (!useDb) return setLocalInvoices((c) => [...c, invoice]), invoice;
+      assertUuid(invoice.workspaceId, "Workspace");
       return saveInvoiceWithLines(invoice);
     },
     async updateInvoice(invoice: InvoiceRow) {
       if (!useDb) return setLocalInvoices((c) => c.map((i) => i.id === invoice.id ? invoice : i)), invoice;
+      assertUuid(invoice.workspaceId, "Workspace");
+      assertUuid(invoice.id, "Invoice");
       return saveInvoiceWithLines(invoice);
     },
     async deleteInvoice(id: string) {
       if (!useDb) return setLocalInvoices((c) => c.filter((i) => i.id !== id)), true;
+      if (!isUuid(id)) return true;
       const { error } = await supabase.from("invoices").delete().eq("id", id);
       if (error) throw new Error(error.message || "Unable to delete invoice.");
       return true;

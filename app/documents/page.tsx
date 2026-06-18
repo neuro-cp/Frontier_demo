@@ -16,6 +16,7 @@ import {
   uploadDocumentFile,
 } from "@/lib/storage";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
+import { getWorkspaceDisplayName } from "@/lib/workspaceDisplay";
 
 type ClientLike = {
   id: string;
@@ -102,6 +103,7 @@ export default function DocumentsPage() {
   const workspaceDocuments = documents.filter(
     (document) => document.workspaceId === activeWorkspace.id
   );
+  const workspaceDisplayName = getWorkspaceDisplayName(activeWorkspace);
 
   const workspaceClients = clients.filter(
     (client) => client.workspaceId === activeWorkspace.id
@@ -309,7 +311,7 @@ export default function DocumentsPage() {
                   colSpan={8}
                   className="px-6 py-16 text-center text-2xl text-gray-500 dark:text-gray-400"
                 >
-                  No documents uploaded for {activeWorkspace.name}
+                  No documents uploaded for {workspaceDisplayName}
                 </td>
               </tr>
             ) : (
@@ -401,7 +403,7 @@ export default function DocumentsPage() {
                 </label>
 
                 <input
-                  value={activeWorkspace.name}
+                  value={workspaceDisplayName}
                   readOnly
                   className="w-full rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-base text-gray-700 outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 sm:text-lg"
                 />

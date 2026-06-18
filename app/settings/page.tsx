@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useWorkspace } from "@/components/WorkspaceContext";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
+import { getWorkspaceDisplayName } from "@/lib/workspaceDisplay";
 import { defaultBusinessTypes } from "@/lib/workspaceOptions";
 import DataMigrationSettings from "./DataMigrationSettings";
 import PermissionsSettings from "./PermissionsSettings";
@@ -86,13 +87,13 @@ export default function SettingsPage() {
 
   const initialSettings =
     allSettings.find((item) => item.workspaceId === activeWorkspace.id) ??
-    getDefaultSettings(activeWorkspace.id, activeWorkspace.name);
+    getDefaultSettings(activeWorkspace.id, getWorkspaceDisplayName(activeWorkspace));
 
   return (
     <SettingsWorkspacePanel
       key={activeWorkspace.id}
       activeWorkspaceId={activeWorkspace.id}
-      activeWorkspaceName={activeWorkspace.name}
+      activeWorkspaceName={getWorkspaceDisplayName(activeWorkspace)}
       allSettings={allSettings}
       initialSettings={initialSettings}
       setAllSettings={setAllSettings}

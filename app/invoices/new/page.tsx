@@ -14,6 +14,7 @@ import type { Job } from "@/lib/jobTypes";
 import type { ClientRow } from "@/lib/clientTypes";
 import { InvoiceRow, InvoiceSetupDraft } from "@/lib/frontierInvoices";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
+import { getWorkspaceDisplayName } from "@/lib/workspaceDisplay";
 
 type WorkspaceInvoiceSettings = {
   workspaceId: string;
@@ -192,7 +193,8 @@ function NewInvoiceContent() {
 
   const companyPlaceholder = {
     companyName:
-      savedWorkspaceSettings?.companyName || `${activeWorkspace.name} Company`,
+      savedWorkspaceSettings?.companyName ||
+      `${getWorkspaceDisplayName(activeWorkspace)} Company`,
     companyAddress:
       savedWorkspaceSettings?.companyAddress || "123 Business Street",
     companyCity: savedWorkspaceSettings?.companyCity || "Rochester Hills",

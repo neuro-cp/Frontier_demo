@@ -17,6 +17,7 @@ import { createInvoicesRepository } from "@/lib/db/invoices";
 import type { ClientRow as SharedClientRow } from "@/lib/clientTypes";
 import type { InvoiceRow as SharedInvoiceRow } from "@/lib/frontierInvoices";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
+import { getWorkspaceDisplayName } from "@/lib/workspaceDisplay";
 
 
 type InvoiceStatus = "Estimate" | "Draft" | "Sent" | "Overdue" | "Paid";
@@ -126,13 +127,13 @@ function cleanText(value: string | undefined) {
   return value?.trim() ?? "";
 }
 
-function getFallbackDraft(activeWorkspace: { id: string; name: string }) {
+function getFallbackDraft(activeWorkspace: { id: string; name: string; type: string }) {
   return {
     id: crypto.randomUUID(),
     workspaceId: activeWorkspace.id,
     invoiceNumber: `INV-${Date.now().toString().slice(-5)}`,
     invoiceDate: todayString(),
-    companyName: activeWorkspace.name ?? "",
+    companyName: getWorkspaceDisplayName(activeWorkspace),
     companyAddress: "",
     companyCity: "",
     companyState: "",
@@ -353,7 +354,7 @@ export default function InvoiceBuilderPage() {
       dueDate: draft.dueDate ?? "",
       status,
 
-      companyName: draft.companyName ?? activeWorkspace.name ?? "",
+      companyName: draft.companyName ?? getWorkspaceDisplayName(activeWorkspace),
       companyAddress: draft.companyAddress ?? "",
       companyCity: draft.companyCity ?? "",
       companyState: draft.companyState ?? "",

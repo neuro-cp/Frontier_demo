@@ -1,5 +1,6 @@
 "use client";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { assertUuid, isUuid } from "@/lib/db/ids";
 type Setter<T> = (value: T | ((current: T) => T)) => void;
 export type DocumentProcessingStatus = "uploaded" | "queued" | "processing" | "needs_review" | "reviewed" | "failed";
 export type StoredDocument = { id: string; workspaceId: string; name: string; detectedType: string; extractionStatus: string; fileName: string; notes: string; clientId: string; jobId: string; invoiceId?: string; createdAt: string; uploadedBy?: string; status?: string; storageBucket?: string; storagePath?: string; mimeType?: string; sizeBytes?: number; storageStatus?: string; processingStatus?: DocumentProcessingStatus; extractedText?: string; extractedJson?: Record<string, unknown> | null; ocrProvider?: string; aiJobId?: string; reviewedAt?: string; reviewedBy?: string; confidence?: number | null; documentType?: string };
@@ -13,24 +14,29 @@ export function createDocumentsRepository({ isSignedIn, supabase, localDocuments
   return {
     async getDocuments(workspaceId: string) {
       if (!useDb) return localDocuments.filter((d) => d.workspaceId === workspaceId);
+      if (!isUuid(workspaceId)) return [];
       const { data, error } = await supabase.from("documents").select("*").eq("workspace_id", workspaceId).order("created_at", { ascending: false });
       if (error) throw new Error(error.message || "Unable to load documents.");
       return ((data ?? []) as DbDoc[]).map(dbToDoc);
     },
     async createDocument(doc: StoredDocument) {
       if (!useDb) return setLocalDocuments((c) => [doc, ...c]), doc;
+      assertUuid(doc.workspaceId, "Workspace");
       const { data, error } = await supabase.from("documents").insert({ id: doc.id, workspace_id: doc.workspaceId, ...docToDb(doc) }).select("*").single();
       if (error) throw new Error(error.message || "Unable to create document.");
       return dbToDoc(data as DbDoc);
     },
     async updateDocument(doc: StoredDocument) {
       if (!useDb) return setLocalDocuments((c) => c.map((d) => d.id === doc.id ? doc : d)), doc;
+      assertUuid(doc.workspaceId, "Workspace");
+      assertUuid(doc.id, "Document");
       const { data, error } = await supabase.from("documents").update(docToDb(doc)).eq("id", doc.id).select("*").single();
       if (error) throw new Error(error.message || "Unable to update document.");
       return dbToDoc(data as DbDoc);
     },
     async deleteDocument(id: string) {
       if (!useDb) return setLocalDocuments((c) => c.filter((d) => d.id !== id)), true;
+      if (!isUuid(id)) return true;
       const { error } = await supabase.from("documents").delete().eq("id", id);
       if (error) throw new Error(error.message || "Unable to delete document.");
       return true;

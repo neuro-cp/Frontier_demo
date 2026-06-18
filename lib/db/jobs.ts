@@ -1,6 +1,7 @@
 "use client";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { assertUuid, isUuid } from "@/lib/db/ids";
 import { moneyStringToCents, centsToMoneyString } from "@/lib/db/money";
 import type { Job, JobMaterial } from "@/lib/jobTypes";
 
@@ -59,12 +60,15 @@ export function createJobsRepository({ isSignedIn, supabase, localJobs, setLocal
   return {
     async getJobs(workspaceId: string) {
       if (!useDb) return localJobs.filter((j) => j.workspaceId === workspaceId);
+      if (!isUuid(workspaceId)) return [];
       const { data, error } = await supabase.from("jobs").select("*, job_materials(*)").eq("workspace_id", workspaceId).order("scheduled_date", { ascending: true });
       if (error) throw new Error(error.message || "Unable to load jobs.");
       return ((data ?? []) as DbJob[]).map(dbToJob);
     },
     async getJobById(id: string, workspaceId?: string) {
       if (!useDb) return localJobs.find((j) => j.id === id && (!workspaceId || j.workspaceId === workspaceId)) ?? null;
+      if (!isUuid(id)) return null;
+      if (workspaceId && !isUuid(workspaceId)) return null;
       let query = supabase.from("jobs").select("*, job_materials(*)").eq("id", id);
       if (workspaceId) query = query.eq("workspace_id", workspaceId);
       const { data, error } = await query.maybeSingle();
@@ -73,26 +77,33 @@ export function createJobsRepository({ isSignedIn, supabase, localJobs, setLocal
     },
     async createJob(job: Job) {
       if (!useDb) return setLocalJobs((c) => [...c, job]), job;
+      assertUuid(job.workspaceId, "Workspace");
       return saveJobWithMaterials(job);
     },
     async updateJob(id: string, job: Job) {
       if (!useDb) return setLocalJobs((c) => c.map((j) => (j.id === id ? job : j))), job;
+      assertUuid(job.workspaceId, "Workspace");
+      assertUuid(id, "Job");
       return saveJobWithMaterials({ ...job, id });
     },
     async deleteJob(id: string) {
       if (!useDb) return setLocalJobs((c) => c.filter((j) => j.id !== id)), true;
+      if (!isUuid(id)) return true;
       const { error } = await supabase.from("jobs").delete().eq("id", id);
       if (error) throw new Error(error.message || "Unable to delete job.");
       return true;
     },
     async getJobMaterials(jobId: string) {
       if (!useDb) return localJobs.find((j) => j.id === jobId)?.materials ?? [];
+      if (!isUuid(jobId)) return [];
       const { data, error } = await supabase.from("job_materials").select("*").eq("job_id", jobId);
       if (error) throw new Error(error.message || "Unable to load job materials.");
       return ((data ?? []) as DbMaterial[]).map((m) => ({ name: m.name, quantity: Number(m.quantity) }));
     },
     async saveJobMaterials(jobId: string, workspaceId: string, materials: JobMaterial[]) {
       if (!useDb) return true;
+      assertUuid(jobId, "Job");
+      assertUuid(workspaceId, "Workspace");
       const { error: deleteError } = await supabase.from("job_materials").delete().eq("job_id", jobId).eq("workspace_id", workspaceId);
       if (deleteError) throw new Error(deleteError.message || "Unable to replace job materials.");
       if (materials.length === 0) return true;
@@ -102,6 +113,7 @@ export function createJobsRepository({ isSignedIn, supabase, localJobs, setLocal
     },
     async deleteJobMaterials(jobId: string) {
       if (!useDb) return true;
+      assertUuid(jobId, "Job");
       const { error } = await supabase.from("job_materials").delete().eq("job_id", jobId);
       if (error) throw new Error(error.message || "Unable to delete job materials.");
       return true;

@@ -11,6 +11,7 @@ import { createClientsRepository } from "@/lib/db/clients";
 import { InvoiceRow } from "@/lib/frontierInvoices";
 import type { Job } from "@/lib/jobTypes";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
+import { getWorkspaceDisplayName } from "@/lib/workspaceDisplay";
 
 type ClientLinkedJob = Job & {
   clientId?: string;
@@ -187,6 +188,7 @@ export default function ClientsPage() {
   const workspaceClients = clientItems.filter(
     (client) => client.workspaceId === activeWorkspace.id
   );
+  const workspaceDisplayName = getWorkspaceDisplayName(activeWorkspace);
 
   const sortedWorkspaceClients = [...workspaceClients].sort((a, b) => {
     if (statusPriority === "default") {
@@ -626,7 +628,7 @@ export default function ClientsPage() {
                   colSpan={8}
                   className="p-10 text-center text-lg text-gray-500 dark:text-gray-400"
                 >
-                  No clients found for {activeWorkspace.name}
+                  No clients found for {workspaceDisplayName}
                 </td>
               </tr>
             )}

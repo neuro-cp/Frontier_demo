@@ -55,6 +55,7 @@ export default function DashboardPage() {
   const [databaseInvoiceItems, setDatabaseInvoiceItems] = useState<InvoiceRow[]>([]);
   const [databaseInventoryItems, setDatabaseInventoryItems] = useState<InventoryRow[]>([]);
   const [databaseExpenseItems, setDatabaseExpenseItems] = useState<ExpenseRow[]>([]);
+  const [dataError, setDataError] = useState("");
 
   const supabase = useMemo(() => (isDatabaseMode ? createBrowserSupabaseClient() : null), [isDatabaseMode]);
   const jobsRepo = useMemo(() => createJobsRepository({ isSignedIn: isDatabaseMode, supabase, localJobs: localJobItems, setLocalJobs: setLocalJobItems }), [isDatabaseMode, localJobItems, setLocalJobItems, supabase]);
@@ -79,9 +80,12 @@ export default function DashboardPage() {
         setDatabaseInvoiceItems(invoices);
         setDatabaseInventoryItems(inventory);
         setDatabaseExpenseItems(expenses);
+        setDataError("");
       }
     }).catch((error) => {
-      console.error("Unable to load dashboard data.", error);
+      if (!cancelled) {
+        setDataError(error instanceof Error ? error.message : "Unable to load dashboard data.");
+      }
     });
     return () => { cancelled = true; };
   }, [activeWorkspace.id, clientsRepo, expensesRepo, inventoryRepo, invoicesRepo, isDatabaseMode, jobsRepo]);
@@ -147,6 +151,11 @@ export default function DashboardPage() {
 
   return (
     <div className="w-full max-w-full">
+      {dataError && (
+        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
+          {dataError}
+        </div>
+      )}
 
 
       <div className="mb-6 rounded-lg bg-white p-4 shadow dark:bg-gray-900">

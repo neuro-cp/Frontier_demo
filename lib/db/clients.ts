@@ -3,6 +3,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { ClientRow } from "@/lib/clientTypes";
+import { assertUuid, isUuid } from "@/lib/db/ids";
 import { centsToMoneyString, moneyStringToCents } from "@/lib/db/money";
 
 type StoredStateSetter<T> = T | ((current: T) => T);
@@ -106,6 +107,7 @@ export function createClientsRepository({
       if (!useDatabase) {
         return localClients.filter((client) => client.workspaceId === workspaceId);
       }
+      if (!isUuid(workspaceId)) return [];
 
       const { data, error } = await supabase
         .from("clients")
@@ -134,6 +136,8 @@ export function createClientsRepository({
           ) ?? null
         );
       }
+      if (workspaceId && !isUuid(workspaceId)) return null;
+      if (!isUuid(clientId)) return null;
 
       let query = supabase
         .from("clients")
@@ -161,6 +165,7 @@ export function createClientsRepository({
         setLocalClients((current) => [...current, client]);
         return client;
       }
+      assertUuid(client.workspaceId, "Workspace");
 
       const { data, error } = await supabase
         .from("clients")
@@ -186,6 +191,7 @@ export function createClientsRepository({
         );
         return client;
       }
+      assertUuid(client.workspaceId, "Workspace");
 
       const updateValues = mapClientRowToDatabaseWrite(client);
       delete updateValues.id;
@@ -213,6 +219,8 @@ export function createClientsRepository({
         );
         return true;
       }
+      if (!isUuid(clientId)) return true;
+      if (workspaceId && !isUuid(workspaceId)) return true;
 
       let query = supabase.from("clients").delete().eq("id", clientId);
 

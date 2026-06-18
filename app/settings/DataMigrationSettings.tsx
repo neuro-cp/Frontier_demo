@@ -5,6 +5,7 @@ import { useState } from "react";
 import { useAuthSession } from "@/components/AuthSessionProvider";
 import { useWorkspace } from "@/components/WorkspaceContext";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
+import { isUuid } from "@/lib/db/ids";
 import { importLocalFrontierData, previewLocalFrontierData } from "@/lib/migration/localImport";
 import type { LocalImportCounts, LocalImportSummary } from "@/lib/migration/localImportTypes";
 
@@ -34,10 +35,12 @@ export default function DataMigrationSettings() {
   }
 
   function preview() {
+    if (!isUuid(activeWorkspace.id)) return;
     setCounts(previewLocalFrontierData(activeWorkspace.id));
   }
 
   async function importData() {
+    if (!isUuid(activeWorkspace.id)) return;
     setBusy(true);
     const supabase = createBrowserSupabaseClient();
     const result = await importLocalFrontierData({ workspaceId: activeWorkspace.id, supabase });
@@ -52,8 +55,8 @@ export default function DataMigrationSettings() {
         <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Import localStorage data into the active Supabase workspace. Local data is not deleted.</p>
       </div>
       <div className="flex flex-wrap gap-2">
-        <button onClick={preview} className="rounded-lg bg-blue-600 px-4 py-2 font-semibold text-white">Preview Local Data</button>
-        <button onClick={importData} disabled={busy} className="rounded-lg bg-green-600 px-4 py-2 font-semibold text-white disabled:opacity-50">Import Local Data</button>
+        <button onClick={preview} disabled={!isUuid(activeWorkspace.id)} className="rounded-lg bg-blue-600 px-4 py-2 font-semibold text-white disabled:opacity-50">Preview Local Data</button>
+        <button onClick={importData} disabled={busy || !isUuid(activeWorkspace.id)} className="rounded-lg bg-green-600 px-4 py-2 font-semibold text-white disabled:opacity-50">Import Local Data</button>
         <button onClick={() => { setCounts(null); setSummary(null); }} className="rounded-lg border border-gray-300 px-4 py-2 font-semibold dark:border-gray-700">Clear Import Status</button>
       </div>
       {counts && (

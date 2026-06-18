@@ -18,6 +18,7 @@ import {
   moneyToNumber,
 } from "@/lib/frontierInvoices";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
+import { getWorkspaceDisplayName } from "@/lib/workspaceDisplay";
 
 type FinancialInvoice = { id: string; invoice: InvoiceRow };
 
@@ -124,6 +125,7 @@ export default function FinancialsPage() {
   const workspaceExpenses = expenseItems.filter(
     (expense) => expense.workspaceId === activeWorkspace.id
   );
+  const workspaceDisplayName = getWorkspaceDisplayName(activeWorkspace);
 
   function saveSavedInvoiceItems(updatedInvoices: InvoiceRow[]) {
     if (isDatabaseMode) setDbInvoices(updatedInvoices);
@@ -353,7 +355,7 @@ export default function FinancialsPage() {
               ) : (
                 <tr>
                   <td colSpan={5} className="px-6 py-12 text-center text-lg text-gray-500 dark:text-gray-400">
-                    No invoices for {activeWorkspace.name}
+                    No invoices for {workspaceDisplayName}
                   </td>
                 </tr>
               )}
@@ -426,7 +428,7 @@ export default function FinancialsPage() {
               ) : (
                 <tr>
                   <td colSpan={4} className="px-6 py-12 text-center text-lg text-gray-500 dark:text-gray-400">
-                    No expenses for {activeWorkspace.name}
+                    No expenses for {workspaceDisplayName}
                   </td>
                 </tr>
               )}

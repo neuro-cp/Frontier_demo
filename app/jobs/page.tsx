@@ -17,6 +17,7 @@ import {
   InvoiceRow,
 } from "@/lib/frontierInvoices";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
+import { getWorkspaceDisplayName } from "@/lib/workspaceDisplay";
 
 function getStatusColor(status: JobStatus) {
   switch (status) {
@@ -112,6 +113,7 @@ export default function JobsPage() {
   const workspaceJobs = jobItems.filter(
     (job) => job.workspaceId === activeWorkspace.id
   );
+  const workspaceDisplayName = getWorkspaceDisplayName(activeWorkspace);
 
   const allWorkspaceJobsSelected =
     workspaceJobs.length > 0 &&
@@ -510,7 +512,7 @@ export default function JobsPage() {
             ) : (
               <tr>
                 <td colSpan={7} className="p-10 text-center text-lg text-gray-500 dark:text-gray-400">
-                  No jobs found for {activeWorkspace.name}
+                  No jobs found for {workspaceDisplayName}
                 </td>
               </tr>
             )}
