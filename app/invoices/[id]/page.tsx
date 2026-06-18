@@ -6,7 +6,7 @@ import { useParams, useRouter } from "next/navigation";
 
 import DocumentAttachments from "@/app/documents/DocumentAttachments";
 import { useAuthSession } from "@/components/AuthSessionProvider";
-import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
+import { storageKeys, useStoredJsonState, writeStoredJson } from "@/lib/clientStorage";
 import { createInvoicesRepository } from "@/lib/db/invoices";
 import {
   formatMoneyNumber,
@@ -104,6 +104,15 @@ export default function InvoiceDetailPage() {
     } catch (error) {
       setInvoiceError(error instanceof Error ? error.message : "Unable to duplicate invoice.");
     }
+  }
+
+  function editInvoice() {
+    if (!invoice) return;
+    writeStoredJson(storageKeys.invoiceDraft, {
+      ...invoice,
+      editExisting: true,
+    });
+    router.push("/invoices/new/build");
   }
 
   if (isLoadingInvoice) {
@@ -210,6 +219,14 @@ export default function InvoiceDetailPage() {
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
+            onClick={editInvoice}
+            className="rounded-lg bg-blue-600 px-4 py-2 font-semibold text-white hover:bg-blue-700"
+          >
+            Edit
+          </button>
+
+          <button
+            type="button"
             onClick={duplicateInvoice}
             className="rounded-lg border border-gray-300 px-4 py-2 font-semibold hover:bg-gray-100 dark:border-gray-700 dark:hover:bg-gray-800"
           >
@@ -270,22 +287,31 @@ export default function InvoiceDetailPage() {
           </div>
 
           <div className="text-center">
-            <h2 className="text-4xl font-bold text-blue-500">INVOICE</h2>
+            <h2 className="text-4xl font-bold text-blue-500">
+              {invoice.status === "Estimate" ? "ESTIMATE" : "INVOICE"}
+            </h2>
 
             <div
               className="mt-4 grid text-sm"
               style={{
-                gridTemplateColumns: "1fr 1fr",
+                gridTemplateColumns: "1fr 1fr 1fr",
                 borderTop: `1px solid ${borderColor}`,
                 borderLeft: `1px solid ${borderColor}`,
               }}
             >
-              {["INVOICE #", "DATE", invoice.invoiceNumber, invoice.invoiceDate].map((value, index) => (
+              {[
+                invoice.status === "Estimate" ? "ESTIMATE #" : "INVOICE #",
+                "DATE",
+                "STATUS",
+                invoice.invoiceNumber,
+                invoice.invoiceDate,
+                invoice.status,
+              ].map((value, index) => (
                 <div
                   key={`${value}-${index}`}
-                  className={`px-3 py-1 ${index < 2 ? "font-bold" : ""}`}
+                  className={`px-3 py-1 ${index < 3 ? "font-bold" : ""}`}
                   style={{
-                    background: index < 2 ? headerBlue : undefined,
+                    background: index < 3 ? headerBlue : undefined,
                     borderRight: `1px solid ${borderColor}`,
                     borderBottom: `1px solid ${borderColor}`,
                   }}
@@ -387,6 +413,24 @@ export default function InvoiceDetailPage() {
               <div className="flex justify-between gap-3 font-bold">
                 <span>TOTAL</span>
                 <span>${formatMoneyNumber(totals.total)}</span>
+              </div>
+              <div className="mt-2 space-y-1 text-xs font-normal">
+                <div className="flex justify-between gap-3">
+                  <span>Subtotal</span>
+                  <span>${formatMoneyNumber(totals.subtotal)}</span>
+                </div>
+                {totals.discount > 0 && (
+                  <div className="flex justify-between gap-3">
+                    <span>Discount</span>
+                    <span>-${formatMoneyNumber(totals.discount)}</span>
+                  </div>
+                )}
+                {totals.tax > 0 && (
+                  <div className="flex justify-between gap-3">
+                    <span>Tax</span>
+                    <span>${formatMoneyNumber(totals.tax)}</span>
+                  </div>
+                )}
               </div>
             </div>
           </div>

@@ -93,6 +93,7 @@ type InvoiceSetupDraft = Partial<InvoiceRow> & {
   id?: string;
   workspaceId?: string;
   lineItems?: InvoiceLineItem[];
+  editExisting?: boolean;
 };
 
 function moneyToNumber(value: string | number | undefined) {
@@ -404,12 +405,17 @@ export default function InvoiceBuilderPage() {
         sourceClientId: resolvedClientId ?? invoiceBeforeClientUpdate.sourceClientId ?? "",
       };
 
-      const updatedInvoices = [
-        ...savedInvoices.filter((invoice) => invoice.id !== savedInvoice.id),
-        savedInvoice,
-      ];
+      const isEditingExisting = Boolean(draft.editExisting);
+      const updatedInvoices = isEditingExisting
+        ? savedInvoices.map((invoice) => invoice.id === savedInvoice.id ? savedInvoice : invoice)
+        : [
+            ...savedInvoices.filter((invoice) => invoice.id !== savedInvoice.id),
+            savedInvoice,
+          ];
 
-      const saved = await invoicesRepo.createInvoice(savedInvoice as unknown as SharedInvoiceRow);
+      const saved = isEditingExisting
+        ? await invoicesRepo.updateInvoice(savedInvoice as unknown as SharedInvoiceRow)
+        : await invoicesRepo.createInvoice(savedInvoice as unknown as SharedInvoiceRow);
       if (!saved) return;
       if (!isDatabaseMode) setSavedInvoices(updatedInvoices);
       removeStoredValue(storageKeys.invoiceDraft);
