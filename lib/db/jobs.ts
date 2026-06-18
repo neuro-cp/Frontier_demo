@@ -41,6 +41,21 @@ function jobToDb(job: Job) {
 
 export function createJobsRepository({ isSignedIn, supabase, localJobs, setLocalJobs }: Options) {
   const useDb = isSignedIn && supabase;
+  function materialsToRpcPayload(materials: JobMaterial[]) {
+    return materials.map((material) => ({
+      name: material.name,
+      quantity: material.quantity,
+    }));
+  }
+  async function saveJobWithMaterials(job: Job) {
+    if (!useDb) return job;
+    const { error } = await supabase.rpc("upsert_job_with_materials", {
+      job_payload: jobToDb(job),
+      materials_payload: materialsToRpcPayload(job.materials ?? []),
+    });
+    if (error) throw new Error(error.message || "Unable to save job.");
+    return job;
+  }
   return {
     async getJobs(workspaceId: string) {
       if (!useDb) return localJobs.filter((j) => j.workspaceId === workspaceId);
@@ -58,18 +73,11 @@ export function createJobsRepository({ isSignedIn, supabase, localJobs, setLocal
     },
     async createJob(job: Job) {
       if (!useDb) return setLocalJobs((c) => [...c, job]), job;
-      const { error } = await supabase.from("jobs").insert(jobToDb(job));
-      if (error) throw new Error(error.message || "Unable to create job.");
-      await this.saveJobMaterials(job.id, job.workspaceId, job.materials);
-      return job;
+      return saveJobWithMaterials(job);
     },
     async updateJob(id: string, job: Job) {
       if (!useDb) return setLocalJobs((c) => c.map((j) => (j.id === id ? job : j))), job;
-      const values = jobToDb(job); delete (values as { id?: string }).id;
-      const { error } = await supabase.from("jobs").update(values).eq("id", id).eq("workspace_id", job.workspaceId);
-      if (error) throw new Error(error.message || "Unable to update job.");
-      await this.saveJobMaterials(id, job.workspaceId, job.materials);
-      return job;
+      return saveJobWithMaterials({ ...job, id });
     },
     async deleteJob(id: string) {
       if (!useDb) return setLocalJobs((c) => c.filter((j) => j.id !== id)), true;
@@ -85,7 +93,8 @@ export function createJobsRepository({ isSignedIn, supabase, localJobs, setLocal
     },
     async saveJobMaterials(jobId: string, workspaceId: string, materials: JobMaterial[]) {
       if (!useDb) return true;
-      await supabase.from("job_materials").delete().eq("job_id", jobId);
+      const { error: deleteError } = await supabase.from("job_materials").delete().eq("job_id", jobId).eq("workspace_id", workspaceId);
+      if (deleteError) throw new Error(deleteError.message || "Unable to replace job materials.");
       if (materials.length === 0) return true;
       const { error } = await supabase.from("job_materials").insert(materials.map((m) => ({ workspace_id: workspaceId, job_id: jobId, name: m.name, quantity: m.quantity })));
       if (error) throw new Error(error.message || "Unable to save job materials.");

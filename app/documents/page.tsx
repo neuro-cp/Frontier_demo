@@ -184,6 +184,8 @@ export default function DocumentsPage() {
       storageBucket: storagePath ? DOCUMENT_STORAGE_BUCKET : "",
       storagePath,
       storageStatus: storagePath ? "Stored" : "Pending storage setup",
+      processingStatus: "uploaded",
+      documentType: detectedType,
       notes: notes.trim(),
       clientId,
       jobId,
@@ -326,6 +328,9 @@ export default function DocumentsPage() {
                     <span className="rounded-full bg-yellow-100 px-3 py-1 text-sm font-semibold text-yellow-800 dark:bg-yellow-950/50 dark:text-yellow-300">
                       {document.extractionStatus}
                     </span>
+                    <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                      OCR: {document.processingStatus || "uploaded"}
+                    </div>
                   </td>
 
                   <td className="px-6 py-4 text-gray-600 dark:text-gray-300">

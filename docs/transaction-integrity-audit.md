@@ -2,6 +2,22 @@
 
 ## Fixed This Sprint
 
+### Job create/update
+
+- File: `lib/db/jobs.ts`
+- Function: `createJob`, `updateJob`
+- Previous risk: job header could save, then material replacement could fail.
+- Fix: signed-in job saves now use `public.upsert_job_with_materials(job_payload, materials_payload)` from migration `0011_ai_ocr_logistics_readiness.sql`.
+- Result: job row and material replacement run inside one Postgres transaction.
+
+### Route plan create/update
+
+- File: `lib/db/routes.ts`
+- Function: `createRoute`, `updateRoute`
+- Previous risk: route plan could save without all stops.
+- Fix: signed-in route saves now use `public.upsert_route_with_stops(route_payload, stops_payload)`.
+- Result: route plan and stop replacement run inside one Postgres transaction.
+
 ### Invoice create/update
 
 - File: `lib/db/invoices.ts`
@@ -27,22 +43,6 @@
 - Remaining limitation: browser cleanup can still fail due to network interruption after upload.
 
 ## Remaining Transaction Risks
-
-### Job create/update
-
-- File: `lib/db/jobs.ts`
-- Function: `createJob`, `updateJob`, `saveJobMaterials`
-- Risk: job header can save, then material replacement can fail.
-- Severity: High for inventory/job costing accuracy.
-- Recommended fix: add `public.upsert_job_with_materials(job_payload, materials_payload)`.
-
-### Route plan create/update
-
-- File: `lib/db/routes.ts`
-- Function: `createRoute`, `updateRoute`
-- Risk: route plan can save without all stops.
-- Severity: Medium.
-- Recommended fix: add `public.upsert_route_with_stops(route_payload, stops_payload)` and throw readable errors.
 
 ### Document delete
 

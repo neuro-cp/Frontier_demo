@@ -51,6 +51,7 @@
 - Open Documents.
 - Create a metadata-only document.
 - Confirm status text shows metadata/storage status.
+- Upload a document and confirm OCR status shows `uploaded`.
 - Confirm admin console shows document metadata only.
 - Confirm no private file contents are exposed.
 
@@ -60,6 +61,7 @@
 - Confirm the map still renders.
 - Add/select client locations where available.
 - Confirm Google Maps route export is only enabled with at least two stops.
+- Save a route plan with multiple stops and confirm it persists.
 
 ## Core DB Migration
 
@@ -76,6 +78,19 @@
 - Mark an invoice Paid and confirm Financials revenue/outstanding totals update from Supabase data.
 - Switch workspaces and confirm clients, jobs, invoices, inventory, and calendar data are isolated.
 - Try opening a client/job/invoice id from a different workspace and confirm it does not load.
+
+## AI/OCR Readiness
+
+- Confirm uploaded documents receive `processing_status = uploaded`.
+- Confirm no external AI/OCR request is made.
+- Confirm `ai_jobs` can represent future OCR, extraction, voice, logistics, invoice, and client parse jobs.
+
+## Transaction Integrity
+
+- Create and edit an invoice with multiple line items.
+- Create and edit a job with multiple materials.
+- Save a route plan with multiple stops.
+- Confirm failed child-record writes surface readable errors.
 
 ## Known Limits
 
