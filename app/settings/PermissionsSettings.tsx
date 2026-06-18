@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { useAuthSession } from "@/components/AuthSessionProvider";
+import { isUuid } from "@/lib/db/ids";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 
 type PermissionsSettingsProps = {
@@ -70,6 +71,17 @@ export default function PermissionsSettings({
 
   useEffect(() => {
     if (!supabase) return;
+    if (!isUuid(activeWorkspaceId)) {
+      let cancelled = false;
+      queueMicrotask(() => {
+        if (cancelled) return;
+        setMembers((current) => (current.length > 0 ? [] : current));
+        setMemberLoadError((current) => (current ? "" : current));
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
     let cancelled = false;
     supabase
       .from("workspace_members")
@@ -120,6 +132,10 @@ export default function PermissionsSettings({
   async function handleInviteSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!supabase || !user) return;
+    if (!isUuid(activeWorkspaceId)) {
+      setSavedNotice("Create a workspace before inviting members.");
+      return;
+    }
     if (!canManageMembers) {
       setSavedNotice("Only Owners and Managers can invite members.");
       return;
@@ -213,6 +229,7 @@ export default function PermissionsSettings({
   }
 
   async function updateRole(member: MemberRow, role: WorkspaceRole) {
+    if (!isUuid(activeWorkspaceId)) return setSavedNotice("Create a workspace first.");
     const ownerCount = members.filter((item) => item.role === "Owner" && item.status !== "Removed").length;
     if (member.role === "Owner" && role !== "Owner" && ownerCount <= 1) {
       setSavedNotice("Cannot change the last Owner.");
@@ -224,6 +241,7 @@ export default function PermissionsSettings({
   }
 
   async function removeMember(member: MemberRow) {
+    if (!isUuid(activeWorkspaceId)) return setSavedNotice("Create a workspace first.");
     const ownerCount = members.filter((item) => item.role === "Owner" && item.status !== "Removed").length;
     if (member.role === "Owner" && ownerCount <= 1) {
       setSavedNotice("Cannot remove the last Owner.");

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useSyncExternalStore } from "react";
+import { useCallback, useMemo, useState, useSyncExternalStore } from "react";
 
 export const storageKeys = {
   activeWorkspace: "frontier-active-workspace",
@@ -125,7 +125,8 @@ export function useStoredJsonState<T>(
   key: string,
   fallback: T
 ): [T, (value: StoredStateSetter<T>) => void] {
-  const fallbackSnapshot = useMemo(() => JSON.stringify(fallback), [fallback]);
+  const [fallbackValue] = useState(fallback);
+  const [fallbackSnapshot] = useState(() => JSON.stringify(fallback));
 
   const getSnapshot = useCallback(() => {
     if (typeof window === "undefined") return fallbackSnapshot;
@@ -160,13 +161,13 @@ export function useStoredJsonState<T>(
     try {
       return JSON.parse(snapshot) as T;
     } catch {
-      return fallback;
+      return fallbackValue;
     }
-  }, [fallback, snapshot]);
+  }, [fallbackValue, snapshot]);
 
   const setValue = useCallback(
     (nextValue: StoredStateSetter<T>) => {
-      const current = readStoredJson(key, fallback);
+      const current = readStoredJson(key, fallbackValue);
       const resolvedValue =
         typeof nextValue === "function"
           ? (nextValue as (current: T) => T)(current)
@@ -174,7 +175,7 @@ export function useStoredJsonState<T>(
 
       writeStoredJson(key, resolvedValue);
     },
-    [fallback, key]
+    [fallbackValue, key]
   );
 
   return [value, setValue];
