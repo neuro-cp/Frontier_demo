@@ -42,7 +42,7 @@ export async function GET(
     ] = await Promise.all([
       serviceClient
         .from("workspace_members")
-        .select("id, user_id, role, status, invited_email, created_at, profiles(email, display_name)")
+        .select("id, user_id, role, status, invited_email, created_at, profiles!workspace_members_user_id_fkey(email, display_name)")
         .eq("workspace_id", workspaceId)
         .neq("status", "Removed")
         .order("created_at", { ascending: false })
