@@ -49,14 +49,23 @@ function invoiceToDb(i: InvoiceRow) {
 }
 export function createInvoicesRepository({ isSignedIn, supabase, localInvoices, setLocalInvoices }: { isSignedIn: boolean; supabase: SupabaseClient | null; localInvoices: InvoiceRow[]; setLocalInvoices: Setter<InvoiceRow[]> }) {
   const useDb = isSignedIn && supabase;
-  async function saveLines(invoice: InvoiceRow) {
-    if (!useDb) return;
-    const { error: deleteError } = await supabase.from("invoice_line_items").delete().eq("invoice_id", invoice.id);
-    if (deleteError) throw new Error(deleteError.message || "Unable to replace invoice lines.");
-    if (invoice.lineItems.length) {
-      const { error } = await supabase.from("invoice_line_items").insert(invoice.lineItems.map((l: InvoiceLineItem, index) => ({ id: l.id, workspace_id: invoice.workspaceId, invoice_id: invoice.id, description: l.description, quantity: l.quantity, unit_price_cents: moneyStringToCents(l.unitPrice), sort_order: index })));
-      if (error) throw new Error(error.message || "Unable to save invoice lines.");
-    }
+  function invoiceLinesToRpcPayload(invoice: InvoiceRow) {
+    return invoice.lineItems.map((l: InvoiceLineItem, index) => ({
+      id: l.id,
+      description: l.description,
+      quantity: l.quantity,
+      unit_price_cents: moneyStringToCents(l.unitPrice),
+      sort_order: index,
+    }));
+  }
+  async function saveInvoiceWithLines(invoice: InvoiceRow) {
+    if (!useDb) return invoice;
+    const { error } = await supabase.rpc("upsert_invoice_with_lines", {
+      invoice_payload: invoiceToDb(invoice),
+      line_items_payload: invoiceLinesToRpcPayload(invoice),
+    });
+    if (error) throw new Error(error.message || "Unable to save invoice.");
+    return invoice;
   }
   return {
     async getInvoices(workspaceId: string) {
@@ -75,16 +84,11 @@ export function createInvoicesRepository({ isSignedIn, supabase, localInvoices, 
     },
     async createInvoice(invoice: InvoiceRow) {
       if (!useDb) return setLocalInvoices((c) => [...c, invoice]), invoice;
-      const { error } = await supabase.from("invoices").insert(invoiceToDb(invoice));
-      if (error) throw new Error(error.message || "Unable to create invoice.");
-      await saveLines(invoice); return invoice;
+      return saveInvoiceWithLines(invoice);
     },
     async updateInvoice(invoice: InvoiceRow) {
       if (!useDb) return setLocalInvoices((c) => c.map((i) => i.id === invoice.id ? invoice : i)), invoice;
-      const values = invoiceToDb(invoice); delete (values as { id?: string }).id;
-      const { error } = await supabase.from("invoices").update(values).eq("id", invoice.id);
-      if (error) throw new Error(error.message || "Unable to update invoice.");
-      await saveLines(invoice); return invoice;
+      return saveInvoiceWithLines(invoice);
     },
     async deleteInvoice(id: string) {
       if (!useDb) return setLocalInvoices((c) => c.filter((i) => i.id !== id)), true;

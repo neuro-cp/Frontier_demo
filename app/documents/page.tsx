@@ -202,6 +202,13 @@ export default function DocumentsPage() {
       if (isDatabaseMode) setDatabaseDocuments((current) => [created, ...current]);
       closeUploadModal();
     } catch (error) {
+      if (isDatabaseMode && supabase && storagePath) {
+        try {
+          await removeDocumentFile({ supabase, path: storagePath });
+        } catch (cleanupError) {
+          console.error("Unable to clean up failed document upload.", cleanupError);
+        }
+      }
       setDocumentError(error instanceof Error ? error.message : "Unable to save document.");
     } finally {
       setIsSavingDocument(false);

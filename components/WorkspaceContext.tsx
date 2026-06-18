@@ -304,44 +304,14 @@ export function WorkspaceProvider({
 
     setWorkspaceError(null);
 
-    const { error: workspaceErrorResult } = await supabase
-      .from("workspaces")
-      .insert({
-        id: workspace.id,
-        name: workspace.name,
-        type: workspace.type,
-        created_by: user.id,
-      });
+    const { error } = await supabase.rpc("create_workspace_with_owner", {
+      workspace_id: workspace.id,
+      workspace_name: workspace.name,
+      workspace_type: workspace.type,
+    });
 
-    if (workspaceErrorResult) {
-      setWorkspaceError(workspaceErrorResult.message);
-      return;
-    }
-
-    const { error: memberError } = await supabase
-      .from("workspace_members")
-      .insert({
-        workspace_id: workspace.id,
-        user_id: user.id,
-        role: "Owner",
-        status: "Active",
-      });
-
-    if (memberError) {
-      setWorkspaceError(memberError.message);
-      return;
-    }
-
-    const { error: settingsError } = await supabase
-      .from("workspace_settings")
-      .insert({
-        workspace_id: workspace.id,
-        workspace_nickname: workspace.name,
-        business_type: workspace.type,
-      });
-
-    if (settingsError) {
-      setWorkspaceError(settingsError.message);
+    if (error) {
+      setWorkspaceError(error.message);
       return;
     }
 
