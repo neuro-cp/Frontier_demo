@@ -185,18 +185,18 @@ export default function LogisticsPage() {
           </div>
 
           <div className="overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800">
-            {visibleLocations.length > 0 ? (
-              <LogisticsMap
-                locations={visibleLocations}
-                selectedLocationIds={selectedLocationIds}
-                onToggleLocation={toggleLocation}
-              />
-            ) : (
-              <div className="flex h-[500px] items-center justify-center bg-gray-50 text-lg text-gray-500 dark:bg-gray-950 dark:text-gray-400">
-                No client locations found for this filter.
-              </div>
-            )}
+            <LogisticsMap
+              locations={visibleLocations}
+              selectedLocationIds={selectedLocationIds}
+              onToggleLocation={toggleLocation}
+            />
           </div>
+
+          {visibleLocations.length === 0 && (
+            <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm text-gray-500 dark:border-gray-800 dark:bg-gray-950 dark:text-gray-400">
+              No client locations found for this filter.
+            </div>
+          )}
 
           {missingCoordinateClients.length > 0 && (
             <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
