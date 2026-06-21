@@ -1,5 +1,5 @@
 
-\restrict RDaxbPPXlOHHDzUbZj1r3ZxJlJg0GoF0Yy2w2J688vn2gyD2MwZ3cZoqY08E92T
+\restrict VWmPX3PttHPaxcP2wpTa1PbaYn5JUsyjYEIagBBP3bCs4VZZcH8J9RCjWXkPVp4
 
 
 SET statement_timeout = 0;
@@ -748,7 +748,7 @@ CREATE TABLE IF NOT EXISTS "public"."ai_review_drafts" (
     CONSTRAINT "ai_review_drafts_actions_array_check" CHECK (("jsonb_typeof"("actions") = 'array'::"text")),
     CONSTRAINT "ai_review_drafts_no_delete_actions_check" CHECK ((NOT "jsonb_path_exists"("actions", '$[*]?(@."type" like_regex "^delete_")'::"jsonpath"))),
     CONSTRAINT "ai_review_drafts_source_type_check" CHECK (("source_type" = ANY (ARRAY['ocr'::"text", 'transcript'::"text"]))),
-    CONSTRAINT "ai_review_drafts_status_check" CHECK (("status" = ANY (ARRAY['Pending'::"text", 'Approved'::"text", 'Rejected'::"text"]))),
+    CONSTRAINT "ai_review_drafts_status_check" CHECK (("status" = ANY (ARRAY['Pending'::"text", 'Approved'::"text", 'Rejected'::"text", 'Needs Changes'::"text"]))),
     CONSTRAINT "ai_review_drafts_warnings_array_check" CHECK (("jsonb_typeof"("warnings") = 'array'::"text"))
 );
 
@@ -2793,6 +2793,6 @@ ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TAB
 
 
 
-\unrestrict RDaxbPPXlOHHDzUbZj1r3ZxJlJg0GoF0Yy2w2J688vn2gyD2MwZ3cZoqY08E92T
+\unrestrict VWmPX3PttHPaxcP2wpTa1PbaYn5JUsyjYEIagBBP3bCs4VZZcH8J9RCjWXkPVp4
 
 RESET ALL;

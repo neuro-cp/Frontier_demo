@@ -4,7 +4,11 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { ReviewDraft } from "@/lib/ai/reviewTypes";
 import type { AiSourceType, InterpretationWarning, SuggestedAction } from "@/lib/ai/types";
 
-export type AiReviewDraftStatus = "Pending" | "Approved" | "Rejected";
+export type AiReviewDraftStatus =
+  | "Pending"
+  | "Approved"
+  | "Rejected"
+  | "Needs Changes";
 
 export type AiReviewDraft = {
   id: string;
