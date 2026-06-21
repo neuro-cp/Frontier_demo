@@ -23,7 +23,10 @@ export type Workspace = {
   id: string;
   name: string;
   type: string;
+  role?: WorkspaceRole;
 };
+
+export type WorkspaceRole = "Owner" | "Manager" | "Employee";
 
 const createWorkspacePlaceholder: Workspace = {
   id: "create-workspace",
@@ -43,9 +46,12 @@ type WorkspaceContextValue = {
   workspaces: Workspace[];
   activeWorkspace: Workspace;
   setActiveWorkspace: (workspace: Workspace) => void;
-  addWorkspace: (workspace: Workspace) => void | Promise<void>;
+  addWorkspace: (workspace: Workspace) => Promise<boolean>;
   deleteWorkspace: (workspaceId: string) => Promise<boolean>;
   adminViewWorkspace: Workspace | null;
+  activeWorkspaceRole: WorkspaceRole;
+  canManageWorkspace: boolean;
+  canDeleteBusinessRecords: boolean;
   isLoadingWorkspaces: boolean;
   workspaceError: string | null;
 };
@@ -53,20 +59,9 @@ type WorkspaceContextValue = {
 const WorkspaceContext =
   createContext<WorkspaceContextValue | null>(null);
 
-type WorkspaceMemberWithWorkspace = {
-  workspace_id: string;
-  workspaces:
-    | {
-        id: string;
-        name: string;
-        type: string;
-      }
-    | {
-        id: string;
-        name: string;
-        type: string;
-      }[]
-    | null;
+type WorkspacesResponse = {
+  workspaces?: Workspace[];
+  error?: string;
 };
 
 function getUserDisplayName(user: { email?: string; user_metadata?: object }) {
@@ -78,22 +73,6 @@ function getUserDisplayName(user: { email?: string; user_metadata?: object }) {
     | undefined;
 
   return metadata?.full_name || metadata?.name || user.email || "Frontier User";
-}
-
-function normalizeJoinedWorkspace(
-  row: WorkspaceMemberWithWorkspace
-): Workspace | null {
-  const workspace = Array.isArray(row.workspaces)
-    ? row.workspaces[0]
-    : row.workspaces;
-
-  if (!workspace) return null;
-
-  return {
-    id: workspace.id,
-    name: workspace.name,
-    type: workspace.type,
-  };
 }
 
 export function WorkspaceProvider({
@@ -158,18 +137,13 @@ export function WorkspaceProvider({
 
       if (inviteError) throw inviteError;
 
-      const { data: membershipRows, error: membershipError } = await supabase
-        .from("workspace_members")
-        .select("workspace_id, workspaces(id, name, type)")
-        .eq("user_id", supabaseUser.id)
-        .eq("status", "Active");
+      const response = await fetch("/api/workspaces");
+      const payload = (await response.json()) as WorkspacesResponse;
+      if (!response.ok) {
+        throw new Error(payload.error || "Unable to load workspaces.");
+      }
 
-      if (membershipError) throw membershipError;
-
-      const loadedWorkspaces = ((membershipRows ??
-        []) as WorkspaceMemberWithWorkspace[])
-        .map(normalizeJoinedWorkspace)
-        .filter((workspace): workspace is Workspace => Boolean(workspace));
+      const loadedWorkspaces = payload.workspaces ?? [];
 
       return loadedWorkspaces;
     },
@@ -277,8 +251,8 @@ export function WorkspaceProvider({
     ? databaseActiveWorkspaceId
     : activeWorkspaceId;
 
-  const activeWorkspace =
-    useMemo(
+  const activeWorkspace: Workspace =
+    useMemo<Workspace>(
       () =>
         adminViewWorkspace ??
         visibleWorkspaces.find(
@@ -288,6 +262,12 @@ export function WorkspaceProvider({
         (isDatabaseMode ? createWorkspacePlaceholder : defaultWorkspaces[0]),
       [adminViewWorkspace, isDatabaseMode, visibleActiveWorkspaceId, visibleWorkspaces]
     );
+  const activeWorkspaceRole = (adminViewWorkspace
+    ? "Owner"
+    : activeWorkspace.role) ?? "Owner";
+  const canManageWorkspace = activeWorkspaceRole === "Owner";
+  const canDeleteBusinessRecords =
+    activeWorkspaceRole === "Owner" || activeWorkspaceRole === "Manager";
 
   const addWorkspace = useCallback(async (workspace: Workspace) => {
     if (!isDatabaseMode || !user) {
@@ -297,31 +277,40 @@ export function WorkspaceProvider({
       ]);
 
       setActiveWorkspaceId(workspace.id);
-      return;
+      return true;
     }
-
-    const supabase = createBrowserSupabaseClient();
 
     setWorkspaceError(null);
 
-    const { error } = await supabase.rpc("create_workspace_with_owner", {
-      workspace_id: workspace.id,
-      workspace_name: workspace.name,
-      workspace_type: workspace.type,
+    const response = await fetch("/api/workspaces", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(workspace),
     });
+    const payload = (await response.json()) as {
+      workspace?: Workspace;
+      error?: string;
+    };
 
-    if (error) {
-      setWorkspaceError(error.message);
-      return;
+    if (!response.ok || !payload.workspace) {
+      const message = payload.error || "Unable to create workspace.";
+      setWorkspaceError(message);
+      throw new Error(message);
     }
 
-    setDatabaseWorkspaces((current) => [
-      ...current,
-      workspace,
-    ]);
-    setDatabaseActiveWorkspaceId(workspace.id);
-    writeStoredString(storageKeys.activeWorkspace, workspace.id);
-  }, [isDatabaseMode, setActiveWorkspaceId, setWorkspaces, user]);
+    const createdWorkspace = payload.workspace;
+    const loadedWorkspaces = await ensureSignedInWorkspace(user);
+    const nextWorkspaces = loadedWorkspaces.some(
+      (item) => item.id === createdWorkspace.id
+    )
+      ? loadedWorkspaces
+      : [...loadedWorkspaces, createdWorkspace];
+
+    setDatabaseWorkspaces(nextWorkspaces);
+    setDatabaseActiveWorkspaceId(createdWorkspace.id);
+    writeStoredString(storageKeys.activeWorkspace, createdWorkspace.id);
+    return true;
+  }, [ensureSignedInWorkspace, isDatabaseMode, setActiveWorkspaceId, setWorkspaces, user]);
 
   const deleteWorkspace = useCallback(async (workspaceId: string) => {
     if (!isDatabaseMode || !user) {
@@ -336,14 +325,13 @@ export function WorkspaceProvider({
       return true;
     }
 
-    const supabase = createBrowserSupabaseClient();
-    const { error } = await supabase
-      .from("workspaces")
-      .delete()
-      .eq("id", workspaceId);
+    const response = await fetch(`/api/workspaces?workspaceId=${encodeURIComponent(workspaceId)}`, {
+      method: "DELETE",
+    });
+    const payload = (await response.json()) as { error?: string };
 
-    if (error) {
-      setWorkspaceError(error.message);
+    if (!response.ok) {
+      setWorkspaceError(payload.error || "Unable to delete workspace.");
       return false;
     }
 
@@ -380,14 +368,20 @@ export function WorkspaceProvider({
       addWorkspace,
       deleteWorkspace,
       adminViewWorkspace,
+      activeWorkspaceRole,
+      canManageWorkspace,
+      canDeleteBusinessRecords,
       isLoadingWorkspaces,
       workspaceError,
     }),
     [
       activeWorkspace,
       addWorkspace,
+      activeWorkspaceRole,
       deleteWorkspace,
       adminViewWorkspace,
+      canDeleteBusinessRecords,
+      canManageWorkspace,
       isLoadingWorkspaces,
       setActiveWorkspace,
       visibleWorkspaces,

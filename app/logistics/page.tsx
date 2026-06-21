@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { useAuthSession } from "@/components/AuthSessionProvider";
 import { useWorkspace } from "@/components/WorkspaceContext";
+import { createRoutePlanAction } from "@/lib/actions/routes";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
 import type { ClientRow } from "@/lib/clientTypes";
 import { createClientsRepository } from "@/lib/db/clients";
@@ -22,6 +23,7 @@ const LogisticsMap = dynamic(() => import("./LogisticsMap"), {
 });
 
 const clientStatuses = ["All", "Lead", "Active", "Inactive"];
+const maxGoogleMapsUrlLength = 2048;
 
 export default function LogisticsPage() {
   const { activeWorkspace } = useWorkspace();
@@ -36,6 +38,9 @@ export default function LogisticsPage() {
   );
   const [databaseClients, setDatabaseClients] = useState<ClientRow[]>([]);
   const [routes, setRoutes] = useState<RoutePlan[]>([]);
+  const [routeError, setRouteError] = useState("");
+  const [geocodingClientId, setGeocodingClientId] = useState("");
+  const [isOptimizingRoute, setIsOptimizingRoute] = useState(false);
 
   const supabase = useMemo(() => (isDatabaseMode ? createBrowserSupabaseClient() : null), [isDatabaseMode]);
   const clientsRepo = useMemo(() => createClientsRepository({ isSignedIn: isDatabaseMode, supabase, localClients, setLocalClients }), [isDatabaseMode, localClients, setLocalClients, supabase]);
@@ -76,9 +81,12 @@ export default function LogisticsPage() {
   }, [filteredClients]);
 
   const selectedLocations = useMemo(() => {
-    return visibleLocations.filter((location) =>
-      selectedLocationIds.includes(location.id)
+    const locationsById = new Map(
+      visibleLocations.map((location) => [location.id, location])
     );
+    return selectedLocationIds
+      .map((locationId) => locationsById.get(locationId))
+      .filter((location): location is LogisticsLocation => Boolean(location));
   }, [visibleLocations, selectedLocationIds]);
 
   function toggleLocation(locationId: string) {
@@ -125,13 +133,111 @@ export default function LogisticsPage() {
 
     const waypointParam = waypoints ? `&waypoints=${waypoints}` : "";
 
-    return `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${destination}${waypointParam}&travelmode=driving`;
+    const url = `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${destination}${waypointParam}&travelmode=driving`;
+    return url.length <= maxGoogleMapsUrlLength ? url : "";
   }
 
   const googleMapsUrl = buildGoogleMapsUrl(selectedLocations);
+  const canOpenGoogleMaps = selectedLocations.length >= 2 && Boolean(googleMapsUrl);
+
+  async function geocodeClient(clientId: string) {
+    if (!isDatabaseMode) {
+      setRouteError("Sign in to geocode and save client coordinates.");
+      return;
+    }
+
+    setGeocodingClientId(clientId);
+    setRouteError("");
+
+    try {
+      const response = await fetch("/api/geocode", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          workspaceId: activeWorkspace.id,
+          clientId,
+        }),
+      });
+      const payload = (await response.json()) as {
+        data?: {
+          clientId: string;
+          latitude: number;
+          longitude: number;
+        };
+        error?: string;
+      };
+
+      if (!response.ok || !payload.data) {
+        throw new Error(payload.error || "Address could not be geocoded.");
+      }
+
+      setDatabaseClients((current) =>
+        current.map((client) =>
+          client.id === payload.data?.clientId
+            ? {
+                ...client,
+                latitude: payload.data.latitude,
+                longitude: payload.data.longitude,
+              }
+            : client
+        )
+      );
+      setSelectedLocationIds((current) =>
+        current.includes(clientId) ? current : [...current, clientId]
+      );
+    } catch (error) {
+      setRouteError(
+        error instanceof Error ? error.message : "Address could not be geocoded."
+      );
+    } finally {
+      setGeocodingClientId("");
+    }
+  }
+
+  async function optimizeRoute() {
+    if (!isDatabaseMode || selectedLocations.length < 2) return;
+
+    setIsOptimizingRoute(true);
+    setRouteError("");
+
+    try {
+      const response = await fetch("/api/logistics/route", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          workspaceId: activeWorkspace.id,
+          stops: selectedLocations.map((location) => ({
+            id: location.id,
+            latitude: location.latitude,
+            longitude: location.longitude,
+            addressSnapshot: getClientFullAddress(location),
+          })),
+        }),
+      });
+      const payload = (await response.json()) as {
+        data?: { orderedStopIds: string[] };
+        error?: string;
+      };
+
+      if (!response.ok || !payload.data) {
+        throw new Error(payload.error || "Unable to optimize route.");
+      }
+
+      setSelectedLocationIds(payload.data.orderedStopIds);
+    } catch (error) {
+      setRouteError(error instanceof Error ? error.message : "Unable to optimize route.");
+    } finally {
+      setIsOptimizingRoute(false);
+    }
+  }
 
   async function saveRoute() {
     if (!isDatabaseMode || selectedLocations.length === 0) return;
+    if (selectedLocations.length >= 2 && !googleMapsUrl) {
+      setRouteError("Too many route stops for Google Maps export. Reduce stop count.");
+      return;
+    }
+
     const route: RoutePlan = {
       id: crypto.randomUUID(),
       workspaceId: activeWorkspace.id,
@@ -145,8 +251,13 @@ export default function LogisticsPage() {
         addressSnapshot: getClientFullAddress(location),
       })),
     };
-    const created = await routesRepo.createRoute(route);
-    if (created) setRoutes((current) => [created, ...current]);
+    const result = await createRoutePlanAction(routesRepo, route);
+    if (!result.ok) {
+      setRouteError(result.error);
+      return;
+    }
+    setRouteError("");
+    setRoutes((current) => [result.data, ...current]);
   }
 
   return (
@@ -165,6 +276,12 @@ export default function LogisticsPage() {
           ))}
         </select>
       </div>
+
+      {routeError && (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
+          {routeError}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1fr_420px]">
         <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-gray-900 sm:p-6">
@@ -202,14 +319,35 @@ export default function LogisticsPage() {
             <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
               <div className="font-semibold">Missing coordinates</div>
               <p className="mt-1">
-                Add an address or saved coordinates for these clients to show
-                them on the map:
+                Geocode saved addresses to replace temporary map positions:
               </p>
-              <div className="mt-2">
-                {missingCoordinateClients.map((client) => client.name).join(", ")}
+              <div className="mt-3 space-y-2">
+                {missingCoordinateClients.map((client) => (
+                  <div
+                    key={client.id}
+                    className="flex flex-col gap-2 rounded-lg bg-white/70 p-3 dark:bg-gray-900/50 sm:flex-row sm:items-center sm:justify-between"
+                  >
+                    <span>{client.name}</span>
+                    {client.hasAddress ? (
+                      <button
+                        type="button"
+                        onClick={() => geocodeClient(client.id)}
+                        disabled={!isDatabaseMode || geocodingClientId === client.id}
+                        className="rounded-lg bg-amber-600 px-3 py-2 text-xs font-semibold text-white hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {geocodingClientId === client.id ? "Geocoding..." : "Geocode"}
+                      </button>
+                    ) : (
+                      <span className="text-xs font-semibold">Add an address first</span>
+                    )}
+                  </div>
+                ))}
               </div>
             </div>
           )}
+          <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">
+            Geocoding data &copy; OpenStreetMap contributors.
+          </p>
         </div>
 
         <div className="space-y-6">
@@ -241,14 +379,25 @@ export default function LogisticsPage() {
               </button>
 
               {isDatabaseMode && (
-                <button
-                  type="button"
-                  onClick={saveRoute}
-                  disabled={selectedLocations.length === 0}
-                  className="w-full rounded-lg border border-green-600 px-4 py-2 text-sm font-semibold text-green-700 hover:bg-green-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-green-300 dark:hover:bg-green-950/30 sm:w-auto"
-                >
-                  Save Route
-                </button>
+                <>
+                  <button
+                    type="button"
+                    onClick={optimizeRoute}
+                    disabled={selectedLocations.length < 2 || isOptimizingRoute}
+                    className="w-full rounded-lg border border-blue-600 px-4 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-blue-300 dark:hover:bg-blue-950/30 sm:w-auto"
+                  >
+                    {isOptimizingRoute ? "Optimizing..." : "Optimize Route"}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={saveRoute}
+                    disabled={selectedLocations.length === 0}
+                    className="w-full rounded-lg border border-green-600 px-4 py-2 text-sm font-semibold text-green-700 hover:bg-green-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-green-300 dark:hover:bg-green-950/30 sm:w-auto"
+                  >
+                    Save Route
+                  </button>
+                </>
               )}
             </div>
 
@@ -358,18 +507,23 @@ export default function LogisticsPage() {
             </div>
 
             <a
-              href={selectedLocations.length >= 2 ? googleMapsUrl : undefined}
+              href={canOpenGoogleMaps ? googleMapsUrl : undefined}
               target="_blank"
               rel="noreferrer"
-              aria-disabled={selectedLocations.length < 2}
+              aria-disabled={!canOpenGoogleMaps}
               className={`mt-6 block w-full rounded-lg px-4 py-3 text-center font-semibold text-white ${
-                selectedLocations.length >= 2
+                canOpenGoogleMaps
                   ? "bg-green-600 hover:bg-green-700"
                   : "pointer-events-none cursor-not-allowed bg-gray-400"
               }`}
             >
               Open Route in Google Maps
             </a>
+            {selectedLocations.length >= 2 && !googleMapsUrl && (
+              <p className="mt-3 text-sm text-amber-700 dark:text-amber-300">
+                Too many route stops for Google Maps export. Reduce stop count.
+              </p>
+            )}
           </div>
         </div>
       </div>

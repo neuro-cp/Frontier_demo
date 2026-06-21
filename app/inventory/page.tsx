@@ -3,6 +3,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { useAuthSession } from "@/components/AuthSessionProvider";
 import { useWorkspace } from "@/components/WorkspaceContext";
+import {
+  createInventoryItemAction,
+  deleteInventoryItemAction,
+  updateInventoryItemAction,
+} from "@/lib/actions/inventory";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
 import { createInventoryRepository, type InventoryRow } from "@/lib/db/inventory";
 import { createJobsRepository } from "@/lib/db/jobs";
@@ -11,7 +16,7 @@ import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { getWorkspaceDisplayName } from "@/lib/workspaceDisplay";
 
 export default function InventoryPage() {
-  const { activeWorkspace } = useWorkspace();
+  const { activeWorkspace, canDeleteBusinessRecords } = useWorkspace();
   const { isSupabaseConfigured, user } = useAuthSession();
   const isDatabaseMode = Boolean(isSupabaseConfigured && user);
 
@@ -135,9 +140,18 @@ export default function InventoryPage() {
   }
 
   async function removeSelectedItems() {
+    if (!canDeleteBusinessRecords) return;
+
     try {
       const selected = inventoryItems.filter((item) => selectedItems.includes(item.name));
-      await Promise.all(selected.map((item) => inventoryRepo.deleteInventoryItem(item)));
+      const results = await Promise.all(
+        selected.map((item) => deleteInventoryItemAction(inventoryRepo, item))
+      );
+      const failedDelete = results.find((result) => !result.ok);
+      if (failedDelete && !results.some((result) => result.ok)) {
+        setDataError(failedDelete.ok ? "Unable to delete inventory." : failedDelete.error);
+        return;
+      }
       saveInventory(inventoryItems.filter((item) => !selectedItems.includes(item.name)));
       setSelectedItems([]);
       setDataError("");
@@ -173,8 +187,12 @@ export default function InventoryPage() {
     };
 
     try {
-      const created = await inventoryRepo.createInventoryItem(newItem);
-      if (!created) return;
+      const result = await createInventoryItemAction(inventoryRepo, newItem);
+      if (!result.ok) {
+        setDataError(result.error);
+        return;
+      }
+      const created = result.data;
       if (isDatabaseMode) setDatabaseInventoryItems((current) => [...current, created]);
       else saveInventory([...inventoryItems, created]);
       setDataError("");
@@ -233,8 +251,12 @@ export default function InventoryPage() {
       : [...inventoryItems, updatedItem];
 
     try {
-      const saved = await inventoryRepo.updateInventoryItem(updatedItem);
-      if (!saved) return;
+      const result = await updateInventoryItemAction(inventoryRepo, updatedItem);
+      if (!result.ok) {
+        setDataError(result.error);
+        return;
+      }
+      const saved = result.data;
       if (isDatabaseMode) {
         setDatabaseInventoryItems((current) =>
           existingItem
@@ -258,7 +280,7 @@ export default function InventoryPage() {
           <button type="button" onClick={() => setNewItemOpen(true)} className="rounded-lg bg-blue-600 px-4 py-2 text-white shadow hover:bg-blue-700">
             + Add Item
           </button>
-          <button type="button" onClick={removeSelectedItems} disabled={selectedItems.length === 0} className="rounded-lg bg-red-600 px-4 py-2 text-white shadow hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50">
+          <button type="button" onClick={removeSelectedItems} disabled={selectedItems.length === 0 || !canDeleteBusinessRecords} className="rounded-lg bg-red-600 px-4 py-2 text-white shadow hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50">
             Remove Item
           </button>
         </div>

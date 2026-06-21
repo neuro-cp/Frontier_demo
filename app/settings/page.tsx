@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useWorkspace } from "@/components/WorkspaceContext";
+import { deleteWorkspaceAction } from "@/lib/actions/workspaces";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
 import { getWorkspaceDisplayName } from "@/lib/workspaceDisplay";
 import { defaultBusinessTypes } from "@/lib/workspaceOptions";
@@ -79,7 +80,7 @@ function getDefaultSettings(
 }
 
 export default function SettingsPage() {
-  const { activeWorkspace, deleteWorkspace } = useWorkspace();
+  const { activeWorkspace, canManageWorkspace, deleteWorkspace } = useWorkspace();
   const [allSettings, setAllSettings] = useStoredJsonState<WorkspaceSettings[]>(
     storageKeys.settings,
     []
@@ -97,6 +98,7 @@ export default function SettingsPage() {
       allSettings={allSettings}
       initialSettings={initialSettings}
       setAllSettings={setAllSettings}
+      canManageWorkspace={canManageWorkspace}
       deleteWorkspace={deleteWorkspace}
     />
   );
@@ -108,6 +110,7 @@ function SettingsWorkspacePanel({
   allSettings,
   initialSettings,
   setAllSettings,
+  canManageWorkspace,
   deleteWorkspace,
 }: {
   activeWorkspaceId: string;
@@ -115,6 +118,7 @@ function SettingsWorkspacePanel({
   allSettings: WorkspaceSettings[];
   initialSettings: WorkspaceSettings;
   setAllSettings: (settings: WorkspaceSettings[]) => void;
+  canManageWorkspace: boolean;
   deleteWorkspace: (workspaceId: string) => Promise<boolean>;
 }) {
 
@@ -174,6 +178,11 @@ function SettingsWorkspacePanel({
 
   async function handleDeleteWorkspace() {
     if (activeWorkspaceId === "create-workspace") return;
+    if (!canManageWorkspace) {
+      showSavedNotice("Only workspace owners can delete a workspace.");
+      return;
+    }
+
     if (deleteConfirmation !== activeWorkspaceName) {
       showSavedNotice("Type the workspace name exactly before deleting.");
       return;
@@ -186,11 +195,14 @@ function SettingsWorkspacePanel({
     if (!confirmed) return;
 
     setIsDeletingWorkspace(true);
-    const deleted = await deleteWorkspace(activeWorkspaceId);
+    const result = await deleteWorkspaceAction(
+      { addWorkspace: () => undefined, deleteWorkspace },
+      activeWorkspaceId
+    );
     setIsDeletingWorkspace(false);
 
-    if (!deleted) {
-      showSavedNotice("Workspace could not be deleted.");
+    if (!result.ok) {
+      showSavedNotice(result.error);
       return;
     }
 
@@ -605,11 +617,17 @@ function SettingsWorkspacePanel({
               <p className="mt-2 text-sm text-red-700 dark:text-red-200">
                 This permanently deletes the workspace and database records tied to it. Type the workspace name to enable deletion.
               </p>
+              {!canManageWorkspace && (
+                <p className="mt-2 text-sm font-semibold text-red-700 dark:text-red-200">
+                  Only workspace owners can delete this workspace.
+                </p>
+              )}
               <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-[1fr_auto]">
                 <input
                   value={deleteConfirmation}
                   onChange={(event) => setDeleteConfirmation(event.target.value)}
                   placeholder={activeWorkspaceName}
+                  disabled={!canManageWorkspace}
                   className={inputClass}
                 />
                 <button
@@ -617,6 +635,7 @@ function SettingsWorkspacePanel({
                   onClick={handleDeleteWorkspace}
                   disabled={
                     isDeletingWorkspace ||
+                    !canManageWorkspace ||
                     deleteConfirmation !== activeWorkspaceName
                   }
                   className="rounded-lg bg-red-600 px-5 py-3 font-semibold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-gray-400"

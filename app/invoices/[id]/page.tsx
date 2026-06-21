@@ -6,6 +6,12 @@ import { useParams, useRouter } from "next/navigation";
 
 import DocumentAttachments from "@/app/documents/DocumentAttachments";
 import { useAuthSession } from "@/components/AuthSessionProvider";
+import { useWorkspace } from "@/components/WorkspaceContext";
+import {
+  createInvoiceAction,
+  deleteInvoiceAction,
+  updateInvoiceAction,
+} from "@/lib/actions/invoices";
 import { storageKeys, useStoredJsonState, writeStoredJson } from "@/lib/clientStorage";
 import { createInvoicesRepository } from "@/lib/db/invoices";
 import {
@@ -28,6 +34,7 @@ export default function InvoiceDetailPage() {
   const params = useParams();
   const router = useRouter();
   const invoiceId = String(params.id);
+  const { canDeleteBusinessRecords } = useWorkspace();
   const { isSupabaseConfigured, user } = useAuthSession();
   const isDatabaseMode = Boolean(isSupabaseConfigured && user);
 
@@ -37,6 +44,7 @@ export default function InvoiceDetailPage() {
   );
   const [databaseInvoice, setDatabaseInvoice] = useState<InvoiceRow | null>(null);
   const [isLoadingInvoice, setIsLoadingInvoice] = useState(false);
+  const [isDeletingInvoice, setIsDeletingInvoice] = useState(false);
   const [invoiceError, setInvoiceError] = useState("");
 
   const supabase = useMemo(() => (isDatabaseMode ? createBrowserSupabaseClient() : null), [isDatabaseMode]);
@@ -67,7 +75,12 @@ export default function InvoiceDetailPage() {
     if (!invoice) return;
 
     try {
-      const saved = await invoicesRepo.updateInvoice({ ...invoice, status: nextStatus });
+      const result = await updateInvoiceAction(invoicesRepo, { ...invoice, status: nextStatus });
+      if (!result.ok) {
+        setInvoiceError(result.error);
+        return;
+      }
+      const saved = result.data;
       if (isDatabaseMode) setDatabaseInvoice(saved);
       else setLocalInvoices((current) => current.map((item) => item.id === invoice.id ? saved : item));
       setInvoiceError("");
@@ -98,7 +111,12 @@ export default function InvoiceDetailPage() {
     };
 
     try {
-      const saved = await invoicesRepo.createInvoice(duplicated);
+      const result = await createInvoiceAction(invoicesRepo, duplicated);
+      if (!result.ok) {
+        setInvoiceError(result.error);
+        return;
+      }
+      const saved = result.data;
       setInvoiceError("");
       router.push(`/invoices/${saved.id}`);
     } catch (error) {
@@ -113,6 +131,36 @@ export default function InvoiceDetailPage() {
       editExisting: true,
     });
     router.push("/invoices/new/build");
+  }
+
+  async function deleteInvoice() {
+    if (!canDeleteBusinessRecords) return;
+    if (!invoice || isDeletingInvoice) return;
+    const confirmed = window.confirm(
+      `Delete invoice ${invoice.invoiceNumber}? This cannot be undone.`
+    );
+    if (!confirmed) return;
+
+    setIsDeletingInvoice(true);
+    try {
+      const result = await deleteInvoiceAction(
+        invoicesRepo,
+        invoice.id,
+        invoice.workspaceId
+      );
+      if (!result.ok) {
+        setInvoiceError(result.error);
+        setIsDeletingInvoice(false);
+        return;
+      }
+      setInvoiceError("");
+      router.push("/invoices");
+    } catch (error) {
+      setInvoiceError(
+        error instanceof Error ? error.message : "Unable to delete invoice."
+      );
+      setIsDeletingInvoice(false);
+    }
   }
 
   if (isLoadingInvoice) {
@@ -233,6 +281,15 @@ export default function InvoiceDetailPage() {
             Duplicate
           </button>
 
+          <button
+            type="button"
+            onClick={deleteInvoice}
+            disabled={isDeletingInvoice || !canDeleteBusinessRecords}
+            className="rounded-lg border border-red-600 px-4 py-2 font-semibold text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-red-400 dark:hover:bg-red-950/30"
+          >
+            {isDeletingInvoice ? "Deleting..." : "Delete"}
+          </button>
+
           {invoice.status === "Estimate" && (
             <button
               type="button"
@@ -274,7 +331,7 @@ export default function InvoiceDetailPage() {
         </div>
       </div>
 
-      <div className="invoice-print-page mx-auto max-w-4xl rounded-xl bg-white p-8 text-black shadow print:max-w-none print:rounded-none print:p-0 print:shadow-none">
+      <div className="invoice-print-page mx-auto max-w-4xl rounded-xl bg-[#ffffff] p-8 text-gray-950 shadow dark:bg-gray-900 dark:text-gray-100 print:max-w-none print:rounded-none print:bg-white print:p-0 print:text-black print:shadow-none">
         <div className="grid grid-cols-2 gap-8">
           <div className="text-sm leading-5">
             <p className="font-bold">{invoice.companyName}</p>
@@ -309,7 +366,7 @@ export default function InvoiceDetailPage() {
               ].map((value, index) => (
                 <div
                   key={`${value}-${index}`}
-                  className={`px-3 py-1 ${index < 3 ? "font-bold" : ""}`}
+                  className={`px-3 py-1 ${index < 3 ? "font-bold text-gray-950" : ""}`}
                   style={{
                     background: index < 3 ? headerBlue : undefined,
                     borderRight: `1px solid ${borderColor}`,
@@ -325,7 +382,7 @@ export default function InvoiceDetailPage() {
 
         <div className="mt-10 max-w-sm text-sm leading-5">
           <div
-            className="px-2 py-1 font-bold"
+            className="px-2 py-1 font-bold text-gray-950"
             style={{ background: headerBlue, border: `1px solid ${borderColor}` }}
           >
             BILL TO
@@ -355,7 +412,7 @@ export default function InvoiceDetailPage() {
             }}
           >
             <div
-              className="px-3 py-2 font-bold"
+              className="px-3 py-2 font-bold text-gray-950"
               style={{
                 background: headerBlue,
                 borderRight: `1px solid ${borderColor}`,
@@ -366,7 +423,7 @@ export default function InvoiceDetailPage() {
             </div>
 
             <div
-              className="px-3 py-2 text-right font-bold"
+              className="px-3 py-2 text-right font-bold text-gray-950"
               style={{ background: headerBlue, borderBottom: `1px solid ${borderColor}` }}
             >
               AMOUNT

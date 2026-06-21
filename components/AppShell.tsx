@@ -5,6 +5,7 @@ import Link from "next/link";
 import Sidebar from "./Sidebar";
 import { useAuthSession } from "@/components/AuthSessionProvider";
 import { useWorkspace } from "@/components/WorkspaceContext";
+import { createWorkspaceAction } from "@/lib/actions/workspaces";
 import {
   removeStoredValue,
   storageKeys,
@@ -50,6 +51,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const [userOpen, setUserOpen] = useState(false);
   const [newWorkspaceOpen, setNewWorkspaceOpen] = useState(false);
+  const [newWorkspaceError, setNewWorkspaceError] = useState("");
+  const [isCreatingWorkspace, setIsCreatingWorkspace] = useState(false);
   const [platformAdminCheck, setPlatformAdminCheck] = useState<{
     userId: string;
     isAdmin: boolean;
@@ -67,6 +70,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     adminViewWorkspace,
     setActiveWorkspace,
     addWorkspace,
+    workspaceError,
   } = useWorkspace();
 
   const darkMode = theme !== "light";
@@ -147,6 +151,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     setWorkspaceName("");
     setWorkspaceType(defaultBusinessTypes[0]);
     setCustomWorkspaceType("");
+    setNewWorkspaceError("");
   }
 
   function closeNewWorkspaceModal() {
@@ -158,6 +163,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   async function createWorkspace() {
     if (!workspaceName.trim()) return;
+    if (isCreatingWorkspace) return;
 
     const resolvedType =
       workspaceType === "Other"
@@ -165,6 +171,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         : workspaceType;
 
     if (!resolvedType) return;
+    setNewWorkspaceError("");
+    setIsCreatingWorkspace(true);
 
     const newWorkspace = {
       id: crypto.randomUUID(),
@@ -172,7 +180,32 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       type: resolvedType,
     };
 
-    await addWorkspace(newWorkspace);
+    let created = false;
+    try {
+      const result = await createWorkspaceAction(
+        { addWorkspace },
+        newWorkspace
+      );
+      if (!result.ok) {
+        setIsCreatingWorkspace(false);
+        setNewWorkspaceError(result.error);
+        return;
+      }
+      created = true;
+    } catch (error) {
+      setIsCreatingWorkspace(false);
+      setNewWorkspaceError(
+        error instanceof Error
+          ? error.message
+          : workspaceError || "Unable to create workspace."
+      );
+      return;
+    }
+    setIsCreatingWorkspace(false);
+    if (!created) {
+      setNewWorkspaceError(workspaceError || "Unable to create workspace.");
+      return;
+    }
 
     resetNewWorkspaceForm();
     setNewWorkspaceOpen(false);
@@ -473,11 +506,18 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 />
               )}
 
+              {newWorkspaceError && (
+                <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
+                  {newWorkspaceError}
+                </div>
+              )}
+
               <button
                 onClick={createWorkspace}
-                className="w-full rounded-lg bg-blue-600 py-3 text-white hover:bg-blue-700"
+                disabled={isCreatingWorkspace}
+                className="w-full rounded-lg bg-blue-600 py-3 text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                Create Workspace
+                {isCreatingWorkspace ? "Creating..." : "Create Workspace"}
               </button>
             </div>
           </div>

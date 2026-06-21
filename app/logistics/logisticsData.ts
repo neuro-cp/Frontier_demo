@@ -18,9 +18,10 @@ export type LogisticsLocation = {
 export type MissingCoordinateClient = {
   id: string;
   name: string;
+  hasAddress: boolean;
 };
 
-function hasClientAddress(client: ClientRow) {
+export function hasClientAddress(client: ClientRow) {
   return Boolean(
     client.address?.trim() ||
       client.city?.trim() ||
@@ -93,12 +94,12 @@ export function getMissingCoordinateClients(
   return clients
     .filter(
       (client) =>
-        typeof client.latitude !== "number" &&
-        typeof client.longitude !== "number" &&
-        !hasClientAddress(client)
+        typeof client.latitude !== "number" ||
+        typeof client.longitude !== "number"
     )
     .map((client) => ({
       id: client.id,
       name: client.name,
+      hasAddress: hasClientAddress(client),
     }));
 }

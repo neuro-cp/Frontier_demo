@@ -141,62 +141,32 @@ export default function PermissionsSettings({
       return;
     }
 
-    const inviterId = user.id;
     setIsInviting(true);
     setInviteInstruction("");
 
     const normalizedEmail = inviteEmail.trim().toLowerCase();
-    const inviteToken = crypto.randomUUID();
-    const inviteExpiresAt = new Date(
-      Date.now() + 14 * 24 * 60 * 60 * 1000
-    ).toISOString();
+    const response = await fetch("/api/workspace-members/invite", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        workspaceId: activeWorkspaceId,
+        email: normalizedEmail,
+        role: inviteRole,
+      }),
+    });
+    const payload = (await response.json()) as {
+      member?: MemberRow;
+      error?: string;
+    };
 
-    const { data: existingRows, error: lookupError } = await supabase
-      .from("workspace_members")
-      .select("id")
-      .eq("workspace_id", activeWorkspaceId)
-      .eq("status", "Invited")
-      .eq("invited_email", normalizedEmail)
-      .limit(1);
-
-    if (lookupError) {
-      setSavedNotice(lookupError.message);
-      setIsInviting(false);
-      return;
-    }
-
-    const existingInvite = existingRows?.[0] as { id: string } | undefined;
-    const writeQuery = existingInvite
-      ? supabase
-          .from("workspace_members")
-          .update({
-            role: inviteRole,
-            invite_token: inviteToken,
-            invite_expires_at: inviteExpiresAt,
-          })
-          .eq("id", existingInvite.id)
-      : supabase.from("workspace_members").insert({
-          workspace_id: activeWorkspaceId,
-          invited_email: normalizedEmail,
-          invited_by: inviterId,
-          invite_token: inviteToken,
-          invite_expires_at: inviteExpiresAt,
-          role: inviteRole,
-          status: "Invited",
-        });
-
-    const { data, error } = await writeQuery
-      .select("id, user_id, role, status, invited_email, created_at")
-      .single();
-
-    if (error) {
-      setSavedNotice(error.message);
+    if (!response.ok || !payload.member) {
+      setSavedNotice(payload.error || "Unable to save invite.");
       setIsInviting(false);
       return;
     }
 
     setMembers((current) => {
-      const nextMember = data as MemberRow;
+      const nextMember = payload.member as MemberRow;
       const withoutExisting = current.filter(
         (member) => member.id !== nextMember.id
       );
@@ -235,9 +205,26 @@ export default function PermissionsSettings({
       setSavedNotice("Cannot change the last Owner.");
       return;
     }
-    const { error } = await supabase!.from("workspace_members").update({ role }).eq("id", member.id);
-    if (error) return setSavedNotice(error.message);
-    setMembers((current) => current.map((item) => item.id === member.id ? { ...item, role } : item));
+    const response = await fetch("/api/workspace-members/mutate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        workspaceId: activeWorkspaceId,
+        memberId: member.id,
+        role,
+      }),
+    });
+    const payload = (await response.json()) as {
+      member?: MemberRow;
+      error?: string;
+    };
+    if (!response.ok || !payload.member) {
+      setSavedNotice(payload.error || "Unable to update member role.");
+      return;
+    }
+    setMembers((current) =>
+      current.map((item) => item.id === member.id ? payload.member as MemberRow : item)
+    );
   }
 
   async function removeMember(member: MemberRow) {
@@ -247,8 +234,20 @@ export default function PermissionsSettings({
       setSavedNotice("Cannot remove the last Owner.");
       return;
     }
-    const { error } = await supabase!.from("workspace_members").update({ status: "Removed" }).eq("id", member.id);
-    if (error) return setSavedNotice(error.message);
+    const response = await fetch("/api/workspace-members/mutate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        workspaceId: activeWorkspaceId,
+        memberId: member.id,
+        status: "Removed",
+      }),
+    });
+    const payload = (await response.json()) as { error?: string };
+    if (!response.ok) {
+      setSavedNotice(payload.error || "Unable to remove member.");
+      return;
+    }
     setMembers((current) => current.filter((item) => item.id !== member.id));
   }
 

@@ -15,7 +15,7 @@ function validateInventoryItem(item: InventoryRow) {
   };
 }
 
-export async function createInventoryItem(
+export async function createInventoryItemAction(
   repository: InventoryActionsRepository,
   item: InventoryRow
 ): Promise<ActionResult<InventoryRow>> {
@@ -27,7 +27,7 @@ export async function createInventoryItem(
   }
 }
 
-export async function updateInventoryItem(
+export async function updateInventoryItemAction(
   repository: InventoryActionsRepository,
   item: InventoryRow
 ): Promise<ActionResult<InventoryRow>> {
@@ -39,7 +39,7 @@ export async function updateInventoryItem(
   }
 }
 
-export async function deleteInventoryItem(
+export async function deleteInventoryItemAction(
   repository: InventoryActionsRepository,
   item: InventoryRow
 ): Promise<ActionResult<boolean>> {
@@ -50,3 +50,7 @@ export async function deleteInventoryItem(
     return fail(error instanceof Error ? error.message : "Unable to delete inventory item.");
   }
 }
+
+export const createInventoryItem = createInventoryItemAction;
+export const updateInventoryItem = updateInventoryItemAction;
+export const deleteInventoryItem = deleteInventoryItemAction;

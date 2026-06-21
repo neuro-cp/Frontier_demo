@@ -3,6 +3,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { InvoiceLineItem, InvoiceRow } from "@/lib/frontierInvoices";
 import { assertUuid, isUuid } from "@/lib/db/ids";
 import { centsToMoneyString, moneyStringToCents } from "@/lib/db/money";
+import { createSignedInRecord } from "@/lib/db/serverCreate";
+import { mutateSignedInRecord } from "@/lib/db/serverMutate";
 type Setter<T> = (value: T | ((current: T) => T)) => void;
 type DbInvoiceLine = {
   id: string;
@@ -61,12 +63,12 @@ export function createInvoicesRepository({ isSignedIn, supabase, localInvoices, 
   }
   async function saveInvoiceWithLines(invoice: InvoiceRow) {
     if (!useDb) return invoice;
-    const { error } = await supabase.rpc("upsert_invoice_with_lines", {
-      invoice_payload: invoiceToDb(invoice),
-      line_items_payload: invoiceLinesToRpcPayload(invoice),
+    const data = await mutateSignedInRecord<DbInvoice>("invoice", "update", {
+      invoice: invoiceToDb(invoice),
+      lineItems: invoiceLinesToRpcPayload(invoice),
     });
-    if (error) throw new Error(error.message || "Unable to save invoice.");
-    return invoice;
+    if (!data) throw new Error("Unable to save invoice.");
+    return dbToInvoice(data);
   }
   return {
     async getInvoices(workspaceId: string) {
@@ -89,7 +91,11 @@ export function createInvoicesRepository({ isSignedIn, supabase, localInvoices, 
     async createInvoice(invoice: InvoiceRow) {
       if (!useDb) return setLocalInvoices((c) => [...c, invoice]), invoice;
       assertUuid(invoice.workspaceId, "Workspace");
-      return saveInvoiceWithLines(invoice);
+      const data = await createSignedInRecord<DbInvoice>("invoice", {
+        invoice: invoiceToDb(invoice),
+        lineItems: invoiceLinesToRpcPayload(invoice),
+      });
+      return dbToInvoice(data);
     },
     async updateInvoice(invoice: InvoiceRow) {
       if (!useDb) return setLocalInvoices((c) => c.map((i) => i.id === invoice.id ? invoice : i)), invoice;
@@ -97,11 +103,12 @@ export function createInvoicesRepository({ isSignedIn, supabase, localInvoices, 
       assertUuid(invoice.id, "Invoice");
       return saveInvoiceWithLines(invoice);
     },
-    async deleteInvoice(id: string) {
+    async deleteInvoice(id: string, workspaceId?: string) {
       if (!useDb) return setLocalInvoices((c) => c.filter((i) => i.id !== id)), true;
       if (!isUuid(id)) return true;
-      const { error } = await supabase.from("invoices").delete().eq("id", id);
-      if (error) throw new Error(error.message || "Unable to delete invoice.");
+      await mutateSignedInRecord<boolean>("invoice", "delete", {
+        invoice: { id, workspace_id: workspaceId },
+      });
       return true;
     },
   };

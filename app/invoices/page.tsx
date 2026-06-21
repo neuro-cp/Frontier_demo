@@ -5,6 +5,7 @@ import Link from "next/link";
 
 import { useAuthSession } from "@/components/AuthSessionProvider";
 import { useWorkspace } from "@/components/WorkspaceContext";
+import { deleteInvoiceAction, updateInvoiceAction } from "@/lib/actions/invoices";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
 import { createInvoicesRepository } from "@/lib/db/invoices";
 import {
@@ -19,7 +20,7 @@ import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { getWorkspaceDisplayName } from "@/lib/workspaceDisplay";
 
 export default function InvoicesPage() {
-  const { activeWorkspace } = useWorkspace();
+  const { activeWorkspace, canDeleteBusinessRecords } = useWorkspace();
   const { isSupabaseConfigured, user } = useAuthSession();
   const isDatabaseMode = Boolean(isSupabaseConfigured && user);
 
@@ -77,14 +78,26 @@ export default function InvoicesPage() {
   }
 
   function openDeleteModal() {
+    if (!canDeleteBusinessRecords) return;
     if (selectedInvoices.length === 0) return;
     setShowDeleteModal(true);
   }
 
   async function removeSelectedInvoices() {
+    if (!canDeleteBusinessRecords) return;
+
     try {
-      const deleted = await Promise.all(selectedInvoices.map((id) => invoicesRepo.deleteInvoice(id)));
-      const deletedIds = selectedInvoices.filter((_, index) => deleted[index]);
+      const results = await Promise.all(
+        selectedInvoices.map((id) =>
+          deleteInvoiceAction(invoicesRepo, id, activeWorkspace.id)
+        )
+      );
+      const deletedIds = selectedInvoices.filter((_, index) => results[index].ok);
+      const failedDelete = results.find((result) => !result.ok);
+      if (failedDelete && !deletedIds.length) {
+        setInvoiceError(failedDelete.ok ? "Unable to delete invoices." : failedDelete.error);
+        return;
+      }
       saveInvoices(invoices.filter((invoice) => !deletedIds.includes(invoice.id)));
       setSelectedInvoices([]);
       setShowDeleteModal(false);
@@ -98,8 +111,12 @@ export default function InvoicesPage() {
     const invoice = invoices.find((item) => item.id === id);
     if (!invoice) return;
     try {
-      const saved = await invoicesRepo.updateInvoice({ ...invoice, status: nextStatus });
-      if (!saved) return;
+      const result = await updateInvoiceAction(invoicesRepo, { ...invoice, status: nextStatus });
+      if (!result.ok) {
+        setInvoiceError(result.error);
+        return;
+      }
+      const saved = result.data;
       saveInvoices(invoices.map((item) => item.id === id ? saved : item));
       setInvoiceError("");
     } catch (error) {
@@ -123,7 +140,7 @@ export default function InvoicesPage() {
           <button
             type="button"
             onClick={openDeleteModal}
-            disabled={selectedInvoices.length === 0}
+            disabled={selectedInvoices.length === 0 || !canDeleteBusinessRecords}
             className="rounded-lg bg-red-600 px-4 py-2 text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
             Remove Invoice
@@ -290,7 +307,8 @@ export default function InvoicesPage() {
               <button
                 type="button"
                 onClick={removeSelectedInvoices}
-                className="rounded-lg bg-red-600 px-4 py-2 text-white hover:bg-red-700"
+                disabled={!canDeleteBusinessRecords}
+                className="rounded-lg bg-red-600 px-4 py-2 text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-gray-400"
               >
                 Remove
               </button>

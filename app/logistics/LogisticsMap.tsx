@@ -3,6 +3,7 @@
 import L from "leaflet";
 import { MapContainer, Marker, Popup, TileLayer } from "react-leaflet";
 
+import { osmTileAttribution } from "@/lib/services/attribution";
 import { LogisticsLocation } from "./logisticsData";
 
 type LogisticsMapProps = {
@@ -54,8 +55,11 @@ export default function LogisticsMap({
       className="relative z-0 h-[500px] w-full rounded-xl"
     >
       <TileLayer
-        attribution="&copy; OpenStreetMap contributors"
-        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+        attribution={osmTileAttribution}
+        url={
+          process.env.NEXT_PUBLIC_OSM_TILE_URL ||
+          "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+        }
       />
 
       {locations.map((location) => {

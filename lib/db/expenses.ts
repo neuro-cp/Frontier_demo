@@ -3,6 +3,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Expense } from "@/lib/expenseTypes";
 import { assertUuid, isUuid } from "@/lib/db/ids";
 import { centsToMoneyString, moneyStringToCents } from "@/lib/db/money";
+import { createSignedInRecord } from "@/lib/db/serverCreate";
+import { mutateSignedInRecord } from "@/lib/db/serverMutate";
 type Setter<T> = (value: T | ((current: T) => T)) => void;
 type DbExpense = { id: string; workspace_id: string; description: string; category: string; amount_cents: number; expense_date?: string | null; notes?: string | null };
 export type ExpenseRow = Expense & { id?: string };
@@ -21,22 +23,29 @@ export function createExpensesRepository({ isSignedIn, supabase, localExpenses, 
     async createExpense(expense: ExpenseRow) {
       if (!useDb) return setLocalExpenses((c) => [...c, expense]), expense;
       assertUuid(expense.workspaceId, "Workspace");
-      const { data, error } = await supabase.from("expenses").insert({ workspace_id: expense.workspaceId, description: expense.description, category: expense.category, amount_cents: moneyStringToCents(expense.amount) }).select("*").single();
-      if (error) throw new Error(error.message || "Unable to create expense.");
-      return dbToExpense(data as DbExpense);
+      const data = await createSignedInRecord<DbExpense>("expense", { workspace_id: expense.workspaceId, description: expense.description, category: expense.category, amount_cents: moneyStringToCents(expense.amount) });
+      return dbToExpense(data);
     },
     async updateExpense(expense: ExpenseRow) {
       if (!useDb) return setLocalExpenses((c) => c.map((e) => keyOf(e) === keyOf(expense) ? expense : e)), expense;
       if (!expense.id || !isUuid(expense.id)) return null;
-      const { data, error } = await supabase.from("expenses").update({ description: expense.description, category: expense.category, amount_cents: moneyStringToCents(expense.amount) }).eq("id", expense.id).select("*").single();
-      if (error) throw new Error(error.message || "Unable to update expense.");
-      return dbToExpense(data as DbExpense);
+      const data = await mutateSignedInRecord<DbExpense>("expense", "update", {
+        id: expense.id,
+        workspace_id: expense.workspaceId,
+        description: expense.description,
+        category: expense.category,
+        amount_cents: moneyStringToCents(expense.amount),
+      });
+      if (!data) throw new Error("Unable to update expense.");
+      return dbToExpense(data);
     },
     async deleteExpense(expense: ExpenseRow) {
       if (!useDb) return setLocalExpenses((c) => c.filter((e) => keyOf(e) !== keyOf(expense))), true;
       if (!expense.id || !isUuid(expense.id)) return false;
-      const { error } = await supabase.from("expenses").delete().eq("id", expense.id);
-      if (error) throw new Error(error.message || "Unable to delete expense.");
+      await mutateSignedInRecord<boolean>("expense", "delete", {
+        id: expense.id,
+        workspace_id: expense.workspaceId,
+      });
       return true;
     },
   };

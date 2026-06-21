@@ -5,6 +5,8 @@ import Link from "next/link";
 
 import { useAuthSession } from "@/components/AuthSessionProvider";
 import { useWorkspace } from "@/components/WorkspaceContext";
+import { createExpenseAction, deleteExpenseAction } from "@/lib/actions/expenses";
+import { deleteInvoiceAction, updateInvoiceAction } from "@/lib/actions/invoices";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
 import { createExpensesRepository, type ExpenseRow } from "@/lib/db/expenses";
 import { createInvoicesRepository } from "@/lib/db/invoices";
@@ -69,7 +71,7 @@ function getFinancialInvoiceTotal(row: FinancialInvoice) {
 }
 
 export default function FinancialsPage() {
-  const { activeWorkspace } = useWorkspace();
+  const { activeWorkspace, canDeleteBusinessRecords } = useWorkspace();
   const { isSupabaseConfigured, user } = useAuthSession();
   const isDatabaseMode = Boolean(isSupabaseConfigured && user);
 
@@ -149,9 +151,20 @@ export default function FinancialsPage() {
   }
 
   async function removeSelectedInvoices() {
+    if (!canDeleteBusinessRecords) return;
+
     try {
       if (isDatabaseMode) {
-        await Promise.all(selectedInvoices.map((id) => invoicesRepo.deleteInvoice(id)));
+        const results = await Promise.all(
+          selectedInvoices.map((id) =>
+            deleteInvoiceAction(invoicesRepo, id, activeWorkspace.id)
+          )
+        );
+        const failedDelete = results.find((result) => !result.ok);
+        if (failedDelete && !results.some((result) => result.ok)) {
+          setDataError(failedDelete.ok ? "Unable to remove invoices." : failedDelete.error);
+          return;
+        }
       }
       saveSavedInvoiceItems(
         savedInvoices.filter((invoice) => !selectedInvoices.includes(invoice.id))
@@ -165,10 +178,19 @@ export default function FinancialsPage() {
   }
 
   async function removeSelectedExpenses() {
+    if (!canDeleteBusinessRecords) return;
+
     try {
       const selected = workspaceExpenses.filter((expense) => selectedExpenses.includes(expense.id ?? `${expense.workspaceId}-${expense.description}`));
-      const deleted = await Promise.all(selected.map((expense) => expensesRepo.deleteExpense(expense)));
-      const deletedIds = selected.filter((_, i) => deleted[i]).map((e) => e.id ?? `${e.workspaceId}-${e.description}`);
+      const results = await Promise.all(
+        selected.map((expense) => deleteExpenseAction(expensesRepo, expense))
+      );
+      const failedDelete = results.find((result) => !result.ok);
+      if (failedDelete && !results.some((result) => result.ok)) {
+        setDataError(failedDelete.ok ? "Unable to remove expenses." : failedDelete.error);
+        return;
+      }
+      const deletedIds = selected.filter((_, i) => results[i].ok).map((e) => e.id ?? `${e.workspaceId}-${e.description}`);
       if (isDatabaseMode) setDbExpenses((current) => current.filter((expense) => !deletedIds.includes(expense.id ?? `${expense.workspaceId}-${expense.description}`)));
       setSelectedExpenses([]);
       setDataError("");
@@ -180,8 +202,12 @@ export default function FinancialsPage() {
   async function updateInvoiceStatus(row: FinancialInvoice, status: InvoiceStatus) {
     const updated = { ...row.invoice, status };
     try {
-      const saved = await invoicesRepo.updateInvoice(updated);
-      if (!saved) return;
+      const result = await updateInvoiceAction(invoicesRepo, updated);
+      if (!result.ok) {
+        setDataError(result.error);
+        return;
+      }
+      const saved = result.data;
       saveSavedInvoiceItems(savedInvoices.map((invoice) => invoice.id === saved.id ? saved : invoice));
       setDataError("");
     } catch (error) {
@@ -203,8 +229,12 @@ export default function FinancialsPage() {
     if (Number.isNaN(amount) || amount <= 0) return;
 
     try {
-      const created = await expensesRepo.createExpense({ description: expenseDescription.trim(), category: expenseCategory, amount: formatCurrency(amount), workspaceId: activeWorkspace.id });
-      if (!created) return;
+      const result = await createExpenseAction(expensesRepo, { description: expenseDescription.trim(), category: expenseCategory, amount: formatCurrency(amount), workspaceId: activeWorkspace.id });
+      if (!result.ok) {
+        setDataError(result.error);
+        return;
+      }
+      const created = result.data;
       if (isDatabaseMode) setDbExpenses((current) => [created, ...current]);
       setDataError("");
       closeExpenseModal();
@@ -285,7 +315,7 @@ export default function FinancialsPage() {
               <button
                 type="button"
                 onClick={removeSelectedInvoices}
-                disabled={selectedInvoices.length === 0}
+                disabled={selectedInvoices.length === 0 || !canDeleteBusinessRecords}
                 className="rounded-lg bg-red-600 px-3 py-2 text-sm text-white disabled:opacity-50"
               >
                 Remove
@@ -379,7 +409,7 @@ export default function FinancialsPage() {
 
               <button
                 onClick={removeSelectedExpenses}
-                disabled={selectedExpenses.length === 0}
+                disabled={selectedExpenses.length === 0 || !canDeleteBusinessRecords}
                 className="rounded-lg bg-red-600 px-3 py-2 text-sm text-white disabled:opacity-50"
               >
                 Remove

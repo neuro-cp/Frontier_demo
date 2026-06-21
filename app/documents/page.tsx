@@ -3,8 +3,17 @@
 import { useEffect, useMemo, useState } from "react";
 import { useAuthSession } from "@/components/AuthSessionProvider";
 import { useWorkspace } from "@/components/WorkspaceContext";
+import {
+  createDocumentAction,
+  deleteDocumentAction,
+  updateDocumentAction,
+} from "@/lib/actions/documents";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
-import { createDocumentsRepository, type StoredDocument } from "@/lib/db/documents";
+import {
+  createDocumentsRepository,
+  type DocumentProcessingStatus,
+  type StoredDocument,
+} from "@/lib/db/documents";
 import { createInvoicesRepository } from "@/lib/db/invoices";
 import type { InvoiceRow } from "@/lib/frontierInvoices";
 import {
@@ -33,12 +42,73 @@ type JobLike = {
   client?: string;
 };
 
+type ApiDocument = {
+  id: string;
+  workspace_id: string;
+  client_id: string | null;
+  job_id: string | null;
+  invoice_id?: string | null;
+  name: string;
+  detected_type: string | null;
+  extraction_status: string | null;
+  file_name: string | null;
+  notes: string | null;
+  created_at: string;
+  uploaded_by?: string | null;
+  status?: string | null;
+  storage_bucket: string | null;
+  storage_path: string | null;
+  mime_type: string | null;
+  size_bytes: number | null;
+  processing_status?: DocumentProcessingStatus | null;
+  extracted_text?: string | null;
+  extracted_json?: Record<string, unknown> | null;
+  ocr_provider?: string | null;
+  ai_job_id?: string | null;
+  reviewed_at?: string | null;
+  reviewed_by?: string | null;
+  confidence?: number | null;
+  document_type?: string | null;
+};
+
 function getJobDisplayName(job: JobLike) {
   return job.jobName || job.name || "Untitled job";
 }
 
+function apiDocumentToStoredDocument(document: ApiDocument): StoredDocument {
+  return {
+    id: document.id,
+    workspaceId: document.workspace_id,
+    clientId: document.client_id ?? "",
+    jobId: document.job_id ?? "",
+    invoiceId: document.invoice_id ?? "",
+    name: document.name,
+    detectedType: document.detected_type ?? "Pending",
+    extractionStatus: document.extraction_status ?? "Waiting for extraction",
+    fileName: document.file_name ?? "No file selected",
+    notes: document.notes ?? "",
+    createdAt: document.created_at,
+    uploadedBy: document.uploaded_by ?? "",
+    status: document.status ?? "Metadata available",
+    storageBucket: document.storage_bucket ?? "",
+    storagePath: document.storage_path ?? "",
+    mimeType: document.mime_type ?? "",
+    sizeBytes: document.size_bytes ?? 0,
+    storageStatus: document.storage_path ? "Stored" : "Pending storage setup",
+    processingStatus: document.processing_status ?? "uploaded",
+    extractedText: document.extracted_text ?? "",
+    extractedJson: document.extracted_json ?? null,
+    ocrProvider: document.ocr_provider ?? "",
+    aiJobId: document.ai_job_id ?? "",
+    reviewedAt: document.reviewed_at ?? "",
+    reviewedBy: document.reviewed_by ?? "",
+    confidence: document.confidence ?? null,
+    documentType: document.document_type ?? document.detected_type ?? "",
+  };
+}
+
 export default function DocumentsPage() {
-  const { activeWorkspace } = useWorkspace();
+  const { activeWorkspace, canDeleteBusinessRecords } = useWorkspace();
   const { isSupabaseConfigured, user } = useAuthSession();
   const isDatabaseMode = Boolean(isSupabaseConfigured && user);
 
@@ -74,6 +144,11 @@ export default function DocumentsPage() {
   const [invoiceId, setInvoiceId] = useState("");
   const [documentError, setDocumentError] = useState("");
   const [isSavingDocument, setIsSavingDocument] = useState(false);
+  const [processingDocumentIds, setProcessingDocumentIds] = useState<string[]>([]);
+  const [reviewDocumentId, setReviewDocumentId] = useState("");
+  const [reviewDocumentType, setReviewDocumentType] = useState("unknown");
+  const [reviewText, setReviewText] = useState("");
+  const [reviewJsonText, setReviewJsonText] = useState("");
 
   const supabase = useMemo(() => (isDatabaseMode ? createBrowserSupabaseClient() : null), [isDatabaseMode]);
   const documentsRepo = useMemo(() => createDocumentsRepository({ isSignedIn: isDatabaseMode, supabase, localDocuments, setLocalDocuments }), [isDatabaseMode, localDocuments, setLocalDocuments, supabase]);
@@ -201,8 +276,11 @@ export default function DocumentsPage() {
         await uploadDocumentFile({ supabase, path: storagePath, file: selectedFile });
       }
 
-      const created = await documentsRepo.createDocument(newDocument);
-      if (!created) return;
+      const result = await createDocumentAction(documentsRepo, newDocument);
+      if (!result.ok) {
+        throw new Error(result.error);
+      }
+      const created = result.data;
       if (isDatabaseMode) setDatabaseDocuments((current) => [created, ...current]);
       closeUploadModal();
     } catch (error) {
@@ -220,6 +298,8 @@ export default function DocumentsPage() {
   }
 
   async function deleteDocument(documentId: string) {
+    if (!canDeleteBusinessRecords) return;
+
     setDocumentError("");
     const document = workspaceDocuments.find((item) => item.id === documentId);
     if (!window.confirm(`Delete "${document?.fileName || document?.name || "this document"}"? This cannot be undone.`)) return;
@@ -228,8 +308,14 @@ export default function DocumentsPage() {
       if (isDatabaseMode && supabase && document?.storagePath) {
         await removeDocumentFile({ supabase, path: document.storagePath });
       }
-      const deleted = await documentsRepo.deleteDocument(documentId);
-      if (!deleted) return;
+      const result = await deleteDocumentAction(
+        documentsRepo,
+        documentId,
+        document?.workspaceId
+      );
+      if (!result.ok) {
+        throw new Error(result.error);
+      }
       if (isDatabaseMode) setDatabaseDocuments((current) => current.filter((document) => document.id !== documentId));
     } catch (error) {
       setDocumentError(error instanceof Error ? error.message : "Unable to delete document.");
@@ -252,6 +338,114 @@ export default function DocumentsPage() {
     }
   }
 
+  function replaceDocument(updatedDocument: StoredDocument) {
+    if (isDatabaseMode) {
+      setDatabaseDocuments((current) =>
+        current.map((document) =>
+          document.id === updatedDocument.id ? updatedDocument : document
+        )
+      );
+      return;
+    }
+
+    setLocalDocuments((current) =>
+      current.map((document) =>
+        document.id === updatedDocument.id ? updatedDocument : document
+      )
+    );
+  }
+
+  async function runOcr(document: StoredDocument) {
+    setDocumentError("");
+
+    if (!isDatabaseMode) {
+      setDocumentError("OCR requires a signed-in cloud workspace.");
+      return;
+    }
+
+    setProcessingDocumentIds((current) => [...current, document.id]);
+
+    try {
+      const response = await fetch("/api/documents/ocr", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          documentId: document.id,
+          workspaceId: document.workspaceId,
+        }),
+      });
+      const payload = (await response.json()) as {
+        document?: ApiDocument;
+        error?: string;
+      };
+
+      if (!response.ok || !payload.document) {
+        throw new Error(payload.error || "Unable to run OCR.");
+      }
+
+      const updatedDocument = apiDocumentToStoredDocument(payload.document);
+      replaceDocument(updatedDocument);
+      openReview(updatedDocument);
+    } catch (error) {
+      setDocumentError(error instanceof Error ? error.message : "Unable to run OCR.");
+    } finally {
+      setProcessingDocumentIds((current) =>
+        current.filter((documentId) => documentId !== document.id)
+      );
+    }
+  }
+
+  function openReview(document: StoredDocument) {
+    setReviewDocumentId(document.id);
+    setReviewDocumentType(document.documentType || "unknown");
+    setReviewText(document.extractedText || "");
+    setReviewJsonText(JSON.stringify(document.extractedJson ?? {}, null, 2));
+  }
+
+  function closeReview() {
+    setReviewDocumentId("");
+    setReviewDocumentType("unknown");
+    setReviewText("");
+    setReviewJsonText("");
+  }
+
+  async function saveReview() {
+    const document = workspaceDocuments.find((item) => item.id === reviewDocumentId);
+    if (!document) return;
+
+    let parsedJson: Record<string, unknown>;
+    try {
+      parsedJson = JSON.parse(reviewJsonText || "{}") as Record<string, unknown>;
+    } catch {
+      setDocumentError("Reviewed extraction JSON is not valid.");
+      return;
+    }
+
+    try {
+      const result = await updateDocumentAction(documentsRepo, {
+        ...document,
+        documentType: reviewDocumentType,
+        detectedType: reviewDocumentType,
+        extractionStatus: "Reviewed",
+        processingStatus: "reviewed",
+        extractedText: reviewText,
+        extractedJson: parsedJson,
+        reviewedAt: new Date().toISOString(),
+        reviewedBy: user?.id,
+      });
+      if (!result.ok) {
+        setDocumentError(result.error);
+        return;
+      }
+      const updatedDocument = result.data;
+      replaceDocument(updatedDocument);
+      closeReview();
+      setDocumentError("");
+    } catch (error) {
+      setDocumentError(error instanceof Error ? error.message : "Unable to save OCR review.");
+    }
+  }
+
   function getClientName(documentClientId: string) {
     if (!documentClientId) return "-";
 
@@ -266,6 +460,10 @@ export default function DocumentsPage() {
     return job ? getJobDisplayName(job) : "Unknown job";
   }
 
+  const reviewDocument = workspaceDocuments.find(
+    (document) => document.id === reviewDocumentId
+  );
+
   return (
     <div className="space-y-8">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -279,8 +477,13 @@ export default function DocumentsPage() {
       </div>
 
       <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-200">
-        upload once - extract intended use and data - verify - choose whether to
-        create a client, job, quote, invoice, expense, or calendar item.
+        Review extracted information before using it. OCR drafts never create
+        clients, jobs, invoices, expenses, or calendar items automatically.
+        {!isDatabaseMode && (
+          <span className="mt-2 block font-semibold">
+            OCR requires a signed-in cloud workspace.
+          </span>
+        )}
       </div>
 
       {documentError && (
@@ -333,6 +536,11 @@ export default function DocumentsPage() {
                     <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">
                       OCR: {document.processingStatus || "uploaded"}
                     </div>
+                    {document.ocrProvider && (
+                      <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        Provider: {document.ocrProvider}
+                      </div>
+                    )}
                   </td>
 
                   <td className="px-6 py-4 text-gray-600 dark:text-gray-300">
@@ -355,7 +563,30 @@ export default function DocumentsPage() {
                   </td>
 
                   <td className="px-6 py-4 text-right">
-                    <div className="flex justify-end gap-2">
+                    <div className="flex flex-wrap justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => runOcr(document)}
+                        disabled={
+                          !isDatabaseMode ||
+                          processingDocumentIds.includes(document.id) ||
+                          document.processingStatus === "processing"
+                        }
+                        className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {processingDocumentIds.includes(document.id) ||
+                        document.processingStatus === "processing"
+                          ? "Processing..."
+                          : "Run OCR"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => openReview(document)}
+                        disabled={!document.extractedText && !document.extractedJson}
+                        className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:hover:bg-gray-800"
+                      >
+                        Review
+                      </button>
                       <button
                         type="button"
                         onClick={() => downloadDocument(document)}
@@ -366,7 +597,8 @@ export default function DocumentsPage() {
                       <button
                         type="button"
                         onClick={() => deleteDocument(document.id)}
-                        className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700"
+                        disabled={!canDeleteBusinessRecords}
+                        className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         Delete
                       </button>
@@ -378,6 +610,92 @@ export default function DocumentsPage() {
           </tbody>
         </table>
       </div>
+
+      {reviewDocument && (
+        <section className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+          <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h2 className="text-2xl font-bold text-gray-950 dark:text-gray-100">
+                Review Extraction
+              </h2>
+              <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">
+                Review extracted information before using it. Saving this review
+                only updates the document metadata.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={closeReview}
+              className="rounded-lg border border-gray-300 px-4 py-2 font-semibold hover:bg-gray-100 dark:border-gray-700 dark:hover:bg-gray-800"
+            >
+              Close
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+            <div>
+              <label className="mb-2 block text-sm font-semibold text-gray-900 dark:text-gray-100">
+                Document Type
+              </label>
+              <select
+                value={reviewDocumentType}
+                onChange={(event) => setReviewDocumentType(event.target.value)}
+                className="w-full rounded-lg border border-gray-200 bg-white px-4 py-3 text-gray-950 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
+              >
+                <option value="receipt">receipt</option>
+                <option value="invoice">invoice</option>
+                <option value="estimate">estimate</option>
+                <option value="contract">contract</option>
+                <option value="unknown">unknown</option>
+              </select>
+            </div>
+
+            <div className="text-sm text-gray-600 dark:text-gray-300">
+              <p className="font-semibold text-gray-900 dark:text-gray-100">
+                {reviewDocument.name}
+              </p>
+              <p>Status: {reviewDocument.processingStatus || "uploaded"}</p>
+              <p>Confidence: {reviewDocument.confidence ?? "unscored"}</p>
+            </div>
+          </div>
+
+          <div className="mt-5 grid grid-cols-1 gap-5 lg:grid-cols-2">
+            <div>
+              <label className="mb-2 block text-sm font-semibold text-gray-900 dark:text-gray-100">
+                Extracted Text
+              </label>
+              <textarea
+                rows={12}
+                value={reviewText}
+                onChange={(event) => setReviewText(event.target.value)}
+                className="w-full rounded-lg border border-gray-200 bg-white px-4 py-3 font-mono text-sm text-gray-950 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
+              />
+            </div>
+
+            <div>
+              <label className="mb-2 block text-sm font-semibold text-gray-900 dark:text-gray-100">
+                Extracted Fields Draft
+              </label>
+              <textarea
+                rows={12}
+                value={reviewJsonText}
+                onChange={(event) => setReviewJsonText(event.target.value)}
+                className="w-full rounded-lg border border-gray-200 bg-white px-4 py-3 font-mono text-sm text-gray-950 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
+              />
+            </div>
+          </div>
+
+          <div className="mt-5 flex justify-end">
+            <button
+              type="button"
+              onClick={saveReview}
+              className="rounded-lg bg-blue-600 px-5 py-3 font-semibold text-white hover:bg-blue-700"
+            >
+              Save Reviewed Extraction
+            </button>
+          </div>
+        </section>
+      )}
 
       {isUploadOpen && (
         <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/75 p-3 sm:items-center sm:p-4">

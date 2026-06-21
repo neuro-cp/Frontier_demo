@@ -5,6 +5,7 @@ import Link from "next/link";
 
 import { useAuthSession } from "@/components/AuthSessionProvider";
 import { useWorkspace } from "@/components/WorkspaceContext";
+import { createJobAction, deleteJobAction } from "@/lib/actions/jobs";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
 import type { Job, JobMaterial, JobStatus } from "@/lib/jobTypes";
 import type { ClientRow } from "@/lib/clientTypes";
@@ -37,7 +38,7 @@ function getStatusColor(status: JobStatus) {
 }
 
 export default function JobsPage() {
-  const { activeWorkspace } = useWorkspace();
+  const { activeWorkspace, canDeleteBusinessRecords } = useWorkspace();
   const { isSupabaseConfigured, user } = useAuthSession();
   const isDatabaseMode = Boolean(isSupabaseConfigured && user);
 
@@ -189,9 +190,18 @@ export default function JobsPage() {
   }
 
   async function deleteSelectedJobs() {
+    if (!canDeleteBusinessRecords) return;
+
     try {
-      const deleted = await Promise.all(selectedJobs.map((id) => jobsRepository.deleteJob(id)));
-      const deletedIds = selectedJobs.filter((_, i) => deleted[i]);
+      const results = await Promise.all(
+        selectedJobs.map((id) => deleteJobAction(jobsRepository, id, activeWorkspace.id))
+      );
+      const deletedIds = selectedJobs.filter((_, i) => results[i].ok);
+      const failedDelete = results.find((result) => !result.ok);
+      if (failedDelete && !deletedIds.length) {
+        setDataError(failedDelete.ok ? "Unable to delete jobs." : failedDelete.error);
+        return;
+      }
       if (isDatabaseMode) setDatabaseJobItems((c) => c.filter((j) => !deletedIds.includes(j.id)));
       setSelectedJobs([]);
       setDataError("");
@@ -245,8 +255,12 @@ export default function JobsPage() {
     };
 
     try {
-      const created = await jobsRepository.createJob(newJob);
-      if (!created) return;
+      const result = await createJobAction(jobsRepository, newJob);
+      if (!result.ok) {
+        setDataError(result.error);
+        return;
+      }
+      const created = result.data;
       if (isDatabaseMode) setDatabaseJobItems((c) => [...c, created]);
       setDataError("");
       closeNewJobBox();
@@ -270,7 +284,7 @@ export default function JobsPage() {
           <button
             type="button"
             onClick={deleteSelectedJobs}
-            disabled={selectedJobs.length === 0}
+            disabled={selectedJobs.length === 0 || !canDeleteBusinessRecords}
             className="rounded-lg bg-red-600 px-4 py-2 text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
             Delete Job

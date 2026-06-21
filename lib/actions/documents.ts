@@ -4,7 +4,7 @@ import type { StoredDocument } from "@/lib/db/documents";
 export type DocumentActionsRepository = {
   createDocument: (document: StoredDocument) => Promise<StoredDocument | null>;
   updateDocument: (document: StoredDocument) => Promise<StoredDocument | null>;
-  deleteDocument: (documentId: string) => Promise<boolean>;
+  deleteDocument: (documentId: string, workspaceId?: string) => Promise<boolean>;
 };
 
 function validateDocument(document: StoredDocument) {
@@ -15,7 +15,7 @@ function validateDocument(document: StoredDocument) {
   };
 }
 
-export async function uploadDocumentMetadata(
+export async function createDocumentAction(
   repository: DocumentActionsRepository,
   document: StoredDocument
 ): Promise<ActionResult<StoredDocument>> {
@@ -27,7 +27,7 @@ export async function uploadDocumentMetadata(
   }
 }
 
-export async function updateDocumentMetadata(
+export async function updateDocumentAction(
   repository: DocumentActionsRepository,
   document: StoredDocument
 ): Promise<ActionResult<StoredDocument>> {
@@ -40,14 +40,22 @@ export async function updateDocumentMetadata(
   }
 }
 
-export async function deleteDocumentMetadata(
+export async function deleteDocumentAction(
   repository: DocumentActionsRepository,
-  documentId: string
+  documentId: string,
+  workspaceId?: string
 ): Promise<ActionResult<boolean>> {
   try {
-    const deleted = await repository.deleteDocument(requireText(documentId, "Document"));
+    const deleted = await repository.deleteDocument(
+      requireText(documentId, "Document"),
+      workspaceId
+    );
     return deleted ? ok(true) : fail("Unable to delete document metadata.");
   } catch (error) {
     return fail(error instanceof Error ? error.message : "Unable to delete document metadata.");
   }
 }
+
+export const uploadDocumentMetadata = createDocumentAction;
+export const updateDocumentMetadata = updateDocumentAction;
+export const deleteDocumentMetadata = deleteDocumentAction;

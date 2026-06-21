@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 
 import { useAuthSession } from "@/components/AuthSessionProvider";
 import type { Job } from "@/lib/jobTypes";
 import { useWorkspace } from "@/components/WorkspaceContext";
+import { createCalendarEventAction } from "@/lib/actions/calendar";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
 import type { ClientRow } from "@/lib/clientTypes";
 import { createCalendarEventsRepository, type ClientCalendarEvent } from "@/lib/db/calendarEvents";
@@ -70,6 +71,9 @@ export default function CalendarPage() {
   const [clientEventClientId, setClientEventClientId] = useState("");
   const [clientEventTitle, setClientEventTitle] = useState("");
   const [clientEventDate, setClientEventDate] = useState("");
+  const clientEventClientRef = useRef<HTMLSelectElement | null>(null);
+  const clientEventTitleRef = useRef<HTMLInputElement | null>(null);
+  const clientEventDateRef = useRef<HTMLInputElement | null>(null);
 
   const supabase = useMemo(() => (isDatabaseMode ? createBrowserSupabaseClient() : null), [isDatabaseMode]);
   const eventsRepo = useMemo(() => createCalendarEventsRepository({ isSignedIn: isDatabaseMode, supabase, localEvents: localClientEvents, setLocalEvents: setLocalClientEvents }), [isDatabaseMode, localClientEvents, setLocalClientEvents, supabase]);
@@ -154,21 +158,31 @@ export default function CalendarPage() {
   }
 
   async function addClientEvent() {
-    const selectedClient = workspaceClients.find((client) => client.id === clientEventClientId);
-    if (!selectedClient || !clientEventDate) return;
+    const selectedClientId = clientEventClientId || clientEventClientRef.current?.value || "";
+    const selectedDate = clientEventDate || clientEventDateRef.current?.value || "";
+    const selectedTitle = clientEventTitle || clientEventTitleRef.current?.value || "";
+    const selectedClient = workspaceClients.find((client) => client.id === selectedClientId);
+    if (!selectedClient || !selectedDate) {
+      setDataError("Choose a client and date before adding a calendar event.");
+      return;
+    }
 
     const newEvent: ClientCalendarEvent = {
       id: crypto.randomUUID(),
       workspaceId: activeWorkspace.id,
       clientId: selectedClient.id,
       clientName: selectedClient.name,
-      title: clientEventTitle.trim() || "Client Follow-up",
-      date: clientEventDate,
+      title: selectedTitle.trim() || "Client Follow-up",
+      date: selectedDate,
     };
 
     try {
-      const created = await eventsRepo.createEvent(newEvent);
-      if (!created) return;
+      const result = await createCalendarEventAction(eventsRepo, newEvent);
+      if (!result.ok) {
+        setDataError(result.error);
+        return;
+      }
+      const created = result.data;
       if (isDatabaseMode) setDatabaseClientEvents((current) => [...current, created]);
       else saveClientEvents([...clientEvents, created]);
       setDataError("");
@@ -297,12 +311,12 @@ export default function CalendarPage() {
               <button type="button" onClick={closeClientEventModal} className="text-2xl text-gray-500">-</button>
             </div>
             <div className="space-y-4">
-              <select value={clientEventClientId} onChange={(event) => setClientEventClientId(event.target.value)} className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800">
+              <select ref={clientEventClientRef} value={clientEventClientId} onChange={(event) => setClientEventClientId(event.target.value)} className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800">
                 <option value="">Select Client</option>
                 {workspaceClients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
               </select>
-              <input type="text" value={clientEventTitle} onChange={(event) => setClientEventTitle(event.target.value)} placeholder="Follow-up, estimate, walkthrough..." className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800" />
-              <input type="date" value={clientEventDate} onChange={(event) => setClientEventDate(event.target.value)} className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800" />
+              <input ref={clientEventTitleRef} type="text" value={clientEventTitle} onChange={(event) => setClientEventTitle(event.target.value)} placeholder="Follow-up, estimate, walkthrough..." className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800" />
+              <input ref={clientEventDateRef} type="date" value={clientEventDate} onChange={(event) => setClientEventDate(event.target.value)} className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800" />
               <button type="button" onClick={addClientEvent} className="w-full rounded-lg bg-blue-600 py-3 text-white hover:bg-blue-700">Add to Calendar</button>
             </div>
           </div>

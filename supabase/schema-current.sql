@@ -1,28 +1,33 @@
--- Frontier current live database schema snapshot
--- Generated from live Supabase database at 2026-06-18T02:59:36.683Z
--- Scope: public application schema plus installed extensions. Supabase-managed auth/storage schemas are platform-owned.
--- This is an audit snapshot, not a migration to apply automatically.
+
+\restrict RDaxbPPXlOHHDzUbZj1r3ZxJlJg0GoF0Yy2w2J688vn2gyD2MwZ3cZoqY08E92T
 
 
--- -----------------------------------------------------------------------------
--- Extensions
--- -----------------------------------------------------------------------------
-create extension if not exists "pg_stat_statements" with schema "extensions"; -- version 1.11
-create extension if not exists "pgcrypto" with schema "extensions"; -- version 1.3
-create extension if not exists "plpgsql" with schema "pg_catalog"; -- version 1.0
-create extension if not exists "supabase_vault" with schema "vault"; -- version 0.3.1
-create extension if not exists "uuid-ossp" with schema "extensions"; -- version 1.1
+SET statement_timeout = 0;
+SET lock_timeout = 0;
+SET idle_in_transaction_session_timeout = 0;
+SET client_encoding = 'UTF8';
+SET standard_conforming_strings = on;
+SELECT pg_catalog.set_config('search_path', '', false);
+SET check_function_bodies = false;
+SET xmloption = content;
+SET client_min_messages = warning;
+SET row_security = off;
 
 
--- -----------------------------------------------------------------------------
--- Functions
--- -----------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION public.accept_workspace_invites_for_current_user()
- RETURNS integer
- LANGUAGE plpgsql
- SECURITY DEFINER
- SET search_path TO 'public'
-AS $function$
+CREATE SCHEMA IF NOT EXISTS "public";
+
+
+ALTER SCHEMA "public" OWNER TO "pg_database_owner";
+
+
+COMMENT ON SCHEMA "public" IS 'standard public schema';
+
+
+
+CREATE OR REPLACE FUNCTION "public"."accept_workspace_invites_for_current_user"() RETURNS integer
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
 declare
   accepted_count integer;
   user_email text;
@@ -57,14 +62,70 @@ begin
   get diagnostics accepted_count = row_count;
   return accepted_count;
 end;
-$function$;
+$$;
 
-CREATE OR REPLACE FUNCTION public.get_platform_admin_summary()
- RETURNS TABLE(admin_email text, auth_user_count bigint, profile_count bigint, workspace_count bigint, client_count bigint, job_count bigint, invoice_count bigint, document_count bigint, route_plan_count bigint)
- LANGUAGE plpgsql
- STABLE SECURITY DEFINER
- SET search_path TO 'public', 'auth'
-AS $function$
+
+ALTER FUNCTION "public"."accept_workspace_invites_for_current_user"() OWNER TO "postgres";
+
+SET default_tablespace = '';
+
+SET default_table_access_method = "heap";
+
+
+CREATE TABLE IF NOT EXISTS "public"."workspaces" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "name" "text" NOT NULL,
+    "type" "text" DEFAULT 'Other'::"text" NOT NULL,
+    "created_by" "uuid",
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL
+);
+
+
+ALTER TABLE "public"."workspaces" OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."create_workspace_with_owner"("workspace_id" "uuid", "workspace_name" "text", "workspace_type" "text") RETURNS "public"."workspaces"
+    LANGUAGE "plpgsql"
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  created_workspace public.workspaces;
+begin
+  if auth.uid() is null then
+    raise exception 'Authentication required' using errcode = '42501';
+  end if;
+
+  insert into public.workspaces (id, name, type, created_by)
+  values (workspace_id, workspace_name, coalesce(nullif(workspace_type, ''), 'Other'), auth.uid())
+  returning * into created_workspace;
+
+  insert into public.workspace_members (workspace_id, user_id, role, status)
+  values (workspace_id, auth.uid(), 'Owner', 'Active');
+
+  insert into public.workspace_settings (
+    workspace_id,
+    workspace_nickname,
+    business_type
+  )
+  values (
+    workspace_id,
+    workspace_name,
+    coalesce(nullif(workspace_type, ''), 'Other')
+  );
+
+  return created_workspace;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."create_workspace_with_owner"("workspace_id" "uuid", "workspace_name" "text", "workspace_type" "text") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."get_platform_admin_summary"() RETURNS TABLE("admin_email" "text", "auth_user_count" bigint, "profile_count" bigint, "workspace_count" bigint, "client_count" bigint, "job_count" bigint, "invoice_count" bigint, "document_count" bigint, "route_plan_count" bigint)
+    LANGUAGE "plpgsql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public', 'auth'
+    AS $$
 begin
   if not public.is_platform_admin() then
     return;
@@ -85,14 +146,16 @@ begin
   where platform_admins.user_id = auth.uid()
   limit 1;
 end;
-$function$;
+$$;
 
-CREATE OR REPLACE FUNCTION public.handle_new_auth_user()
- RETURNS trigger
- LANGUAGE plpgsql
- SECURITY DEFINER
- SET search_path TO 'public'
-AS $function$
+
+ALTER FUNCTION "public"."get_platform_admin_summary"() OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."handle_new_auth_user"() RETURNS "trigger"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
 begin
   insert into public.profiles (id, email, display_name)
   values (
@@ -106,57 +169,76 @@ begin
 
   return new;
 end;
-$function$;
+$$;
 
-CREATE OR REPLACE FUNCTION public.is_platform_admin()
- RETURNS boolean
- LANGUAGE sql
- STABLE SECURITY DEFINER
- SET search_path TO 'public'
-AS $function$
+
+ALTER FUNCTION "public"."handle_new_auth_user"() OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."has_workspace_role"("target_workspace_id" "uuid", "allowed_roles" "text"[]) RETURNS boolean
+    LANGUAGE "sql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+  select exists (
+    select 1
+    from public.workspace_members
+    where workspace_id = target_workspace_id
+      and user_id = auth.uid()
+      and status = 'Active'
+      and role = any(allowed_roles)
+  );
+$$;
+
+
+ALTER FUNCTION "public"."has_workspace_role"("target_workspace_id" "uuid", "allowed_roles" "text"[]) OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."is_platform_admin"() RETURNS boolean
+    LANGUAGE "sql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
   select exists (
     select 1
     from public.platform_admins
     where user_id = auth.uid()
   );
-$function$;
+$$;
 
-CREATE OR REPLACE FUNCTION public.is_workspace_creator(target_workspace_id uuid)
- RETURNS boolean
- LANGUAGE sql
- STABLE SECURITY DEFINER
- SET search_path TO 'public'
-AS $function$
+
+ALTER FUNCTION "public"."is_platform_admin"() OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."is_workspace_creator"("target_workspace_id" "uuid") RETURNS boolean
+    LANGUAGE "sql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
   select exists (
     select 1
     from public.workspaces
     where id = target_workspace_id
       and created_by = auth.uid()
   );
-$function$;
+$$;
 
-CREATE OR REPLACE FUNCTION public.is_workspace_manager(target_workspace_id uuid)
- RETURNS boolean
- LANGUAGE sql
- STABLE SECURITY DEFINER
- SET search_path TO 'public'
-AS $function$
-  select exists (
-    select 1
-    from public.workspace_members
-    where workspace_id = target_workspace_id
-      and user_id = auth.uid()
-      and status = 'Active'
-      and role in ('Owner', 'Manager')
-  );
-$function$;
 
-CREATE OR REPLACE FUNCTION public.is_workspace_member(target_workspace_id uuid)
- RETURNS boolean
- LANGUAGE sql
- STABLE SECURITY DEFINER
- SET search_path TO 'public'
-AS $function$
+ALTER FUNCTION "public"."is_workspace_creator"("target_workspace_id" "uuid") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."is_workspace_manager"("target_workspace_id" "uuid") RETURNS boolean
+    LANGUAGE "sql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+  select public.has_workspace_role(target_workspace_id, array['Owner', 'Manager']);
+$$;
+
+
+ALTER FUNCTION "public"."is_workspace_manager"("target_workspace_id" "uuid") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."is_workspace_member"("target_workspace_id" "uuid") RETURNS boolean
+    LANGUAGE "sql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
   select exists (
     select 1
     from public.workspace_members
@@ -164,1363 +246,2553 @@ AS $function$
       and user_id = auth.uid()
       and status = 'Active'
   );
-$function$;
+$$;
 
-CREATE OR REPLACE FUNCTION public.set_updated_at()
- RETURNS trigger
- LANGUAGE plpgsql
-AS $function$
+
+ALTER FUNCTION "public"."is_workspace_member"("target_workspace_id" "uuid") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."is_workspace_owner"("target_workspace_id" "uuid") RETURNS boolean
+    LANGUAGE "sql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+  select public.has_workspace_role(target_workspace_id, array['Owner']);
+$$;
+
+
+ALTER FUNCTION "public"."is_workspace_owner"("target_workspace_id" "uuid") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."set_updated_at"() RETURNS "trigger"
+    LANGUAGE "plpgsql"
+    AS $$
 begin
   new.updated_at = now();
   return new;
 end;
-$function$;
+$$;
+
+
+ALTER FUNCTION "public"."set_updated_at"() OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."storage_workspace_id"("object_name" "text") RETURNS "uuid"
+    LANGUAGE "plpgsql" STABLE
+    AS $$
+declare
+  workspace_segment text;
+begin
+  workspace_segment := (storage.foldername(object_name))[1];
+  return workspace_segment::uuid;
+exception
+  when invalid_text_representation or null_value_not_allowed then
+    return null;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."storage_workspace_id"("object_name" "text") OWNER TO "postgres";
+
+
+COMMENT ON FUNCTION "public"."storage_workspace_id"("object_name" "text") IS 'Extracts the workspace UUID from workspace-documents object paths: workspaceId/entityType/entityId/file.ext.';
 
 
 
--- -----------------------------------------------------------------------------
--- Views
--- -----------------------------------------------------------------------------
--- No public views found.
-
-
--- -----------------------------------------------------------------------------
--- Sequences
--- -----------------------------------------------------------------------------
--- No public sequences found.
-
-
--- -----------------------------------------------------------------------------
--- Tables and Columns
--- -----------------------------------------------------------------------------
-create table public."admin_audit_logs" (
-  "id" uuid default gen_random_uuid() not null,
-  "admin_user_id" uuid not null,
-  "target_user_id" uuid,
-  "target_workspace_id" uuid,
-  "action" text not null,
-  "metadata" jsonb default '{}'::jsonb not null,
-  "created_at" timestamp with time zone default now() not null
-);
-
-create table public."ai_jobs" (
-  "id" uuid default gen_random_uuid() not null,
-  "workspace_id" uuid not null,
-  "document_id" uuid,
-  "client_id" uuid,
-  "job_id" uuid,
-  "invoice_id" uuid,
-  "expense_id" uuid,
-  "workflow_name" text not null,
-  "status" text default 'Queued'::text not null,
-  "model_provider" text,
-  "model_name" text,
-  "prompt_version" text,
-  "input_json" jsonb default '{}'::jsonb not null,
-  "result_json" jsonb,
-  "confidence" numeric,
-  "error_message" text,
-  "approved_by" uuid,
-  "approved_at" timestamp with time zone,
-  "created_at" timestamp with time zone default now() not null,
-  "updated_at" timestamp with time zone default now() not null
-);
-
-create table public."client_activity" (
-  "id" uuid default gen_random_uuid() not null,
-  "workspace_id" uuid not null,
-  "client_id" uuid not null,
-  "activity_type" text not null,
-  "title" text not null,
-  "body" text,
-  "metadata" jsonb default '{}'::jsonb not null,
-  "created_by" uuid,
-  "created_at" timestamp with time zone default now() not null
-);
-
-create table public."client_calendar_events" (
-  "id" uuid default gen_random_uuid() not null,
-  "workspace_id" uuid not null,
-  "client_id" uuid,
-  "client_name_snapshot" text,
-  "title" text not null,
-  "event_date" date not null,
-  "notes" text,
-  "created_at" timestamp with time zone default now() not null,
-  "updated_at" timestamp with time zone default now() not null
-);
-
-create table public."client_notes" (
-  "id" uuid default gen_random_uuid() not null,
-  "workspace_id" uuid not null,
-  "client_id" uuid not null,
-  "body" text not null,
-  "created_by" uuid,
-  "created_at" timestamp with time zone default now() not null,
-  "updated_at" timestamp with time zone default now() not null
-);
-
-create table public."clients" (
-  "id" uuid default gen_random_uuid() not null,
-  "workspace_id" uuid not null,
-  "name" text not null,
-  "status" text default 'Active'::text not null,
-  "balance_cents" integer default 0 not null,
-  "email" text,
-  "phone" text,
-  "address" text,
-  "city" text,
-  "state" text,
-  "zip" text,
-  "notes" text,
-  "latitude" numeric(10,7),
-  "longitude" numeric(10,7),
-  "created_at" timestamp with time zone default now() not null,
-  "updated_at" timestamp with time zone default now() not null
-);
-
-create table public."document_tag_links" (
-  "id" uuid default gen_random_uuid() not null,
-  "workspace_id" uuid not null,
-  "document_id" uuid not null,
-  "tag_id" uuid not null,
-  "created_at" timestamp with time zone default now() not null
-);
-
-create table public."document_tags" (
-  "id" uuid default gen_random_uuid() not null,
-  "workspace_id" uuid not null,
-  "name" text not null,
-  "color" text,
-  "created_at" timestamp with time zone default now() not null,
-  "updated_at" timestamp with time zone default now() not null
-);
-
-create table public."documents" (
-  "id" uuid default gen_random_uuid() not null,
-  "workspace_id" uuid not null,
-  "client_id" uuid,
-  "job_id" uuid,
-  "invoice_id" uuid,
-  "estimate_id" uuid,
-  "expense_id" uuid,
-  "name" text not null,
-  "detected_type" text,
-  "extraction_status" text,
-  "file_name" text,
-  "storage_bucket" text,
-  "storage_path" text,
-  "mime_type" text,
-  "size_bytes" bigint,
-  "notes" text,
-  "extracted_json" jsonb,
-  "created_at" timestamp with time zone default now() not null,
-  "updated_at" timestamp with time zone default now() not null,
-  "uploaded_by" uuid,
-  "status" text default 'Metadata available'::text not null
-);
-
-create table public."estimate_line_items" (
-  "id" uuid default gen_random_uuid() not null,
-  "workspace_id" uuid not null,
-  "estimate_id" uuid not null,
-  "description" text not null,
-  "quantity" numeric default 1 not null,
-  "unit_price_cents" integer default 0 not null,
-  "sort_order" integer default 0 not null,
-  "created_at" timestamp with time zone default now() not null
-);
-
-create table public."estimates" (
-  "id" uuid default gen_random_uuid() not null,
-  "workspace_id" uuid not null,
-  "client_id" uuid,
-  "job_id" uuid,
-  "estimate_number" text not null,
-  "estimate_date" date not null,
-  "converted_invoice_id" uuid,
-  "company_name" text,
-  "company_address" text,
-  "company_city" text,
-  "company_state" text,
-  "company_zip" text,
-  "company_phone" text,
-  "company_email" text,
-  "bill_to_name" text,
-  "bill_to_company" text,
-  "bill_to_address" text,
-  "bill_to_city" text,
-  "bill_to_state" text,
-  "bill_to_zip" text,
-  "bill_to_phone" text,
-  "bill_to_email" text,
-  "discount_type" text default 'None'::text not null,
-  "discount_value" numeric default 0 not null,
-  "tax_rate" numeric default 0 not null,
-  "footer_message" text,
-  "contact_message" text,
-  "status" text default 'Draft'::text not null,
-  "created_at" timestamp with time zone default now() not null,
-  "updated_at" timestamp with time zone default now() not null
-);
-
-create table public."expenses" (
-  "id" uuid default gen_random_uuid() not null,
-  "workspace_id" uuid not null,
-  "description" text not null,
-  "category" text not null,
-  "amount_cents" integer default 0 not null,
-  "expense_date" date,
-  "notes" text,
-  "created_at" timestamp with time zone default now() not null,
-  "updated_at" timestamp with time zone default now() not null
-);
-
-create table public."inventory_items" (
-  "id" uuid default gen_random_uuid() not null,
-  "workspace_id" uuid not null,
-  "name" text not null,
-  "current_qty" numeric,
-  "target_qty" numeric,
-  "created_at" timestamp with time zone default now() not null,
-  "updated_at" timestamp with time zone default now() not null
-);
-
-create table public."invoice_line_items" (
-  "id" uuid default gen_random_uuid() not null,
-  "workspace_id" uuid not null,
-  "invoice_id" uuid not null,
-  "description" text not null,
-  "quantity" numeric default 1 not null,
-  "unit_price_cents" integer default 0 not null,
-  "sort_order" integer default 0 not null,
-  "created_at" timestamp with time zone default now() not null
-);
-
-create table public."invoice_payments" (
-  "id" uuid default gen_random_uuid() not null,
-  "workspace_id" uuid not null,
-  "invoice_id" uuid not null,
-  "amount_cents" integer not null,
-  "payment_date" date default CURRENT_DATE not null,
-  "method" text,
-  "reference" text,
-  "notes" text,
-  "created_at" timestamp with time zone default now() not null,
-  "updated_at" timestamp with time zone default now() not null
-);
-
-create table public."invoices" (
-  "id" uuid default gen_random_uuid() not null,
-  "workspace_id" uuid not null,
-  "client_id" uuid,
-  "job_id" uuid,
-  "source_estimate_id" uuid,
-  "invoice_number" text not null,
-  "invoice_date" date not null,
-  "due_date" date,
-  "company_name" text,
-  "company_address" text,
-  "company_city" text,
-  "company_state" text,
-  "company_zip" text,
-  "company_phone" text,
-  "company_email" text,
-  "bill_to_name" text,
-  "bill_to_company" text,
-  "bill_to_address" text,
-  "bill_to_city" text,
-  "bill_to_state" text,
-  "bill_to_zip" text,
-  "bill_to_phone" text,
-  "bill_to_email" text,
-  "discount_type" text default 'None'::text not null,
-  "discount_value" numeric default 0 not null,
-  "tax_rate" numeric default 0 not null,
-  "footer_message" text,
-  "contact_message" text,
-  "sent_at" timestamp with time zone,
-  "paid_at" timestamp with time zone,
-  "email_status" text,
-  "status" text default 'Draft'::text not null,
-  "created_at" timestamp with time zone default now() not null,
-  "updated_at" timestamp with time zone default now() not null
-);
-
-create table public."job_activity" (
-  "id" uuid default gen_random_uuid() not null,
-  "workspace_id" uuid not null,
-  "job_id" uuid not null,
-  "activity_type" text not null,
-  "title" text not null,
-  "body" text,
-  "metadata" jsonb default '{}'::jsonb not null,
-  "created_by" uuid,
-  "created_at" timestamp with time zone default now() not null
-);
-
-create table public."job_materials" (
-  "id" uuid default gen_random_uuid() not null,
-  "workspace_id" uuid not null,
-  "job_id" uuid not null,
-  "name" text not null,
-  "quantity" numeric default 0 not null,
-  "created_at" timestamp with time zone default now() not null
-);
-
-create table public."jobs" (
-  "id" uuid default gen_random_uuid() not null,
-  "workspace_id" uuid not null,
-  "client_id" uuid,
-  "client_name_snapshot" text,
-  "name" text not null,
-  "status" text default 'Lead'::text not null,
-  "estimated_value_cents" integer default 0 not null,
-  "scheduled_date" date,
-  "notes" text,
-  "created_at" timestamp with time zone default now() not null,
-  "updated_at" timestamp with time zone default now() not null
-);
-
-create table public."platform_admins" (
-  "user_id" uuid not null,
-  "email" text not null,
-  "role" text default 'Admin'::text not null,
-  "created_at" timestamp with time zone default now() not null
-);
-
-create table public."profiles" (
-  "id" uuid not null,
-  "display_name" text,
-  "email" text,
-  "created_at" timestamp with time zone default now() not null,
-  "updated_at" timestamp with time zone default now() not null
-);
-
-create table public."route_plan_stops" (
-  "id" uuid default gen_random_uuid() not null,
-  "workspace_id" uuid not null,
-  "route_plan_id" uuid not null,
-  "client_id" uuid,
-  "stop_order" integer not null,
-  "latitude" numeric(10,7),
-  "longitude" numeric(10,7),
-  "address_snapshot" text,
-  "created_at" timestamp with time zone default now() not null
-);
-
-create table public."route_plans" (
-  "id" uuid default gen_random_uuid() not null,
-  "workspace_id" uuid not null,
-  "name" text not null,
-  "total_distance_meters" integer,
-  "total_duration_seconds" integer,
-  "google_maps_url" text,
-  "notes" text,
-  "created_at" timestamp with time zone default now() not null,
-  "updated_at" timestamp with time zone default now() not null
-);
-
-create table public."workspace_members" (
-  "id" uuid default gen_random_uuid() not null,
-  "workspace_id" uuid not null,
-  "user_id" uuid,
-  "role" text not null,
-  "status" text default 'Active'::text not null,
-  "invited_email" text,
-  "invited_by" uuid,
-  "invite_token" text,
-  "invite_expires_at" timestamp with time zone,
-  "created_at" timestamp with time zone default now() not null,
-  "updated_at" timestamp with time zone default now() not null
-);
-
-create table public."workspace_settings" (
-  "workspace_id" uuid not null,
-  "company_name" text,
-  "company_address" text,
-  "company_city" text,
-  "company_state" text,
-  "company_zip" text,
-  "company_phone" text,
-  "company_email" text,
-  "company_website" text,
-  "default_invoice_terms" text,
-  "default_footer_message" text,
-  "default_contact_message" text,
-  "default_invoice_status" text default 'Draft'::text not null,
-  "tax_state" text,
-  "default_tax_rate" numeric default 0 not null,
-  "tax_location_mode" text default 'Business location'::text not null,
-  "discount_before_tax" boolean default true not null,
-  "workspace_nickname" text,
-  "business_type" text,
-  "notes" text,
-  "created_at" timestamp with time zone default now() not null,
-  "updated_at" timestamp with time zone default now() not null
-);
-
-create table public."workspaces" (
-  "id" uuid default gen_random_uuid() not null,
-  "name" text not null,
-  "type" text default 'Other'::text not null,
-  "created_by" uuid,
-  "created_at" timestamp with time zone default now() not null,
-  "updated_at" timestamp with time zone default now() not null
+CREATE TABLE IF NOT EXISTS "public"."invoices" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "workspace_id" "uuid" NOT NULL,
+    "client_id" "uuid",
+    "job_id" "uuid",
+    "source_estimate_id" "uuid",
+    "invoice_number" "text" NOT NULL,
+    "invoice_date" "date" NOT NULL,
+    "due_date" "date",
+    "company_name" "text",
+    "company_address" "text",
+    "company_city" "text",
+    "company_state" "text",
+    "company_zip" "text",
+    "company_phone" "text",
+    "company_email" "text",
+    "bill_to_name" "text",
+    "bill_to_company" "text",
+    "bill_to_address" "text",
+    "bill_to_city" "text",
+    "bill_to_state" "text",
+    "bill_to_zip" "text",
+    "bill_to_phone" "text",
+    "bill_to_email" "text",
+    "discount_type" "text" DEFAULT 'None'::"text" NOT NULL,
+    "discount_value" numeric DEFAULT 0 NOT NULL,
+    "tax_rate" numeric DEFAULT 0 NOT NULL,
+    "footer_message" "text",
+    "contact_message" "text",
+    "sent_at" timestamp with time zone,
+    "paid_at" timestamp with time zone,
+    "email_status" "text",
+    "status" "text" DEFAULT 'Draft'::"text" NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "invoices_discount_type_check" CHECK (("discount_type" = ANY (ARRAY['None'::"text", 'Percent'::"text", 'Fixed'::"text"]))),
+    CONSTRAINT "invoices_status_check" CHECK (("status" = ANY (ARRAY['Estimate'::"text", 'Draft'::"text", 'Sent'::"text", 'Overdue'::"text", 'Paid'::"text"])))
 );
 
 
+ALTER TABLE "public"."invoices" OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."upsert_invoice_with_lines"("invoice_payload" "jsonb", "line_items_payload" "jsonb") RETURNS "public"."invoices"
+    LANGUAGE "plpgsql"
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  target_invoice public.invoices;
+  target_workspace_id uuid;
+  target_invoice_id uuid;
+  line_item jsonb;
+begin
+  target_workspace_id := (invoice_payload ->> 'workspace_id')::uuid;
+  target_invoice_id := (invoice_payload ->> 'id')::uuid;
+
+  if not public.is_workspace_member(target_workspace_id) then
+    raise exception 'Access denied for workspace %', target_workspace_id
+      using errcode = '42501';
+  end if;
+
+  insert into public.invoices (
+    id,
+    workspace_id,
+    client_id,
+    job_id,
+    invoice_number,
+    invoice_date,
+    company_name,
+    company_address,
+    company_city,
+    company_state,
+    company_zip,
+    company_phone,
+    company_email,
+    bill_to_name,
+    bill_to_company,
+    bill_to_address,
+    bill_to_city,
+    bill_to_state,
+    bill_to_zip,
+    bill_to_phone,
+    bill_to_email,
+    discount_type,
+    discount_value,
+    tax_rate,
+    footer_message,
+    contact_message,
+    status
+  )
+  values (
+    target_invoice_id,
+    target_workspace_id,
+    nullif(invoice_payload ->> 'client_id', '')::uuid,
+    nullif(invoice_payload ->> 'job_id', '')::uuid,
+    invoice_payload ->> 'invoice_number',
+    (invoice_payload ->> 'invoice_date')::date,
+    invoice_payload ->> 'company_name',
+    invoice_payload ->> 'company_address',
+    invoice_payload ->> 'company_city',
+    invoice_payload ->> 'company_state',
+    invoice_payload ->> 'company_zip',
+    invoice_payload ->> 'company_phone',
+    invoice_payload ->> 'company_email',
+    invoice_payload ->> 'bill_to_name',
+    invoice_payload ->> 'bill_to_company',
+    invoice_payload ->> 'bill_to_address',
+    invoice_payload ->> 'bill_to_city',
+    invoice_payload ->> 'bill_to_state',
+    invoice_payload ->> 'bill_to_zip',
+    invoice_payload ->> 'bill_to_phone',
+    invoice_payload ->> 'bill_to_email',
+    coalesce(invoice_payload ->> 'discount_type', 'None'),
+    coalesce(nullif(invoice_payload ->> 'discount_value', '')::numeric, 0),
+    coalesce(nullif(invoice_payload ->> 'tax_rate', '')::numeric, 0),
+    invoice_payload ->> 'footer_message',
+    invoice_payload ->> 'contact_message',
+    coalesce(invoice_payload ->> 'status', 'Draft')
+  )
+  on conflict (id) do update
+    set client_id = excluded.client_id,
+        job_id = excluded.job_id,
+        invoice_number = excluded.invoice_number,
+        invoice_date = excluded.invoice_date,
+        company_name = excluded.company_name,
+        company_address = excluded.company_address,
+        company_city = excluded.company_city,
+        company_state = excluded.company_state,
+        company_zip = excluded.company_zip,
+        company_phone = excluded.company_phone,
+        company_email = excluded.company_email,
+        bill_to_name = excluded.bill_to_name,
+        bill_to_company = excluded.bill_to_company,
+        bill_to_address = excluded.bill_to_address,
+        bill_to_city = excluded.bill_to_city,
+        bill_to_state = excluded.bill_to_state,
+        bill_to_zip = excluded.bill_to_zip,
+        bill_to_phone = excluded.bill_to_phone,
+        bill_to_email = excluded.bill_to_email,
+        discount_type = excluded.discount_type,
+        discount_value = excluded.discount_value,
+        tax_rate = excluded.tax_rate,
+        footer_message = excluded.footer_message,
+        contact_message = excluded.contact_message,
+        status = excluded.status,
+        updated_at = now()
+  returning * into target_invoice;
+
+  delete from public.invoice_line_items
+  where invoice_id = target_invoice_id
+    and workspace_id = target_workspace_id;
+
+  for line_item in
+    select * from jsonb_array_elements(coalesce(line_items_payload, '[]'::jsonb))
+  loop
+    insert into public.invoice_line_items (
+      id,
+      workspace_id,
+      invoice_id,
+      description,
+      quantity,
+      unit_price_cents,
+      sort_order
+    )
+    values (
+      coalesce(nullif(line_item ->> 'id', '')::uuid, gen_random_uuid()),
+      target_workspace_id,
+      target_invoice_id,
+      line_item ->> 'description',
+      coalesce(nullif(line_item ->> 'quantity', '')::numeric, 1),
+      coalesce(nullif(line_item ->> 'unit_price_cents', '')::integer, 0),
+      coalesce(nullif(line_item ->> 'sort_order', '')::integer, 0)
+    );
+  end loop;
+
+  return target_invoice;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."upsert_invoice_with_lines"("invoice_payload" "jsonb", "line_items_payload" "jsonb") OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."jobs" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "workspace_id" "uuid" NOT NULL,
+    "client_id" "uuid",
+    "client_name_snapshot" "text",
+    "name" "text" NOT NULL,
+    "status" "text" DEFAULT 'Lead'::"text" NOT NULL,
+    "estimated_value_cents" integer DEFAULT 0 NOT NULL,
+    "scheduled_date" "date",
+    "notes" "text",
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "jobs_status_check" CHECK (("status" = ANY (ARRAY['Lead'::"text", 'Quoted'::"text", 'Scheduled'::"text", 'Completed'::"text", 'Paid'::"text"])))
+);
+
+
+ALTER TABLE "public"."jobs" OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."upsert_job_with_materials"("job_payload" "jsonb", "materials_payload" "jsonb") RETURNS "public"."jobs"
+    LANGUAGE "plpgsql"
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  target_job public.jobs;
+  target_workspace_id uuid;
+  target_job_id uuid;
+  material_item jsonb;
+begin
+  target_workspace_id := (job_payload ->> 'workspace_id')::uuid;
+  target_job_id := (job_payload ->> 'id')::uuid;
+
+  if not public.is_workspace_member(target_workspace_id) then
+    raise exception 'Access denied for workspace %', target_workspace_id using errcode = '42501';
+  end if;
+
+  insert into public.jobs (
+    id,
+    workspace_id,
+    client_id,
+    client_name_snapshot,
+    name,
+    status,
+    estimated_value_cents,
+    scheduled_date,
+    notes
+  )
+  values (
+    target_job_id,
+    target_workspace_id,
+    nullif(job_payload ->> 'client_id', '')::uuid,
+    job_payload ->> 'client_name_snapshot',
+    job_payload ->> 'name',
+    coalesce(job_payload ->> 'status', 'Lead'),
+    coalesce(nullif(job_payload ->> 'estimated_value_cents', '')::integer, 0),
+    nullif(job_payload ->> 'scheduled_date', '')::date,
+    job_payload ->> 'notes'
+  )
+  on conflict (id) do update
+    set client_id = excluded.client_id,
+        client_name_snapshot = excluded.client_name_snapshot,
+        name = excluded.name,
+        status = excluded.status,
+        estimated_value_cents = excluded.estimated_value_cents,
+        scheduled_date = excluded.scheduled_date,
+        notes = excluded.notes,
+        updated_at = now()
+  returning * into target_job;
+
+  delete from public.job_materials
+  where job_id = target_job_id
+    and workspace_id = target_workspace_id;
+
+  for material_item in
+    select * from jsonb_array_elements(coalesce(materials_payload, '[]'::jsonb))
+  loop
+    insert into public.job_materials (
+      workspace_id,
+      job_id,
+      name,
+      quantity
+    )
+    values (
+      target_workspace_id,
+      target_job_id,
+      material_item ->> 'name',
+      coalesce(nullif(material_item ->> 'quantity', '')::numeric, 0)
+    );
+  end loop;
+
+  return target_job;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."upsert_job_with_materials"("job_payload" "jsonb", "materials_payload" "jsonb") OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."route_plans" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "workspace_id" "uuid" NOT NULL,
+    "name" "text" NOT NULL,
+    "total_distance_meters" integer,
+    "total_duration_seconds" integer,
+    "google_maps_url" "text",
+    "notes" "text",
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL
+);
+
+
+ALTER TABLE "public"."route_plans" OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."upsert_route_with_stops"("route_payload" "jsonb", "stops_payload" "jsonb") RETURNS "public"."route_plans"
+    LANGUAGE "plpgsql"
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  target_route public.route_plans;
+  target_workspace_id uuid;
+  target_route_id uuid;
+  stop_item jsonb;
+begin
+  target_workspace_id := (route_payload ->> 'workspace_id')::uuid;
+  target_route_id := (route_payload ->> 'id')::uuid;
+
+  if not public.is_workspace_member(target_workspace_id) then
+    raise exception 'Access denied for workspace %', target_workspace_id using errcode = '42501';
+  end if;
+
+  insert into public.route_plans (
+    id,
+    workspace_id,
+    name,
+    total_distance_meters,
+    total_duration_seconds,
+    google_maps_url,
+    notes
+  )
+  values (
+    target_route_id,
+    target_workspace_id,
+    route_payload ->> 'name',
+    nullif(route_payload ->> 'total_distance_meters', '')::integer,
+    nullif(route_payload ->> 'total_duration_seconds', '')::integer,
+    route_payload ->> 'google_maps_url',
+    route_payload ->> 'notes'
+  )
+  on conflict (id) do update
+    set name = excluded.name,
+        total_distance_meters = excluded.total_distance_meters,
+        total_duration_seconds = excluded.total_duration_seconds,
+        google_maps_url = excluded.google_maps_url,
+        notes = excluded.notes,
+        updated_at = now()
+  returning * into target_route;
+
+  delete from public.route_plan_stops
+  where route_plan_id = target_route_id
+    and workspace_id = target_workspace_id;
+
+  for stop_item in
+    select * from jsonb_array_elements(coalesce(stops_payload, '[]'::jsonb))
+  loop
+    insert into public.route_plan_stops (
+      id,
+      workspace_id,
+      route_plan_id,
+      client_id,
+      stop_order,
+      latitude,
+      longitude,
+      address_snapshot
+    )
+    values (
+      coalesce(nullif(stop_item ->> 'id', '')::uuid, gen_random_uuid()),
+      target_workspace_id,
+      target_route_id,
+      nullif(stop_item ->> 'client_id', '')::uuid,
+      coalesce(nullif(stop_item ->> 'stop_order', '')::integer, 0),
+      nullif(stop_item ->> 'latitude', '')::numeric,
+      nullif(stop_item ->> 'longitude', '')::numeric,
+      stop_item ->> 'address_snapshot'
+    );
+  end loop;
+
+  return target_route;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."upsert_route_with_stops"("route_payload" "jsonb", "stops_payload" "jsonb") OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."admin_audit_logs" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "admin_user_id" "uuid" NOT NULL,
+    "target_user_id" "uuid",
+    "target_workspace_id" "uuid",
+    "action" "text" NOT NULL,
+    "metadata" "jsonb" DEFAULT '{}'::"jsonb" NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL
+);
+
+
+ALTER TABLE "public"."admin_audit_logs" OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."ai_jobs" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "workspace_id" "uuid" NOT NULL,
+    "document_id" "uuid",
+    "client_id" "uuid",
+    "job_id" "uuid",
+    "invoice_id" "uuid",
+    "expense_id" "uuid",
+    "workflow_name" "text" NOT NULL,
+    "status" "text" DEFAULT 'Queued'::"text" NOT NULL,
+    "model_provider" "text",
+    "model_name" "text",
+    "prompt_version" "text",
+    "input_json" "jsonb" DEFAULT '{}'::"jsonb" NOT NULL,
+    "result_json" "jsonb",
+    "confidence" numeric,
+    "error_message" "text",
+    "approved_by" "uuid",
+    "approved_at" timestamp with time zone,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "created_by" "uuid",
+    "job_type" "text" DEFAULT 'document_ocr'::"text",
+    "input_ref" "text",
+    "output_json" "jsonb",
+    "started_at" timestamp with time zone,
+    "completed_at" timestamp with time zone,
+    CONSTRAINT "ai_jobs_job_type_check" CHECK (("job_type" = ANY (ARRAY['document_ocr'::"text", 'document_extraction'::"text", 'voice_command'::"text", 'logistics_plan'::"text", 'invoice_parse'::"text", 'client_parse'::"text"]))),
+    CONSTRAINT "ai_jobs_status_check" CHECK (("status" = ANY (ARRAY['Queued'::"text", 'Processing'::"text", 'Needs Review'::"text", 'Approved'::"text", 'Failed'::"text", 'queued'::"text", 'processing'::"text", 'needs_review'::"text", 'reviewed'::"text", 'failed'::"text"])))
+);
+
+
+ALTER TABLE "public"."ai_jobs" OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."ai_review_drafts" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "workspace_id" "uuid" NOT NULL,
+    "source_type" "text" NOT NULL,
+    "source_id" "uuid",
+    "source_label" "text",
+    "status" "text" DEFAULT 'Pending'::"text" NOT NULL,
+    "confidence" numeric,
+    "warnings" "jsonb" DEFAULT '[]'::"jsonb" NOT NULL,
+    "actions" "jsonb" DEFAULT '[]'::"jsonb" NOT NULL,
+    "raw_input" "text",
+    "model_provider" "text",
+    "model_name" "text",
+    "created_by" "uuid",
+    "reviewed_by" "uuid",
+    "reviewed_at" timestamp with time zone,
+    "approved_at" timestamp with time zone,
+    "rejected_at" timestamp with time zone,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "ai_review_drafts_actions_array_check" CHECK (("jsonb_typeof"("actions") = 'array'::"text")),
+    CONSTRAINT "ai_review_drafts_no_delete_actions_check" CHECK ((NOT "jsonb_path_exists"("actions", '$[*]?(@."type" like_regex "^delete_")'::"jsonpath"))),
+    CONSTRAINT "ai_review_drafts_source_type_check" CHECK (("source_type" = ANY (ARRAY['ocr'::"text", 'transcript'::"text"]))),
+    CONSTRAINT "ai_review_drafts_status_check" CHECK (("status" = ANY (ARRAY['Pending'::"text", 'Approved'::"text", 'Rejected'::"text"]))),
+    CONSTRAINT "ai_review_drafts_warnings_array_check" CHECK (("jsonb_typeof"("warnings") = 'array'::"text"))
+);
+
+
+ALTER TABLE "public"."ai_review_drafts" OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."client_activity" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "workspace_id" "uuid" NOT NULL,
+    "client_id" "uuid" NOT NULL,
+    "activity_type" "text" NOT NULL,
+    "title" "text" NOT NULL,
+    "body" "text",
+    "metadata" "jsonb" DEFAULT '{}'::"jsonb" NOT NULL,
+    "created_by" "uuid",
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL
+);
+
+
+ALTER TABLE "public"."client_activity" OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."client_calendar_events" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "workspace_id" "uuid" NOT NULL,
+    "client_id" "uuid",
+    "client_name_snapshot" "text",
+    "title" "text" NOT NULL,
+    "event_date" "date" NOT NULL,
+    "notes" "text",
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL
+);
+
+
+ALTER TABLE "public"."client_calendar_events" OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."client_notes" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "workspace_id" "uuid" NOT NULL,
+    "client_id" "uuid" NOT NULL,
+    "body" "text" NOT NULL,
+    "created_by" "uuid",
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL
+);
+
+
+ALTER TABLE "public"."client_notes" OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."clients" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "workspace_id" "uuid" NOT NULL,
+    "name" "text" NOT NULL,
+    "status" "text" DEFAULT 'Active'::"text" NOT NULL,
+    "balance_cents" integer DEFAULT 0 NOT NULL,
+    "email" "text",
+    "phone" "text",
+    "address" "text",
+    "city" "text",
+    "state" "text",
+    "zip" "text",
+    "notes" "text",
+    "latitude" numeric(10,7),
+    "longitude" numeric(10,7),
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "clients_status_check" CHECK (("status" = ANY (ARRAY['Lead'::"text", 'Active'::"text", 'Inactive'::"text"])))
+);
+
+
+ALTER TABLE "public"."clients" OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."document_tag_links" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "workspace_id" "uuid" NOT NULL,
+    "document_id" "uuid" NOT NULL,
+    "tag_id" "uuid" NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL
+);
+
+
+ALTER TABLE "public"."document_tag_links" OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."document_tags" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "workspace_id" "uuid" NOT NULL,
+    "name" "text" NOT NULL,
+    "color" "text",
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL
+);
+
+
+ALTER TABLE "public"."document_tags" OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."documents" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "workspace_id" "uuid" NOT NULL,
+    "client_id" "uuid",
+    "job_id" "uuid",
+    "invoice_id" "uuid",
+    "estimate_id" "uuid",
+    "expense_id" "uuid",
+    "name" "text" NOT NULL,
+    "detected_type" "text",
+    "extraction_status" "text",
+    "file_name" "text",
+    "storage_bucket" "text",
+    "storage_path" "text",
+    "mime_type" "text",
+    "size_bytes" bigint,
+    "notes" "text",
+    "extracted_json" "jsonb",
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "uploaded_by" "uuid",
+    "status" "text" DEFAULT 'Metadata available'::"text" NOT NULL,
+    "processing_status" "text" DEFAULT 'uploaded'::"text" NOT NULL,
+    "extracted_text" "text",
+    "ocr_provider" "text",
+    "ai_job_id" "uuid",
+    "reviewed_at" timestamp with time zone,
+    "reviewed_by" "uuid",
+    "confidence" numeric,
+    "document_type" "text",
+    CONSTRAINT "documents_processing_status_check" CHECK (("processing_status" = ANY (ARRAY['uploaded'::"text", 'queued'::"text", 'processing'::"text", 'needs_review'::"text", 'reviewed'::"text", 'failed'::"text"])))
+);
+
+
+ALTER TABLE "public"."documents" OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."estimate_line_items" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "workspace_id" "uuid" NOT NULL,
+    "estimate_id" "uuid" NOT NULL,
+    "description" "text" NOT NULL,
+    "quantity" numeric DEFAULT 1 NOT NULL,
+    "unit_price_cents" integer DEFAULT 0 NOT NULL,
+    "sort_order" integer DEFAULT 0 NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL
+);
+
+
+ALTER TABLE "public"."estimate_line_items" OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."estimates" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "workspace_id" "uuid" NOT NULL,
+    "client_id" "uuid",
+    "job_id" "uuid",
+    "estimate_number" "text" NOT NULL,
+    "estimate_date" "date" NOT NULL,
+    "converted_invoice_id" "uuid",
+    "company_name" "text",
+    "company_address" "text",
+    "company_city" "text",
+    "company_state" "text",
+    "company_zip" "text",
+    "company_phone" "text",
+    "company_email" "text",
+    "bill_to_name" "text",
+    "bill_to_company" "text",
+    "bill_to_address" "text",
+    "bill_to_city" "text",
+    "bill_to_state" "text",
+    "bill_to_zip" "text",
+    "bill_to_phone" "text",
+    "bill_to_email" "text",
+    "discount_type" "text" DEFAULT 'None'::"text" NOT NULL,
+    "discount_value" numeric DEFAULT 0 NOT NULL,
+    "tax_rate" numeric DEFAULT 0 NOT NULL,
+    "footer_message" "text",
+    "contact_message" "text",
+    "status" "text" DEFAULT 'Draft'::"text" NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "estimates_discount_type_check" CHECK (("discount_type" = ANY (ARRAY['None'::"text", 'Percent'::"text", 'Fixed'::"text"]))),
+    CONSTRAINT "estimates_status_check" CHECK (("status" = ANY (ARRAY['Draft'::"text", 'Sent'::"text", 'Accepted'::"text", 'Declined'::"text", 'Expired'::"text", 'Converted'::"text"])))
+);
+
+
+ALTER TABLE "public"."estimates" OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."expenses" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "workspace_id" "uuid" NOT NULL,
+    "description" "text" NOT NULL,
+    "category" "text" NOT NULL,
+    "amount_cents" integer DEFAULT 0 NOT NULL,
+    "expense_date" "date",
+    "notes" "text",
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL
+);
+
+
+ALTER TABLE "public"."expenses" OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."inventory_items" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "workspace_id" "uuid" NOT NULL,
+    "name" "text" NOT NULL,
+    "current_qty" numeric,
+    "target_qty" numeric,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL
+);
+
+
+ALTER TABLE "public"."inventory_items" OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."invoice_line_items" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "workspace_id" "uuid" NOT NULL,
+    "invoice_id" "uuid" NOT NULL,
+    "description" "text" NOT NULL,
+    "quantity" numeric DEFAULT 1 NOT NULL,
+    "unit_price_cents" integer DEFAULT 0 NOT NULL,
+    "sort_order" integer DEFAULT 0 NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL
+);
+
+
+ALTER TABLE "public"."invoice_line_items" OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."invoice_payments" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "workspace_id" "uuid" NOT NULL,
+    "invoice_id" "uuid" NOT NULL,
+    "amount_cents" integer NOT NULL,
+    "payment_date" "date" DEFAULT CURRENT_DATE NOT NULL,
+    "method" "text",
+    "reference" "text",
+    "notes" "text",
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "invoice_payments_amount_cents_check" CHECK (("amount_cents" >= 0))
+);
+
+
+ALTER TABLE "public"."invoice_payments" OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."job_activity" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "workspace_id" "uuid" NOT NULL,
+    "job_id" "uuid" NOT NULL,
+    "activity_type" "text" NOT NULL,
+    "title" "text" NOT NULL,
+    "body" "text",
+    "metadata" "jsonb" DEFAULT '{}'::"jsonb" NOT NULL,
+    "created_by" "uuid",
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL
+);
+
+
+ALTER TABLE "public"."job_activity" OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."job_materials" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "workspace_id" "uuid" NOT NULL,
+    "job_id" "uuid" NOT NULL,
+    "name" "text" NOT NULL,
+    "quantity" numeric DEFAULT 0 NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL
+);
+
+
+ALTER TABLE "public"."job_materials" OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."platform_admins" (
+    "user_id" "uuid" NOT NULL,
+    "email" "text" NOT NULL,
+    "role" "text" DEFAULT 'Admin'::"text" NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "platform_admins_email_normalized_check" CHECK (("email" = "lower"(TRIM(BOTH FROM "email")))),
+    CONSTRAINT "platform_admins_role_check" CHECK (("role" = ANY (ARRAY['Owner'::"text", 'Admin'::"text", 'Support'::"text"])))
+);
+
+
+ALTER TABLE "public"."platform_admins" OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."profiles" (
+    "id" "uuid" NOT NULL,
+    "display_name" "text",
+    "email" "text",
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL
+);
+
+
+ALTER TABLE "public"."profiles" OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."route_plan_stops" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "workspace_id" "uuid" NOT NULL,
+    "route_plan_id" "uuid" NOT NULL,
+    "client_id" "uuid",
+    "stop_order" integer NOT NULL,
+    "latitude" numeric(10,7),
+    "longitude" numeric(10,7),
+    "address_snapshot" "text",
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL
+);
+
+
+ALTER TABLE "public"."route_plan_stops" OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."workspace_members" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "workspace_id" "uuid" NOT NULL,
+    "user_id" "uuid",
+    "role" "text" NOT NULL,
+    "status" "text" DEFAULT 'Active'::"text" NOT NULL,
+    "invited_email" "text",
+    "invited_by" "uuid",
+    "invite_token" "text",
+    "invite_expires_at" timestamp with time zone,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "workspace_members_role_check" CHECK (("role" = ANY (ARRAY['Owner'::"text", 'Manager'::"text", 'Employee'::"text"]))),
+    CONSTRAINT "workspace_members_status_check" CHECK (("status" = ANY (ARRAY['Active'::"text", 'Invited'::"text", 'Removed'::"text"]))),
+    CONSTRAINT "workspace_members_user_or_email_check" CHECK ((("user_id" IS NOT NULL) OR ("invited_email" IS NOT NULL)))
+);
+
+
+ALTER TABLE "public"."workspace_members" OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."workspace_settings" (
+    "workspace_id" "uuid" NOT NULL,
+    "company_name" "text",
+    "company_address" "text",
+    "company_city" "text",
+    "company_state" "text",
+    "company_zip" "text",
+    "company_phone" "text",
+    "company_email" "text",
+    "company_website" "text",
+    "default_invoice_terms" "text",
+    "default_footer_message" "text",
+    "default_contact_message" "text",
+    "default_invoice_status" "text" DEFAULT 'Draft'::"text" NOT NULL,
+    "tax_state" "text",
+    "default_tax_rate" numeric DEFAULT 0 NOT NULL,
+    "tax_location_mode" "text" DEFAULT 'Business location'::"text" NOT NULL,
+    "discount_before_tax" boolean DEFAULT true NOT NULL,
+    "workspace_nickname" "text",
+    "business_type" "text",
+    "notes" "text",
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "workspace_settings_default_invoice_status_check" CHECK (("default_invoice_status" = ANY (ARRAY['Estimate'::"text", 'Draft'::"text", 'Sent'::"text"]))),
+    CONSTRAINT "workspace_settings_tax_location_mode_check" CHECK (("tax_location_mode" = ANY (ARRAY['Business location'::"text", 'Job location'::"text"])))
+);
+
+
+ALTER TABLE "public"."workspace_settings" OWNER TO "postgres";
+
+
+ALTER TABLE ONLY "public"."admin_audit_logs"
+    ADD CONSTRAINT "admin_audit_logs_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."ai_jobs"
+    ADD CONSTRAINT "ai_jobs_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."ai_review_drafts"
+    ADD CONSTRAINT "ai_review_drafts_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."client_activity"
+    ADD CONSTRAINT "client_activity_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."client_calendar_events"
+    ADD CONSTRAINT "client_calendar_events_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."client_notes"
+    ADD CONSTRAINT "client_notes_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."clients"
+    ADD CONSTRAINT "clients_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."document_tag_links"
+    ADD CONSTRAINT "document_tag_links_document_id_tag_id_key" UNIQUE ("document_id", "tag_id");
+
 
--- -----------------------------------------------------------------------------
--- Constraints
--- -----------------------------------------------------------------------------
-alter table admin_audit_logs add constraint "admin_audit_logs_pkey" PRIMARY KEY (id);
-alter table admin_audit_logs add constraint "admin_audit_logs_admin_user_id_fkey" FOREIGN KEY (admin_user_id) REFERENCES auth.users(id) ON DELETE CASCADE;
-alter table admin_audit_logs add constraint "admin_audit_logs_target_user_id_fkey" FOREIGN KEY (target_user_id) REFERENCES auth.users(id) ON DELETE SET NULL;
-alter table admin_audit_logs add constraint "admin_audit_logs_target_workspace_id_fkey" FOREIGN KEY (target_workspace_id) REFERENCES workspaces(id) ON DELETE SET NULL;
-alter table ai_jobs add constraint "ai_jobs_pkey" PRIMARY KEY (id);
-alter table ai_jobs add constraint "ai_jobs_approved_by_fkey" FOREIGN KEY (approved_by) REFERENCES profiles(id) ON DELETE SET NULL;
-alter table ai_jobs add constraint "ai_jobs_client_id_fkey" FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE SET NULL;
-alter table ai_jobs add constraint "ai_jobs_document_id_fkey" FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE SET NULL;
-alter table ai_jobs add constraint "ai_jobs_expense_id_fkey" FOREIGN KEY (expense_id) REFERENCES expenses(id) ON DELETE SET NULL;
-alter table ai_jobs add constraint "ai_jobs_invoice_id_fkey" FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE SET NULL;
-alter table ai_jobs add constraint "ai_jobs_job_id_fkey" FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE SET NULL;
-alter table ai_jobs add constraint "ai_jobs_workspace_id_fkey" FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE;
-alter table ai_jobs add constraint "ai_jobs_status_check" CHECK ((status = ANY (ARRAY['Queued'::text, 'Processing'::text, 'Needs Review'::text, 'Approved'::text, 'Failed'::text])));
-alter table client_activity add constraint "client_activity_pkey" PRIMARY KEY (id);
-alter table client_activity add constraint "client_activity_client_id_fkey" FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE;
-alter table client_activity add constraint "client_activity_created_by_fkey" FOREIGN KEY (created_by) REFERENCES profiles(id) ON DELETE SET NULL;
-alter table client_activity add constraint "client_activity_workspace_id_fkey" FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE;
-alter table client_calendar_events add constraint "client_calendar_events_pkey" PRIMARY KEY (id);
-alter table client_calendar_events add constraint "client_calendar_events_client_id_fkey" FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE SET NULL;
-alter table client_calendar_events add constraint "client_calendar_events_workspace_id_fkey" FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE;
-alter table client_notes add constraint "client_notes_pkey" PRIMARY KEY (id);
-alter table client_notes add constraint "client_notes_client_id_fkey" FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE;
-alter table client_notes add constraint "client_notes_created_by_fkey" FOREIGN KEY (created_by) REFERENCES profiles(id) ON DELETE SET NULL;
-alter table client_notes add constraint "client_notes_workspace_id_fkey" FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE;
-alter table clients add constraint "clients_pkey" PRIMARY KEY (id);
-alter table clients add constraint "clients_workspace_id_fkey" FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE;
-alter table clients add constraint "clients_status_check" CHECK ((status = ANY (ARRAY['Lead'::text, 'Active'::text, 'Inactive'::text])));
-alter table document_tag_links add constraint "document_tag_links_pkey" PRIMARY KEY (id);
-alter table document_tag_links add constraint "document_tag_links_document_id_tag_id_key" UNIQUE (document_id, tag_id);
-alter table document_tag_links add constraint "document_tag_links_document_id_fkey" FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE;
-alter table document_tag_links add constraint "document_tag_links_tag_id_fkey" FOREIGN KEY (tag_id) REFERENCES document_tags(id) ON DELETE CASCADE;
-alter table document_tag_links add constraint "document_tag_links_workspace_id_fkey" FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE;
-alter table document_tags add constraint "document_tags_pkey" PRIMARY KEY (id);
-alter table document_tags add constraint "document_tags_workspace_id_fkey" FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE;
-alter table documents add constraint "documents_pkey" PRIMARY KEY (id);
-alter table documents add constraint "documents_client_id_fkey" FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE SET NULL;
-alter table documents add constraint "documents_estimate_id_fkey" FOREIGN KEY (estimate_id) REFERENCES estimates(id) ON DELETE SET NULL;
-alter table documents add constraint "documents_expense_id_fkey" FOREIGN KEY (expense_id) REFERENCES expenses(id) ON DELETE SET NULL;
-alter table documents add constraint "documents_invoice_id_fkey" FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE SET NULL;
-alter table documents add constraint "documents_job_id_fkey" FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE SET NULL;
-alter table documents add constraint "documents_uploaded_by_fkey" FOREIGN KEY (uploaded_by) REFERENCES profiles(id) ON DELETE SET NULL;
-alter table documents add constraint "documents_workspace_id_fkey" FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE;
-alter table estimate_line_items add constraint "estimate_line_items_pkey" PRIMARY KEY (id);
-alter table estimate_line_items add constraint "estimate_line_items_estimate_id_fkey" FOREIGN KEY (estimate_id) REFERENCES estimates(id) ON DELETE CASCADE;
-alter table estimate_line_items add constraint "estimate_line_items_workspace_id_fkey" FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE;
-alter table estimates add constraint "estimates_pkey" PRIMARY KEY (id);
-alter table estimates add constraint "estimates_client_id_fkey" FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE SET NULL;
-alter table estimates add constraint "estimates_converted_invoice_fk" FOREIGN KEY (converted_invoice_id) REFERENCES invoices(id) ON DELETE SET NULL;
-alter table estimates add constraint "estimates_job_id_fkey" FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE SET NULL;
-alter table estimates add constraint "estimates_workspace_id_fkey" FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE;
-alter table estimates add constraint "estimates_discount_type_check" CHECK ((discount_type = ANY (ARRAY['None'::text, 'Percent'::text, 'Fixed'::text])));
-alter table estimates add constraint "estimates_status_check" CHECK ((status = ANY (ARRAY['Draft'::text, 'Sent'::text, 'Accepted'::text, 'Declined'::text, 'Expired'::text, 'Converted'::text])));
-alter table expenses add constraint "expenses_pkey" PRIMARY KEY (id);
-alter table expenses add constraint "expenses_workspace_id_fkey" FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE;
-alter table inventory_items add constraint "inventory_items_pkey" PRIMARY KEY (id);
-alter table inventory_items add constraint "inventory_items_workspace_id_fkey" FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE;
-alter table invoice_line_items add constraint "invoice_line_items_pkey" PRIMARY KEY (id);
-alter table invoice_line_items add constraint "invoice_line_items_invoice_id_fkey" FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE;
-alter table invoice_line_items add constraint "invoice_line_items_workspace_id_fkey" FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE;
-alter table invoice_payments add constraint "invoice_payments_pkey" PRIMARY KEY (id);
-alter table invoice_payments add constraint "invoice_payments_invoice_id_fkey" FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE;
-alter table invoice_payments add constraint "invoice_payments_workspace_id_fkey" FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE;
-alter table invoice_payments add constraint "invoice_payments_amount_cents_check" CHECK ((amount_cents >= 0));
-alter table invoices add constraint "invoices_pkey" PRIMARY KEY (id);
-alter table invoices add constraint "invoices_client_id_fkey" FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE SET NULL;
-alter table invoices add constraint "invoices_job_id_fkey" FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE SET NULL;
-alter table invoices add constraint "invoices_source_estimate_id_fkey" FOREIGN KEY (source_estimate_id) REFERENCES estimates(id) ON DELETE SET NULL;
-alter table invoices add constraint "invoices_workspace_id_fkey" FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE;
-alter table invoices add constraint "invoices_discount_type_check" CHECK ((discount_type = ANY (ARRAY['None'::text, 'Percent'::text, 'Fixed'::text])));
-alter table invoices add constraint "invoices_status_check" CHECK ((status = ANY (ARRAY['Draft'::text, 'Sent'::text, 'Overdue'::text, 'Paid'::text])));
-alter table job_activity add constraint "job_activity_pkey" PRIMARY KEY (id);
-alter table job_activity add constraint "job_activity_created_by_fkey" FOREIGN KEY (created_by) REFERENCES profiles(id) ON DELETE SET NULL;
-alter table job_activity add constraint "job_activity_job_id_fkey" FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE;
-alter table job_activity add constraint "job_activity_workspace_id_fkey" FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE;
-alter table job_materials add constraint "job_materials_pkey" PRIMARY KEY (id);
-alter table job_materials add constraint "job_materials_job_id_fkey" FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE;
-alter table job_materials add constraint "job_materials_workspace_id_fkey" FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE;
-alter table jobs add constraint "jobs_pkey" PRIMARY KEY (id);
-alter table jobs add constraint "jobs_client_id_fkey" FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE SET NULL;
-alter table jobs add constraint "jobs_workspace_id_fkey" FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE;
-alter table jobs add constraint "jobs_status_check" CHECK ((status = ANY (ARRAY['Lead'::text, 'Quoted'::text, 'Scheduled'::text, 'Completed'::text, 'Paid'::text])));
-alter table platform_admins add constraint "platform_admins_pkey" PRIMARY KEY (user_id);
-alter table platform_admins add constraint "platform_admins_user_id_fkey" FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE;
-alter table platform_admins add constraint "platform_admins_email_normalized_check" CHECK ((email = lower(TRIM(BOTH FROM email))));
-alter table platform_admins add constraint "platform_admins_role_check" CHECK ((role = ANY (ARRAY['Owner'::text, 'Admin'::text, 'Support'::text])));
-alter table profiles add constraint "profiles_pkey" PRIMARY KEY (id);
-alter table profiles add constraint "profiles_id_fkey" FOREIGN KEY (id) REFERENCES auth.users(id) ON DELETE CASCADE;
-alter table route_plan_stops add constraint "route_plan_stops_pkey" PRIMARY KEY (id);
-alter table route_plan_stops add constraint "route_plan_stops_route_plan_id_stop_order_key" UNIQUE (route_plan_id, stop_order);
-alter table route_plan_stops add constraint "route_plan_stops_client_id_fkey" FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE SET NULL;
-alter table route_plan_stops add constraint "route_plan_stops_route_plan_id_fkey" FOREIGN KEY (route_plan_id) REFERENCES route_plans(id) ON DELETE CASCADE;
-alter table route_plan_stops add constraint "route_plan_stops_workspace_id_fkey" FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE;
-alter table route_plans add constraint "route_plans_pkey" PRIMARY KEY (id);
-alter table route_plans add constraint "route_plans_workspace_id_fkey" FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE;
-alter table workspace_members add constraint "workspace_members_pkey" PRIMARY KEY (id);
-alter table workspace_members add constraint "workspace_members_invited_by_fkey" FOREIGN KEY (invited_by) REFERENCES profiles(id) ON DELETE SET NULL;
-alter table workspace_members add constraint "workspace_members_user_id_fkey" FOREIGN KEY (user_id) REFERENCES profiles(id) ON DELETE CASCADE;
-alter table workspace_members add constraint "workspace_members_workspace_id_fkey" FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE;
-alter table workspace_members add constraint "workspace_members_role_check" CHECK ((role = ANY (ARRAY['Owner'::text, 'Manager'::text, 'Employee'::text])));
-alter table workspace_members add constraint "workspace_members_status_check" CHECK ((status = ANY (ARRAY['Active'::text, 'Invited'::text, 'Removed'::text])));
-alter table workspace_members add constraint "workspace_members_user_or_email_check" CHECK (((user_id IS NOT NULL) OR (invited_email IS NOT NULL)));
-alter table workspace_settings add constraint "workspace_settings_pkey" PRIMARY KEY (workspace_id);
-alter table workspace_settings add constraint "workspace_settings_workspace_id_fkey" FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE;
-alter table workspace_settings add constraint "workspace_settings_default_invoice_status_check" CHECK ((default_invoice_status = ANY (ARRAY['Draft'::text, 'Sent'::text])));
-alter table workspace_settings add constraint "workspace_settings_tax_location_mode_check" CHECK ((tax_location_mode = ANY (ARRAY['Business location'::text, 'Job location'::text])));
-alter table workspaces add constraint "workspaces_pkey" PRIMARY KEY (id);
-alter table workspaces add constraint "workspaces_created_by_fkey" FOREIGN KEY (created_by) REFERENCES profiles(id) ON DELETE SET NULL;
-
-
--- -----------------------------------------------------------------------------
--- Indexes
--- -----------------------------------------------------------------------------
-CREATE INDEX admin_audit_logs_action_created_idx ON public.admin_audit_logs USING btree (action, created_at DESC);
-CREATE INDEX admin_audit_logs_admin_user_idx ON public.admin_audit_logs USING btree (admin_user_id);
-CREATE INDEX admin_audit_logs_target_user_idx ON public.admin_audit_logs USING btree (target_user_id);
-CREATE INDEX admin_audit_logs_target_workspace_idx ON public.admin_audit_logs USING btree (target_workspace_id);
-CREATE INDEX ai_jobs_document_idx ON public.ai_jobs USING btree (document_id);
-CREATE INDEX ai_jobs_status_idx ON public.ai_jobs USING btree (status);
-CREATE INDEX ai_jobs_workspace_idx ON public.ai_jobs USING btree (workspace_id);
-CREATE INDEX client_activity_client_idx ON public.client_activity USING btree (client_id);
-CREATE INDEX client_activity_workspace_idx ON public.client_activity USING btree (workspace_id);
-CREATE INDEX client_calendar_events_client_idx ON public.client_calendar_events USING btree (client_id);
-CREATE INDEX client_calendar_events_date_idx ON public.client_calendar_events USING btree (event_date);
-CREATE INDEX client_calendar_events_workspace_idx ON public.client_calendar_events USING btree (workspace_id);
-CREATE INDEX client_notes_client_idx ON public.client_notes USING btree (client_id);
-CREATE INDEX client_notes_workspace_idx ON public.client_notes USING btree (workspace_id);
-CREATE INDEX clients_workspace_idx ON public.clients USING btree (workspace_id);
-CREATE UNIQUE INDEX clients_workspace_name_uidx ON public.clients USING btree (workspace_id, lower(name));
-CREATE INDEX document_tag_links_document_idx ON public.document_tag_links USING btree (document_id);
-CREATE INDEX document_tag_links_tag_idx ON public.document_tag_links USING btree (tag_id);
-CREATE INDEX document_tag_links_workspace_idx ON public.document_tag_links USING btree (workspace_id);
-CREATE INDEX document_tags_workspace_idx ON public.document_tags USING btree (workspace_id);
-CREATE UNIQUE INDEX document_tags_workspace_name_uidx ON public.document_tags USING btree (workspace_id, lower(name));
-CREATE INDEX documents_client_idx ON public.documents USING btree (client_id);
-CREATE INDEX documents_estimate_idx ON public.documents USING btree (estimate_id);
-CREATE INDEX documents_expense_idx ON public.documents USING btree (expense_id);
-CREATE INDEX documents_invoice_idx ON public.documents USING btree (invoice_id);
-CREATE INDEX documents_job_idx ON public.documents USING btree (job_id);
-CREATE INDEX documents_status_idx ON public.documents USING btree (status);
-CREATE INDEX documents_uploaded_by_idx ON public.documents USING btree (uploaded_by);
-CREATE INDEX documents_workspace_idx ON public.documents USING btree (workspace_id);
-CREATE INDEX estimate_line_items_estimate_idx ON public.estimate_line_items USING btree (estimate_id);
-CREATE INDEX estimate_line_items_workspace_idx ON public.estimate_line_items USING btree (workspace_id);
-CREATE INDEX estimates_client_idx ON public.estimates USING btree (client_id);
-CREATE INDEX estimates_date_idx ON public.estimates USING btree (estimate_date);
-CREATE INDEX estimates_job_idx ON public.estimates USING btree (job_id);
-CREATE INDEX estimates_status_idx ON public.estimates USING btree (status);
-CREATE INDEX estimates_workspace_idx ON public.estimates USING btree (workspace_id);
-CREATE UNIQUE INDEX estimates_workspace_number_uidx ON public.estimates USING btree (workspace_id, estimate_number);
-CREATE INDEX expenses_category_idx ON public.expenses USING btree (category);
-CREATE INDEX expenses_date_idx ON public.expenses USING btree (expense_date);
-CREATE INDEX expenses_workspace_idx ON public.expenses USING btree (workspace_id);
-CREATE INDEX inventory_items_workspace_idx ON public.inventory_items USING btree (workspace_id);
-CREATE UNIQUE INDEX inventory_items_workspace_name_uidx ON public.inventory_items USING btree (workspace_id, lower(name));
-CREATE INDEX invoice_line_items_invoice_idx ON public.invoice_line_items USING btree (invoice_id);
-CREATE INDEX invoice_line_items_workspace_idx ON public.invoice_line_items USING btree (workspace_id);
-CREATE INDEX invoice_payments_date_idx ON public.invoice_payments USING btree (payment_date);
-CREATE INDEX invoice_payments_invoice_idx ON public.invoice_payments USING btree (invoice_id);
-CREATE INDEX invoice_payments_workspace_idx ON public.invoice_payments USING btree (workspace_id);
-CREATE INDEX invoices_client_idx ON public.invoices USING btree (client_id);
-CREATE INDEX invoices_date_idx ON public.invoices USING btree (invoice_date);
-CREATE INDEX invoices_job_idx ON public.invoices USING btree (job_id);
-CREATE INDEX invoices_source_estimate_idx ON public.invoices USING btree (source_estimate_id);
-CREATE INDEX invoices_status_idx ON public.invoices USING btree (status);
-CREATE INDEX invoices_workspace_idx ON public.invoices USING btree (workspace_id);
-CREATE UNIQUE INDEX invoices_workspace_number_uidx ON public.invoices USING btree (workspace_id, invoice_number);
-CREATE INDEX job_activity_job_idx ON public.job_activity USING btree (job_id);
-CREATE INDEX job_activity_workspace_idx ON public.job_activity USING btree (workspace_id);
-CREATE INDEX job_materials_job_idx ON public.job_materials USING btree (job_id);
-CREATE INDEX job_materials_name_idx ON public.job_materials USING btree (lower(name));
-CREATE INDEX job_materials_workspace_idx ON public.job_materials USING btree (workspace_id);
-CREATE INDEX jobs_client_idx ON public.jobs USING btree (client_id);
-CREATE INDEX jobs_scheduled_date_idx ON public.jobs USING btree (scheduled_date);
-CREATE INDEX jobs_workspace_idx ON public.jobs USING btree (workspace_id);
-CREATE INDEX route_plan_stops_client_idx ON public.route_plan_stops USING btree (client_id);
-CREATE INDEX route_plan_stops_route_idx ON public.route_plan_stops USING btree (route_plan_id);
-CREATE INDEX route_plan_stops_workspace_idx ON public.route_plan_stops USING btree (workspace_id);
-CREATE INDEX route_plans_workspace_idx ON public.route_plans USING btree (workspace_id);
-CREATE UNIQUE INDEX workspace_members_invite_token_uidx ON public.workspace_members USING btree (invite_token) WHERE (invite_token IS NOT NULL);
-CREATE INDEX workspace_members_user_idx ON public.workspace_members USING btree (user_id);
-CREATE INDEX workspace_members_workspace_idx ON public.workspace_members USING btree (workspace_id);
-CREATE UNIQUE INDEX workspace_members_workspace_user_uidx ON public.workspace_members USING btree (workspace_id, user_id) WHERE (user_id IS NOT NULL);
-
-
--- -----------------------------------------------------------------------------
--- Triggers
--- -----------------------------------------------------------------------------
-create trigger "ai_jobs_set_updated_at" BEFORE UPDATE on public."ai_jobs" for each row EXECUTE FUNCTION set_updated_at();
-create trigger "client_calendar_events_set_updated_at" BEFORE UPDATE on public."client_calendar_events" for each row EXECUTE FUNCTION set_updated_at();
-create trigger "client_notes_set_updated_at" BEFORE UPDATE on public."client_notes" for each row EXECUTE FUNCTION set_updated_at();
-create trigger "clients_set_updated_at" BEFORE UPDATE on public."clients" for each row EXECUTE FUNCTION set_updated_at();
-create trigger "document_tags_set_updated_at" BEFORE UPDATE on public."document_tags" for each row EXECUTE FUNCTION set_updated_at();
-create trigger "documents_set_updated_at" BEFORE UPDATE on public."documents" for each row EXECUTE FUNCTION set_updated_at();
-create trigger "estimates_set_updated_at" BEFORE UPDATE on public."estimates" for each row EXECUTE FUNCTION set_updated_at();
-create trigger "expenses_set_updated_at" BEFORE UPDATE on public."expenses" for each row EXECUTE FUNCTION set_updated_at();
-create trigger "inventory_items_set_updated_at" BEFORE UPDATE on public."inventory_items" for each row EXECUTE FUNCTION set_updated_at();
-create trigger "invoice_payments_set_updated_at" BEFORE UPDATE on public."invoice_payments" for each row EXECUTE FUNCTION set_updated_at();
-create trigger "invoices_set_updated_at" BEFORE UPDATE on public."invoices" for each row EXECUTE FUNCTION set_updated_at();
-create trigger "jobs_set_updated_at" BEFORE UPDATE on public."jobs" for each row EXECUTE FUNCTION set_updated_at();
-create trigger "profiles_set_updated_at" BEFORE UPDATE on public."profiles" for each row EXECUTE FUNCTION set_updated_at();
-create trigger "route_plans_set_updated_at" BEFORE UPDATE on public."route_plans" for each row EXECUTE FUNCTION set_updated_at();
-create trigger "workspace_members_set_updated_at" BEFORE UPDATE on public."workspace_members" for each row EXECUTE FUNCTION set_updated_at();
-create trigger "workspace_settings_set_updated_at" BEFORE UPDATE on public."workspace_settings" for each row EXECUTE FUNCTION set_updated_at();
-create trigger "workspaces_set_updated_at" BEFORE UPDATE on public."workspaces" for each row EXECUTE FUNCTION set_updated_at();
-
-
--- -----------------------------------------------------------------------------
--- Row Level Security
--- -----------------------------------------------------------------------------
-alter table public."admin_audit_logs" enable row level security;
-alter table public."ai_jobs" enable row level security;
-alter table public."client_activity" enable row level security;
-alter table public."client_calendar_events" enable row level security;
-alter table public."client_notes" enable row level security;
-alter table public."clients" enable row level security;
-alter table public."document_tag_links" enable row level security;
-alter table public."document_tags" enable row level security;
-alter table public."documents" enable row level security;
-alter table public."estimate_line_items" enable row level security;
-alter table public."estimates" enable row level security;
-alter table public."expenses" enable row level security;
-alter table public."inventory_items" enable row level security;
-alter table public."invoice_line_items" enable row level security;
-alter table public."invoice_payments" enable row level security;
-alter table public."invoices" enable row level security;
-alter table public."job_activity" enable row level security;
-alter table public."job_materials" enable row level security;
-alter table public."jobs" enable row level security;
-alter table public."platform_admins" enable row level security;
-alter table public."profiles" enable row level security;
-alter table public."route_plan_stops" enable row level security;
-alter table public."route_plans" enable row level security;
-alter table public."workspace_members" enable row level security;
-alter table public."workspace_settings" enable row level security;
-alter table public."workspaces" enable row level security;
-
-
--- -----------------------------------------------------------------------------
--- Policies
--- -----------------------------------------------------------------------------
-create policy "Platform admins can read admin audit logs"
-  on public."admin_audit_logs"
-  as permissive
-  for select
-  to "public"
-  using (is_platform_admin());
-
-create policy "Workspace members can delete AI jobs"
-  on public."ai_jobs"
-  as permissive
-  for delete
-  to "public"
-  using (is_workspace_member(workspace_id));
-
-create policy "Workspace members can insert AI jobs"
-  on public."ai_jobs"
-  as permissive
-  for insert
-  to "public"
-  with check (is_workspace_member(workspace_id));
-
-create policy "Workspace members can read AI jobs"
-  on public."ai_jobs"
-  as permissive
-  for select
-  to "public"
-  using (is_workspace_member(workspace_id));
-
-create policy "Workspace members can update AI jobs"
-  on public."ai_jobs"
-  as permissive
-  for update
-  to "public"
-  using (is_workspace_member(workspace_id))
-  with check (is_workspace_member(workspace_id));
-
-create policy "Workspace members can delete client activity"
-  on public."client_activity"
-  as permissive
-  for delete
-  to "public"
-  using (is_workspace_member(workspace_id));
-
-create policy "Workspace members can insert client activity"
-  on public."client_activity"
-  as permissive
-  for insert
-  to "public"
-  with check (is_workspace_member(workspace_id));
-
-create policy "Workspace members can read client activity"
-  on public."client_activity"
-  as permissive
-  for select
-  to "public"
-  using (is_workspace_member(workspace_id));
-
-create policy "Workspace members can update client activity"
-  on public."client_activity"
-  as permissive
-  for update
-  to "public"
-  using (is_workspace_member(workspace_id))
-  with check (is_workspace_member(workspace_id));
-
-create policy "Workspace members can delete calendar events"
-  on public."client_calendar_events"
-  as permissive
-  for delete
-  to "public"
-  using (is_workspace_member(workspace_id));
-
-create policy "Workspace members can insert calendar events"
-  on public."client_calendar_events"
-  as permissive
-  for insert
-  to "public"
-  with check (is_workspace_member(workspace_id));
-
-create policy "Workspace members can read calendar events"
-  on public."client_calendar_events"
-  as permissive
-  for select
-  to "public"
-  using (is_workspace_member(workspace_id));
-
-create policy "Workspace members can update calendar events"
-  on public."client_calendar_events"
-  as permissive
-  for update
-  to "public"
-  using (is_workspace_member(workspace_id))
-  with check (is_workspace_member(workspace_id));
-
-create policy "Workspace members can delete client notes"
-  on public."client_notes"
-  as permissive
-  for delete
-  to "public"
-  using (is_workspace_member(workspace_id));
-
-create policy "Workspace members can insert client notes"
-  on public."client_notes"
-  as permissive
-  for insert
-  to "public"
-  with check (is_workspace_member(workspace_id));
-
-create policy "Workspace members can read client notes"
-  on public."client_notes"
-  as permissive
-  for select
-  to "public"
-  using (is_workspace_member(workspace_id));
-
-create policy "Workspace members can update client notes"
-  on public."client_notes"
-  as permissive
-  for update
-  to "public"
-  using (is_workspace_member(workspace_id))
-  with check (is_workspace_member(workspace_id));
-
-create policy "Workspace members can delete clients"
-  on public."clients"
-  as permissive
-  for delete
-  to "public"
-  using (is_workspace_member(workspace_id));
-
-create policy "Workspace members can insert clients"
-  on public."clients"
-  as permissive
-  for insert
-  to "public"
-  with check (is_workspace_member(workspace_id));
-
-create policy "Workspace members can read clients"
-  on public."clients"
-  as permissive
-  for select
-  to "public"
-  using (is_workspace_member(workspace_id));
-
-create policy "Workspace members can update clients"
-  on public."clients"
-  as permissive
-  for update
-  to "public"
-  using (is_workspace_member(workspace_id))
-  with check (is_workspace_member(workspace_id));
-
-create policy "Workspace members can delete document tag links"
-  on public."document_tag_links"
-  as permissive
-  for delete
-  to "public"
-  using (is_workspace_member(workspace_id));
-
-create policy "Workspace members can insert document tag links"
-  on public."document_tag_links"
-  as permissive
-  for insert
-  to "public"
-  with check (is_workspace_member(workspace_id));
-
-create policy "Workspace members can read document tag links"
-  on public."document_tag_links"
-  as permissive
-  for select
-  to "public"
-  using (is_workspace_member(workspace_id));
-
-create policy "Workspace members can update document tag links"
-  on public."document_tag_links"
-  as permissive
-  for update
-  to "public"
-  using (is_workspace_member(workspace_id))
-  with check (is_workspace_member(workspace_id));
-
-create policy "Workspace members can delete document tags"
-  on public."document_tags"
-  as permissive
-  for delete
-  to "public"
-  using (is_workspace_member(workspace_id));
-
-create policy "Workspace members can insert document tags"
-  on public."document_tags"
-  as permissive
-  for insert
-  to "public"
-  with check (is_workspace_member(workspace_id));
-
-create policy "Workspace members can read document tags"
-  on public."document_tags"
-  as permissive
-  for select
-  to "public"
-  using (is_workspace_member(workspace_id));
-
-create policy "Workspace members can update document tags"
-  on public."document_tags"
-  as permissive
-  for update
-  to "public"
-  using (is_workspace_member(workspace_id))
-  with check (is_workspace_member(workspace_id));
-
-create policy "Workspace members can delete documents"
-  on public."documents"
-  as permissive
-  for delete
-  to "public"
-  using (is_workspace_member(workspace_id));
-
-create policy "Workspace members can insert documents"
-  on public."documents"
-  as permissive
-  for insert
-  to "public"
-  with check (is_workspace_member(workspace_id));
-
-create policy "Workspace members can read documents"
-  on public."documents"
-  as permissive
-  for select
-  to "public"
-  using (is_workspace_member(workspace_id));
-
-create policy "Workspace members can update documents"
-  on public."documents"
-  as permissive
-  for update
-  to "public"
-  using (is_workspace_member(workspace_id))
-  with check (is_workspace_member(workspace_id));
-
-create policy "Workspace members can delete estimate line items"
-  on public."estimate_line_items"
-  as permissive
-  for delete
-  to "public"
-  using (is_workspace_member(workspace_id));
-
-create policy "Workspace members can insert estimate line items"
-  on public."estimate_line_items"
-  as permissive
-  for insert
-  to "public"
-  with check (is_workspace_member(workspace_id));
-
-create policy "Workspace members can read estimate line items"
-  on public."estimate_line_items"
-  as permissive
-  for select
-  to "public"
-  using (is_workspace_member(workspace_id));
-
-create policy "Workspace members can update estimate line items"
-  on public."estimate_line_items"
-  as permissive
-  for update
-  to "public"
-  using (is_workspace_member(workspace_id))
-  with check (is_workspace_member(workspace_id));
-
-create policy "Workspace members can delete estimates"
-  on public."estimates"
-  as permissive
-  for delete
-  to "public"
-  using (is_workspace_member(workspace_id));
-
-create policy "Workspace members can insert estimates"
-  on public."estimates"
-  as permissive
-  for insert
-  to "public"
-  with check (is_workspace_member(workspace_id));
-
-create policy "Workspace members can read estimates"
-  on public."estimates"
-  as permissive
-  for select
-  to "public"
-  using (is_workspace_member(workspace_id));
-
-create policy "Workspace members can update estimates"
-  on public."estimates"
-  as permissive
-  for update
-  to "public"
-  using (is_workspace_member(workspace_id))
-  with check (is_workspace_member(workspace_id));
-
-create policy "Workspace members can delete expenses"
-  on public."expenses"
-  as permissive
-  for delete
-  to "public"
-  using (is_workspace_member(workspace_id));
-
-create policy "Workspace members can insert expenses"
-  on public."expenses"
-  as permissive
-  for insert
-  to "public"
-  with check (is_workspace_member(workspace_id));
-
-create policy "Workspace members can read expenses"
-  on public."expenses"
-  as permissive
-  for select
-  to "public"
-  using (is_workspace_member(workspace_id));
-
-create policy "Workspace members can update expenses"
-  on public."expenses"
-  as permissive
-  for update
-  to "public"
-  using (is_workspace_member(workspace_id))
-  with check (is_workspace_member(workspace_id));
-
-create policy "Workspace members can delete inventory"
-  on public."inventory_items"
-  as permissive
-  for delete
-  to "public"
-  using (is_workspace_member(workspace_id));
-
-create policy "Workspace members can insert inventory"
-  on public."inventory_items"
-  as permissive
-  for insert
-  to "public"
-  with check (is_workspace_member(workspace_id));
-
-create policy "Workspace members can read inventory"
-  on public."inventory_items"
-  as permissive
-  for select
-  to "public"
-  using (is_workspace_member(workspace_id));
-
-create policy "Workspace members can update inventory"
-  on public."inventory_items"
-  as permissive
-  for update
-  to "public"
-  using (is_workspace_member(workspace_id))
-  with check (is_workspace_member(workspace_id));
-
-create policy "Workspace members can delete invoice line items"
-  on public."invoice_line_items"
-  as permissive
-  for delete
-  to "public"
-  using (is_workspace_member(workspace_id));
-
-create policy "Workspace members can insert invoice line items"
-  on public."invoice_line_items"
-  as permissive
-  for insert
-  to "public"
-  with check (is_workspace_member(workspace_id));
-
-create policy "Workspace members can read invoice line items"
-  on public."invoice_line_items"
-  as permissive
-  for select
-  to "public"
-  using (is_workspace_member(workspace_id));
-
-create policy "Workspace members can update invoice line items"
-  on public."invoice_line_items"
-  as permissive
-  for update
-  to "public"
-  using (is_workspace_member(workspace_id))
-  with check (is_workspace_member(workspace_id));
-
-create policy "Workspace members can delete invoice payments"
-  on public."invoice_payments"
-  as permissive
-  for delete
-  to "public"
-  using (is_workspace_member(workspace_id));
-
-create policy "Workspace members can insert invoice payments"
-  on public."invoice_payments"
-  as permissive
-  for insert
-  to "public"
-  with check (is_workspace_member(workspace_id));
-
-create policy "Workspace members can read invoice payments"
-  on public."invoice_payments"
-  as permissive
-  for select
-  to "public"
-  using (is_workspace_member(workspace_id));
-
-create policy "Workspace members can update invoice payments"
-  on public."invoice_payments"
-  as permissive
-  for update
-  to "public"
-  using (is_workspace_member(workspace_id))
-  with check (is_workspace_member(workspace_id));
-
-create policy "Workspace members can delete invoices"
-  on public."invoices"
-  as permissive
-  for delete
-  to "public"
-  using (is_workspace_member(workspace_id));
-
-create policy "Workspace members can insert invoices"
-  on public."invoices"
-  as permissive
-  for insert
-  to "public"
-  with check (is_workspace_member(workspace_id));
-
-create policy "Workspace members can read invoices"
-  on public."invoices"
-  as permissive
-  for select
-  to "public"
-  using (is_workspace_member(workspace_id));
-
-create policy "Workspace members can update invoices"
-  on public."invoices"
-  as permissive
-  for update
-  to "public"
-  using (is_workspace_member(workspace_id))
-  with check (is_workspace_member(workspace_id));
-
-create policy "Workspace members can delete job activity"
-  on public."job_activity"
-  as permissive
-  for delete
-  to "public"
-  using (is_workspace_member(workspace_id));
-
-create policy "Workspace members can insert job activity"
-  on public."job_activity"
-  as permissive
-  for insert
-  to "public"
-  with check (is_workspace_member(workspace_id));
-
-create policy "Workspace members can read job activity"
-  on public."job_activity"
-  as permissive
-  for select
-  to "public"
-  using (is_workspace_member(workspace_id));
-
-create policy "Workspace members can update job activity"
-  on public."job_activity"
-  as permissive
-  for update
-  to "public"
-  using (is_workspace_member(workspace_id))
-  with check (is_workspace_member(workspace_id));
-
-create policy "Workspace members can delete job materials"
-  on public."job_materials"
-  as permissive
-  for delete
-  to "public"
-  using (is_workspace_member(workspace_id));
-
-create policy "Workspace members can insert job materials"
-  on public."job_materials"
-  as permissive
-  for insert
-  to "public"
-  with check (is_workspace_member(workspace_id));
-
-create policy "Workspace members can read job materials"
-  on public."job_materials"
-  as permissive
-  for select
-  to "public"
-  using (is_workspace_member(workspace_id));
-
-create policy "Workspace members can update job materials"
-  on public."job_materials"
-  as permissive
-  for update
-  to "public"
-  using (is_workspace_member(workspace_id))
-  with check (is_workspace_member(workspace_id));
-
-create policy "Workspace members can delete jobs"
-  on public."jobs"
-  as permissive
-  for delete
-  to "public"
-  using (is_workspace_member(workspace_id));
-
-create policy "Workspace members can insert jobs"
-  on public."jobs"
-  as permissive
-  for insert
-  to "public"
-  with check (is_workspace_member(workspace_id));
-
-create policy "Workspace members can read jobs"
-  on public."jobs"
-  as permissive
-  for select
-  to "public"
-  using (is_workspace_member(workspace_id));
-
-create policy "Workspace members can update jobs"
-  on public."jobs"
-  as permissive
-  for update
-  to "public"
-  using (is_workspace_member(workspace_id))
-  with check (is_workspace_member(workspace_id));
-
-create policy "Platform admins can read platform admins"
-  on public."platform_admins"
-  as permissive
-  for select
-  to "public"
-  using (is_platform_admin());
-
-create policy "Profiles are editable by owner"
-  on public."profiles"
-  as permissive
-  for update
-  to "public"
-  using ((id = auth.uid()))
-  with check ((id = auth.uid()));
-
-create policy "Profiles are visible to owner"
-  on public."profiles"
-  as permissive
-  for select
-  to "public"
-  using ((id = auth.uid()));
-
-create policy "Profiles can be inserted by owner"
-  on public."profiles"
-  as permissive
-  for insert
-  to "public"
-  with check ((id = auth.uid()));
-
-create policy "Workspace members can delete route stops"
-  on public."route_plan_stops"
-  as permissive
-  for delete
-  to "public"
-  using (is_workspace_member(workspace_id));
-
-create policy "Workspace members can insert route stops"
-  on public."route_plan_stops"
-  as permissive
-  for insert
-  to "public"
-  with check (is_workspace_member(workspace_id));
-
-create policy "Workspace members can read route stops"
-  on public."route_plan_stops"
-  as permissive
-  for select
-  to "public"
-  using (is_workspace_member(workspace_id));
-
-create policy "Workspace members can update route stops"
-  on public."route_plan_stops"
-  as permissive
-  for update
-  to "public"
-  using (is_workspace_member(workspace_id))
-  with check (is_workspace_member(workspace_id));
-
-create policy "Workspace members can delete route plans"
-  on public."route_plans"
-  as permissive
-  for delete
-  to "public"
-  using (is_workspace_member(workspace_id));
-
-create policy "Workspace members can insert route plans"
-  on public."route_plans"
-  as permissive
-  for insert
-  to "public"
-  with check (is_workspace_member(workspace_id));
-
-create policy "Workspace members can read route plans"
-  on public."route_plans"
-  as permissive
-  for select
-  to "public"
-  using (is_workspace_member(workspace_id));
-
-create policy "Workspace members can update route plans"
-  on public."route_plans"
-  as permissive
-  for update
-  to "public"
-  using (is_workspace_member(workspace_id))
-  with check (is_workspace_member(workspace_id));
-
-create policy "Users can create their initial owner membership"
-  on public."workspace_members"
-  as permissive
-  for insert
-  to "public"
-  with check (((auth.uid() IS NOT NULL) AND (user_id = auth.uid()) AND (role = 'Owner'::text) AND (status = 'Active'::text) AND is_workspace_creator(workspace_id)));
-
-create policy "Workspace managers can create invited memberships"
-  on public."workspace_members"
-  as permissive
-  for insert
-  to "public"
-  with check ((is_workspace_manager(workspace_id) AND (status = 'Invited'::text) AND (user_id IS NULL) AND (invited_email IS NOT NULL)));
-
-create policy "Workspace managers can manage memberships"
-  on public."workspace_members"
-  as permissive
-  for update
-  to "public"
-  using (is_workspace_manager(workspace_id))
-  with check (is_workspace_manager(workspace_id));
-
-create policy "Workspace managers can remove memberships"
-  on public."workspace_members"
-  as permissive
-  for delete
-  to "public"
-  using (is_workspace_manager(workspace_id));
-
-create policy "Workspace members can view memberships"
-  on public."workspace_members"
-  as permissive
-  for select
-  to "public"
-  using ((is_workspace_member(workspace_id) OR (user_id = auth.uid())));
-
-create policy "Workspace members can delete settings"
-  on public."workspace_settings"
-  as permissive
-  for delete
-  to "public"
-  using (is_workspace_member(workspace_id));
-
-create policy "Workspace members can insert settings"
-  on public."workspace_settings"
-  as permissive
-  for insert
-  to "public"
-  with check (is_workspace_member(workspace_id));
-
-create policy "Workspace members can read settings"
-  on public."workspace_settings"
-  as permissive
-  for select
-  to "public"
-  using (is_workspace_member(workspace_id));
-
-create policy "Workspace members can update settings"
-  on public."workspace_settings"
-  as permissive
-  for update
-  to "public"
-  using (is_workspace_member(workspace_id))
-  with check (is_workspace_member(workspace_id));
-
-create policy "Authenticated users can create workspaces"
-  on public."workspaces"
-  as permissive
-  for insert
-  to "public"
-  with check (((auth.uid() IS NOT NULL) AND (created_by = auth.uid())));
-
-create policy "Workspace members can delete workspaces"
-  on public."workspaces"
-  as permissive
-  for delete
-  to "public"
-  using (is_workspace_member(id));
-
-create policy "Workspace members can update workspaces"
-  on public."workspaces"
-  as permissive
-  for update
-  to "public"
-  using (is_workspace_member(id))
-  with check (is_workspace_member(id));
-
-create policy "Workspace members can view workspaces"
-  on public."workspaces"
-  as permissive
-  for select
-  to "public"
-  using (is_workspace_member(id));
 
+ALTER TABLE ONLY "public"."document_tag_links"
+    ADD CONSTRAINT "document_tag_links_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."document_tags"
+    ADD CONSTRAINT "document_tags_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."documents"
+    ADD CONSTRAINT "documents_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."estimate_line_items"
+    ADD CONSTRAINT "estimate_line_items_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."estimates"
+    ADD CONSTRAINT "estimates_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."expenses"
+    ADD CONSTRAINT "expenses_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."inventory_items"
+    ADD CONSTRAINT "inventory_items_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."invoice_line_items"
+    ADD CONSTRAINT "invoice_line_items_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."invoice_payments"
+    ADD CONSTRAINT "invoice_payments_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."invoices"
+    ADD CONSTRAINT "invoices_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."job_activity"
+    ADD CONSTRAINT "job_activity_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."job_materials"
+    ADD CONSTRAINT "job_materials_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."jobs"
+    ADD CONSTRAINT "jobs_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."platform_admins"
+    ADD CONSTRAINT "platform_admins_pkey" PRIMARY KEY ("user_id");
+
+
+
+ALTER TABLE ONLY "public"."profiles"
+    ADD CONSTRAINT "profiles_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."route_plan_stops"
+    ADD CONSTRAINT "route_plan_stops_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."route_plan_stops"
+    ADD CONSTRAINT "route_plan_stops_route_plan_id_stop_order_key" UNIQUE ("route_plan_id", "stop_order");
+
+
+
+ALTER TABLE ONLY "public"."route_plans"
+    ADD CONSTRAINT "route_plans_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."workspace_members"
+    ADD CONSTRAINT "workspace_members_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."workspace_settings"
+    ADD CONSTRAINT "workspace_settings_pkey" PRIMARY KEY ("workspace_id");
+
+
+
+ALTER TABLE ONLY "public"."workspaces"
+    ADD CONSTRAINT "workspaces_pkey" PRIMARY KEY ("id");
+
+
+
+CREATE INDEX "admin_audit_logs_action_created_idx" ON "public"."admin_audit_logs" USING "btree" ("action", "created_at" DESC);
+
+
+
+CREATE INDEX "admin_audit_logs_admin_user_idx" ON "public"."admin_audit_logs" USING "btree" ("admin_user_id");
+
+
+
+CREATE INDEX "admin_audit_logs_target_user_idx" ON "public"."admin_audit_logs" USING "btree" ("target_user_id");
+
+
+
+CREATE INDEX "admin_audit_logs_target_workspace_idx" ON "public"."admin_audit_logs" USING "btree" ("target_workspace_id");
+
+
+
+CREATE INDEX "ai_jobs_created_by_idx" ON "public"."ai_jobs" USING "btree" ("created_by");
+
+
+
+CREATE INDEX "ai_jobs_document_idx" ON "public"."ai_jobs" USING "btree" ("document_id");
+
+
+
+CREATE INDEX "ai_jobs_job_type_idx" ON "public"."ai_jobs" USING "btree" ("job_type");
+
+
+
+CREATE INDEX "ai_jobs_status_idx" ON "public"."ai_jobs" USING "btree" ("status");
+
+
+
+CREATE INDEX "ai_jobs_workspace_idx" ON "public"."ai_jobs" USING "btree" ("workspace_id");
+
+
+
+CREATE INDEX "ai_review_drafts_created_at_idx" ON "public"."ai_review_drafts" USING "btree" ("created_at" DESC);
+
+
+
+CREATE INDEX "ai_review_drafts_created_by_idx" ON "public"."ai_review_drafts" USING "btree" ("created_by");
+
+
+
+CREATE INDEX "ai_review_drafts_source_idx" ON "public"."ai_review_drafts" USING "btree" ("source_type", "source_id");
+
+
+
+CREATE INDEX "ai_review_drafts_status_idx" ON "public"."ai_review_drafts" USING "btree" ("status");
+
+
+
+CREATE INDEX "ai_review_drafts_workspace_idx" ON "public"."ai_review_drafts" USING "btree" ("workspace_id");
+
+
+
+CREATE INDEX "client_activity_client_idx" ON "public"."client_activity" USING "btree" ("client_id");
+
+
+
+CREATE INDEX "client_activity_workspace_idx" ON "public"."client_activity" USING "btree" ("workspace_id");
+
+
+
+CREATE INDEX "client_calendar_events_client_idx" ON "public"."client_calendar_events" USING "btree" ("client_id");
+
+
+
+CREATE INDEX "client_calendar_events_date_idx" ON "public"."client_calendar_events" USING "btree" ("event_date");
+
+
+
+CREATE INDEX "client_calendar_events_workspace_idx" ON "public"."client_calendar_events" USING "btree" ("workspace_id");
+
+
+
+CREATE INDEX "client_notes_client_idx" ON "public"."client_notes" USING "btree" ("client_id");
+
+
+
+CREATE INDEX "client_notes_workspace_idx" ON "public"."client_notes" USING "btree" ("workspace_id");
+
+
+
+CREATE INDEX "clients_workspace_idx" ON "public"."clients" USING "btree" ("workspace_id");
+
+
+
+CREATE UNIQUE INDEX "clients_workspace_name_uidx" ON "public"."clients" USING "btree" ("workspace_id", "lower"("name"));
+
+
+
+CREATE INDEX "document_tag_links_document_idx" ON "public"."document_tag_links" USING "btree" ("document_id");
+
+
+
+CREATE INDEX "document_tag_links_tag_idx" ON "public"."document_tag_links" USING "btree" ("tag_id");
+
+
+
+CREATE INDEX "document_tag_links_workspace_idx" ON "public"."document_tag_links" USING "btree" ("workspace_id");
+
+
+
+CREATE INDEX "document_tags_workspace_idx" ON "public"."document_tags" USING "btree" ("workspace_id");
+
+
+
+CREATE UNIQUE INDEX "document_tags_workspace_name_uidx" ON "public"."document_tags" USING "btree" ("workspace_id", "lower"("name"));
+
+
+
+CREATE INDEX "documents_ai_job_idx" ON "public"."documents" USING "btree" ("ai_job_id");
+
+
+
+CREATE INDEX "documents_client_idx" ON "public"."documents" USING "btree" ("client_id");
+
+
+
+CREATE INDEX "documents_document_type_idx" ON "public"."documents" USING "btree" ("document_type");
+
+
+
+CREATE INDEX "documents_estimate_idx" ON "public"."documents" USING "btree" ("estimate_id");
+
+
+
+CREATE INDEX "documents_expense_idx" ON "public"."documents" USING "btree" ("expense_id");
+
+
+
+CREATE INDEX "documents_invoice_idx" ON "public"."documents" USING "btree" ("invoice_id");
+
+
+
+CREATE INDEX "documents_job_idx" ON "public"."documents" USING "btree" ("job_id");
+
+
+
+CREATE INDEX "documents_processing_status_idx" ON "public"."documents" USING "btree" ("processing_status");
+
+
+
+CREATE INDEX "documents_status_idx" ON "public"."documents" USING "btree" ("status");
+
+
+
+CREATE INDEX "documents_uploaded_by_idx" ON "public"."documents" USING "btree" ("uploaded_by");
+
+
+
+CREATE INDEX "documents_workspace_idx" ON "public"."documents" USING "btree" ("workspace_id");
+
+
+
+CREATE INDEX "estimate_line_items_estimate_idx" ON "public"."estimate_line_items" USING "btree" ("estimate_id");
+
+
+
+CREATE INDEX "estimate_line_items_workspace_idx" ON "public"."estimate_line_items" USING "btree" ("workspace_id");
+
+
+
+CREATE INDEX "estimates_client_idx" ON "public"."estimates" USING "btree" ("client_id");
+
+
+
+CREATE INDEX "estimates_date_idx" ON "public"."estimates" USING "btree" ("estimate_date");
+
+
+
+CREATE INDEX "estimates_job_idx" ON "public"."estimates" USING "btree" ("job_id");
+
+
+
+CREATE INDEX "estimates_status_idx" ON "public"."estimates" USING "btree" ("status");
+
+
+
+CREATE INDEX "estimates_workspace_idx" ON "public"."estimates" USING "btree" ("workspace_id");
+
+
+
+CREATE UNIQUE INDEX "estimates_workspace_number_uidx" ON "public"."estimates" USING "btree" ("workspace_id", "estimate_number");
+
+
+
+CREATE INDEX "expenses_category_idx" ON "public"."expenses" USING "btree" ("category");
+
+
+
+CREATE INDEX "expenses_date_idx" ON "public"."expenses" USING "btree" ("expense_date");
+
+
+
+CREATE INDEX "expenses_workspace_idx" ON "public"."expenses" USING "btree" ("workspace_id");
+
+
+
+CREATE INDEX "inventory_items_workspace_idx" ON "public"."inventory_items" USING "btree" ("workspace_id");
+
+
+
+CREATE UNIQUE INDEX "inventory_items_workspace_name_uidx" ON "public"."inventory_items" USING "btree" ("workspace_id", "lower"("name"));
+
+
+
+CREATE INDEX "invoice_line_items_invoice_idx" ON "public"."invoice_line_items" USING "btree" ("invoice_id");
+
+
+
+CREATE INDEX "invoice_line_items_workspace_idx" ON "public"."invoice_line_items" USING "btree" ("workspace_id");
+
+
+
+CREATE INDEX "invoice_payments_date_idx" ON "public"."invoice_payments" USING "btree" ("payment_date");
+
+
+
+CREATE INDEX "invoice_payments_invoice_idx" ON "public"."invoice_payments" USING "btree" ("invoice_id");
+
+
+
+CREATE INDEX "invoice_payments_workspace_idx" ON "public"."invoice_payments" USING "btree" ("workspace_id");
+
+
+
+CREATE INDEX "invoices_client_idx" ON "public"."invoices" USING "btree" ("client_id");
+
+
+
+CREATE INDEX "invoices_date_idx" ON "public"."invoices" USING "btree" ("invoice_date");
+
+
+
+CREATE INDEX "invoices_job_idx" ON "public"."invoices" USING "btree" ("job_id");
+
+
+
+CREATE INDEX "invoices_source_estimate_idx" ON "public"."invoices" USING "btree" ("source_estimate_id");
+
+
+
+CREATE INDEX "invoices_status_idx" ON "public"."invoices" USING "btree" ("status");
+
+
+
+CREATE INDEX "invoices_workspace_idx" ON "public"."invoices" USING "btree" ("workspace_id");
+
+
+
+CREATE UNIQUE INDEX "invoices_workspace_number_uidx" ON "public"."invoices" USING "btree" ("workspace_id", "invoice_number");
+
+
+
+CREATE INDEX "job_activity_job_idx" ON "public"."job_activity" USING "btree" ("job_id");
+
+
+
+CREATE INDEX "job_activity_workspace_idx" ON "public"."job_activity" USING "btree" ("workspace_id");
+
+
+
+CREATE INDEX "job_materials_job_idx" ON "public"."job_materials" USING "btree" ("job_id");
+
+
+
+CREATE INDEX "job_materials_name_idx" ON "public"."job_materials" USING "btree" ("lower"("name"));
+
+
+
+CREATE INDEX "job_materials_workspace_idx" ON "public"."job_materials" USING "btree" ("workspace_id");
+
+
+
+CREATE INDEX "jobs_client_idx" ON "public"."jobs" USING "btree" ("client_id");
+
+
+
+CREATE INDEX "jobs_scheduled_date_idx" ON "public"."jobs" USING "btree" ("scheduled_date");
+
+
+
+CREATE INDEX "jobs_workspace_idx" ON "public"."jobs" USING "btree" ("workspace_id");
+
+
+
+CREATE INDEX "route_plan_stops_client_idx" ON "public"."route_plan_stops" USING "btree" ("client_id");
+
+
+
+CREATE INDEX "route_plan_stops_route_idx" ON "public"."route_plan_stops" USING "btree" ("route_plan_id");
+
+
+
+CREATE INDEX "route_plan_stops_workspace_idx" ON "public"."route_plan_stops" USING "btree" ("workspace_id");
+
+
+
+CREATE INDEX "route_plans_workspace_idx" ON "public"."route_plans" USING "btree" ("workspace_id");
+
+
+
+CREATE UNIQUE INDEX "workspace_members_invite_token_uidx" ON "public"."workspace_members" USING "btree" ("invite_token") WHERE ("invite_token" IS NOT NULL);
+
+
+
+CREATE INDEX "workspace_members_user_idx" ON "public"."workspace_members" USING "btree" ("user_id");
+
+
+
+CREATE INDEX "workspace_members_workspace_idx" ON "public"."workspace_members" USING "btree" ("workspace_id");
+
+
+
+CREATE UNIQUE INDEX "workspace_members_workspace_user_uidx" ON "public"."workspace_members" USING "btree" ("workspace_id", "user_id") WHERE ("user_id" IS NOT NULL);
+
+
+
+CREATE OR REPLACE TRIGGER "ai_jobs_set_updated_at" BEFORE UPDATE ON "public"."ai_jobs" FOR EACH ROW EXECUTE FUNCTION "public"."set_updated_at"();
+
+
+
+CREATE OR REPLACE TRIGGER "ai_review_drafts_set_updated_at" BEFORE UPDATE ON "public"."ai_review_drafts" FOR EACH ROW EXECUTE FUNCTION "public"."set_updated_at"();
+
+
+
+CREATE OR REPLACE TRIGGER "client_calendar_events_set_updated_at" BEFORE UPDATE ON "public"."client_calendar_events" FOR EACH ROW EXECUTE FUNCTION "public"."set_updated_at"();
+
+
+
+CREATE OR REPLACE TRIGGER "client_notes_set_updated_at" BEFORE UPDATE ON "public"."client_notes" FOR EACH ROW EXECUTE FUNCTION "public"."set_updated_at"();
+
+
+
+CREATE OR REPLACE TRIGGER "clients_set_updated_at" BEFORE UPDATE ON "public"."clients" FOR EACH ROW EXECUTE FUNCTION "public"."set_updated_at"();
+
+
+
+CREATE OR REPLACE TRIGGER "document_tags_set_updated_at" BEFORE UPDATE ON "public"."document_tags" FOR EACH ROW EXECUTE FUNCTION "public"."set_updated_at"();
+
+
+
+CREATE OR REPLACE TRIGGER "documents_set_updated_at" BEFORE UPDATE ON "public"."documents" FOR EACH ROW EXECUTE FUNCTION "public"."set_updated_at"();
+
+
+
+CREATE OR REPLACE TRIGGER "estimates_set_updated_at" BEFORE UPDATE ON "public"."estimates" FOR EACH ROW EXECUTE FUNCTION "public"."set_updated_at"();
+
+
+
+CREATE OR REPLACE TRIGGER "expenses_set_updated_at" BEFORE UPDATE ON "public"."expenses" FOR EACH ROW EXECUTE FUNCTION "public"."set_updated_at"();
+
+
+
+CREATE OR REPLACE TRIGGER "inventory_items_set_updated_at" BEFORE UPDATE ON "public"."inventory_items" FOR EACH ROW EXECUTE FUNCTION "public"."set_updated_at"();
+
+
+
+CREATE OR REPLACE TRIGGER "invoice_payments_set_updated_at" BEFORE UPDATE ON "public"."invoice_payments" FOR EACH ROW EXECUTE FUNCTION "public"."set_updated_at"();
+
+
+
+CREATE OR REPLACE TRIGGER "invoices_set_updated_at" BEFORE UPDATE ON "public"."invoices" FOR EACH ROW EXECUTE FUNCTION "public"."set_updated_at"();
+
+
+
+CREATE OR REPLACE TRIGGER "jobs_set_updated_at" BEFORE UPDATE ON "public"."jobs" FOR EACH ROW EXECUTE FUNCTION "public"."set_updated_at"();
+
+
+
+CREATE OR REPLACE TRIGGER "profiles_set_updated_at" BEFORE UPDATE ON "public"."profiles" FOR EACH ROW EXECUTE FUNCTION "public"."set_updated_at"();
+
+
+
+CREATE OR REPLACE TRIGGER "route_plans_set_updated_at" BEFORE UPDATE ON "public"."route_plans" FOR EACH ROW EXECUTE FUNCTION "public"."set_updated_at"();
+
+
+
+CREATE OR REPLACE TRIGGER "workspace_members_set_updated_at" BEFORE UPDATE ON "public"."workspace_members" FOR EACH ROW EXECUTE FUNCTION "public"."set_updated_at"();
+
+
+
+CREATE OR REPLACE TRIGGER "workspace_settings_set_updated_at" BEFORE UPDATE ON "public"."workspace_settings" FOR EACH ROW EXECUTE FUNCTION "public"."set_updated_at"();
+
+
+
+CREATE OR REPLACE TRIGGER "workspaces_set_updated_at" BEFORE UPDATE ON "public"."workspaces" FOR EACH ROW EXECUTE FUNCTION "public"."set_updated_at"();
+
+
+
+ALTER TABLE ONLY "public"."admin_audit_logs"
+    ADD CONSTRAINT "admin_audit_logs_admin_user_id_fkey" FOREIGN KEY ("admin_user_id") REFERENCES "auth"."users"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."admin_audit_logs"
+    ADD CONSTRAINT "admin_audit_logs_target_user_id_fkey" FOREIGN KEY ("target_user_id") REFERENCES "auth"."users"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."admin_audit_logs"
+    ADD CONSTRAINT "admin_audit_logs_target_workspace_id_fkey" FOREIGN KEY ("target_workspace_id") REFERENCES "public"."workspaces"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."ai_jobs"
+    ADD CONSTRAINT "ai_jobs_approved_by_fkey" FOREIGN KEY ("approved_by") REFERENCES "public"."profiles"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."ai_jobs"
+    ADD CONSTRAINT "ai_jobs_client_id_fkey" FOREIGN KEY ("client_id") REFERENCES "public"."clients"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."ai_jobs"
+    ADD CONSTRAINT "ai_jobs_created_by_fkey" FOREIGN KEY ("created_by") REFERENCES "public"."profiles"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."ai_jobs"
+    ADD CONSTRAINT "ai_jobs_document_id_fkey" FOREIGN KEY ("document_id") REFERENCES "public"."documents"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."ai_jobs"
+    ADD CONSTRAINT "ai_jobs_expense_id_fkey" FOREIGN KEY ("expense_id") REFERENCES "public"."expenses"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."ai_jobs"
+    ADD CONSTRAINT "ai_jobs_invoice_id_fkey" FOREIGN KEY ("invoice_id") REFERENCES "public"."invoices"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."ai_jobs"
+    ADD CONSTRAINT "ai_jobs_job_id_fkey" FOREIGN KEY ("job_id") REFERENCES "public"."jobs"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."ai_jobs"
+    ADD CONSTRAINT "ai_jobs_workspace_id_fkey" FOREIGN KEY ("workspace_id") REFERENCES "public"."workspaces"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."ai_review_drafts"
+    ADD CONSTRAINT "ai_review_drafts_created_by_fkey" FOREIGN KEY ("created_by") REFERENCES "public"."profiles"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."ai_review_drafts"
+    ADD CONSTRAINT "ai_review_drafts_reviewed_by_fkey" FOREIGN KEY ("reviewed_by") REFERENCES "public"."profiles"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."ai_review_drafts"
+    ADD CONSTRAINT "ai_review_drafts_workspace_id_fkey" FOREIGN KEY ("workspace_id") REFERENCES "public"."workspaces"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."client_activity"
+    ADD CONSTRAINT "client_activity_client_id_fkey" FOREIGN KEY ("client_id") REFERENCES "public"."clients"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."client_activity"
+    ADD CONSTRAINT "client_activity_created_by_fkey" FOREIGN KEY ("created_by") REFERENCES "public"."profiles"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."client_activity"
+    ADD CONSTRAINT "client_activity_workspace_id_fkey" FOREIGN KEY ("workspace_id") REFERENCES "public"."workspaces"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."client_calendar_events"
+    ADD CONSTRAINT "client_calendar_events_client_id_fkey" FOREIGN KEY ("client_id") REFERENCES "public"."clients"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."client_calendar_events"
+    ADD CONSTRAINT "client_calendar_events_workspace_id_fkey" FOREIGN KEY ("workspace_id") REFERENCES "public"."workspaces"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."client_notes"
+    ADD CONSTRAINT "client_notes_client_id_fkey" FOREIGN KEY ("client_id") REFERENCES "public"."clients"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."client_notes"
+    ADD CONSTRAINT "client_notes_created_by_fkey" FOREIGN KEY ("created_by") REFERENCES "public"."profiles"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."client_notes"
+    ADD CONSTRAINT "client_notes_workspace_id_fkey" FOREIGN KEY ("workspace_id") REFERENCES "public"."workspaces"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."clients"
+    ADD CONSTRAINT "clients_workspace_id_fkey" FOREIGN KEY ("workspace_id") REFERENCES "public"."workspaces"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."document_tag_links"
+    ADD CONSTRAINT "document_tag_links_document_id_fkey" FOREIGN KEY ("document_id") REFERENCES "public"."documents"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."document_tag_links"
+    ADD CONSTRAINT "document_tag_links_tag_id_fkey" FOREIGN KEY ("tag_id") REFERENCES "public"."document_tags"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."document_tag_links"
+    ADD CONSTRAINT "document_tag_links_workspace_id_fkey" FOREIGN KEY ("workspace_id") REFERENCES "public"."workspaces"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."document_tags"
+    ADD CONSTRAINT "document_tags_workspace_id_fkey" FOREIGN KEY ("workspace_id") REFERENCES "public"."workspaces"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."documents"
+    ADD CONSTRAINT "documents_ai_job_id_fkey" FOREIGN KEY ("ai_job_id") REFERENCES "public"."ai_jobs"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."documents"
+    ADD CONSTRAINT "documents_client_id_fkey" FOREIGN KEY ("client_id") REFERENCES "public"."clients"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."documents"
+    ADD CONSTRAINT "documents_estimate_id_fkey" FOREIGN KEY ("estimate_id") REFERENCES "public"."estimates"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."documents"
+    ADD CONSTRAINT "documents_expense_id_fkey" FOREIGN KEY ("expense_id") REFERENCES "public"."expenses"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."documents"
+    ADD CONSTRAINT "documents_invoice_id_fkey" FOREIGN KEY ("invoice_id") REFERENCES "public"."invoices"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."documents"
+    ADD CONSTRAINT "documents_job_id_fkey" FOREIGN KEY ("job_id") REFERENCES "public"."jobs"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."documents"
+    ADD CONSTRAINT "documents_reviewed_by_fkey" FOREIGN KEY ("reviewed_by") REFERENCES "public"."profiles"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."documents"
+    ADD CONSTRAINT "documents_uploaded_by_fkey" FOREIGN KEY ("uploaded_by") REFERENCES "public"."profiles"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."documents"
+    ADD CONSTRAINT "documents_workspace_id_fkey" FOREIGN KEY ("workspace_id") REFERENCES "public"."workspaces"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."estimate_line_items"
+    ADD CONSTRAINT "estimate_line_items_estimate_id_fkey" FOREIGN KEY ("estimate_id") REFERENCES "public"."estimates"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."estimate_line_items"
+    ADD CONSTRAINT "estimate_line_items_workspace_id_fkey" FOREIGN KEY ("workspace_id") REFERENCES "public"."workspaces"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."estimates"
+    ADD CONSTRAINT "estimates_client_id_fkey" FOREIGN KEY ("client_id") REFERENCES "public"."clients"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."estimates"
+    ADD CONSTRAINT "estimates_converted_invoice_fk" FOREIGN KEY ("converted_invoice_id") REFERENCES "public"."invoices"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."estimates"
+    ADD CONSTRAINT "estimates_job_id_fkey" FOREIGN KEY ("job_id") REFERENCES "public"."jobs"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."estimates"
+    ADD CONSTRAINT "estimates_workspace_id_fkey" FOREIGN KEY ("workspace_id") REFERENCES "public"."workspaces"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."expenses"
+    ADD CONSTRAINT "expenses_workspace_id_fkey" FOREIGN KEY ("workspace_id") REFERENCES "public"."workspaces"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."inventory_items"
+    ADD CONSTRAINT "inventory_items_workspace_id_fkey" FOREIGN KEY ("workspace_id") REFERENCES "public"."workspaces"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."invoice_line_items"
+    ADD CONSTRAINT "invoice_line_items_invoice_id_fkey" FOREIGN KEY ("invoice_id") REFERENCES "public"."invoices"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."invoice_line_items"
+    ADD CONSTRAINT "invoice_line_items_workspace_id_fkey" FOREIGN KEY ("workspace_id") REFERENCES "public"."workspaces"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."invoice_payments"
+    ADD CONSTRAINT "invoice_payments_invoice_id_fkey" FOREIGN KEY ("invoice_id") REFERENCES "public"."invoices"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."invoice_payments"
+    ADD CONSTRAINT "invoice_payments_workspace_id_fkey" FOREIGN KEY ("workspace_id") REFERENCES "public"."workspaces"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."invoices"
+    ADD CONSTRAINT "invoices_client_id_fkey" FOREIGN KEY ("client_id") REFERENCES "public"."clients"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."invoices"
+    ADD CONSTRAINT "invoices_job_id_fkey" FOREIGN KEY ("job_id") REFERENCES "public"."jobs"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."invoices"
+    ADD CONSTRAINT "invoices_source_estimate_id_fkey" FOREIGN KEY ("source_estimate_id") REFERENCES "public"."estimates"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."invoices"
+    ADD CONSTRAINT "invoices_workspace_id_fkey" FOREIGN KEY ("workspace_id") REFERENCES "public"."workspaces"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."job_activity"
+    ADD CONSTRAINT "job_activity_created_by_fkey" FOREIGN KEY ("created_by") REFERENCES "public"."profiles"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."job_activity"
+    ADD CONSTRAINT "job_activity_job_id_fkey" FOREIGN KEY ("job_id") REFERENCES "public"."jobs"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."job_activity"
+    ADD CONSTRAINT "job_activity_workspace_id_fkey" FOREIGN KEY ("workspace_id") REFERENCES "public"."workspaces"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."job_materials"
+    ADD CONSTRAINT "job_materials_job_id_fkey" FOREIGN KEY ("job_id") REFERENCES "public"."jobs"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."job_materials"
+    ADD CONSTRAINT "job_materials_workspace_id_fkey" FOREIGN KEY ("workspace_id") REFERENCES "public"."workspaces"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."jobs"
+    ADD CONSTRAINT "jobs_client_id_fkey" FOREIGN KEY ("client_id") REFERENCES "public"."clients"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."jobs"
+    ADD CONSTRAINT "jobs_workspace_id_fkey" FOREIGN KEY ("workspace_id") REFERENCES "public"."workspaces"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."platform_admins"
+    ADD CONSTRAINT "platform_admins_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "auth"."users"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."profiles"
+    ADD CONSTRAINT "profiles_id_fkey" FOREIGN KEY ("id") REFERENCES "auth"."users"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."route_plan_stops"
+    ADD CONSTRAINT "route_plan_stops_client_id_fkey" FOREIGN KEY ("client_id") REFERENCES "public"."clients"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."route_plan_stops"
+    ADD CONSTRAINT "route_plan_stops_route_plan_id_fkey" FOREIGN KEY ("route_plan_id") REFERENCES "public"."route_plans"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."route_plan_stops"
+    ADD CONSTRAINT "route_plan_stops_workspace_id_fkey" FOREIGN KEY ("workspace_id") REFERENCES "public"."workspaces"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."route_plans"
+    ADD CONSTRAINT "route_plans_workspace_id_fkey" FOREIGN KEY ("workspace_id") REFERENCES "public"."workspaces"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."workspace_members"
+    ADD CONSTRAINT "workspace_members_invited_by_fkey" FOREIGN KEY ("invited_by") REFERENCES "public"."profiles"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."workspace_members"
+    ADD CONSTRAINT "workspace_members_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "public"."profiles"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."workspace_members"
+    ADD CONSTRAINT "workspace_members_workspace_id_fkey" FOREIGN KEY ("workspace_id") REFERENCES "public"."workspaces"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."workspace_settings"
+    ADD CONSTRAINT "workspace_settings_workspace_id_fkey" FOREIGN KEY ("workspace_id") REFERENCES "public"."workspaces"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."workspaces"
+    ADD CONSTRAINT "workspaces_created_by_fkey" FOREIGN KEY ("created_by") REFERENCES "public"."profiles"("id") ON DELETE SET NULL;
+
+
+
+CREATE POLICY "Authenticated users can create workspaces" ON "public"."workspaces" FOR INSERT WITH CHECK ((("auth"."uid"() IS NOT NULL) AND ("created_by" = "auth"."uid"())));
+
+
+
+CREATE POLICY "Platform admins can read admin audit logs" ON "public"."admin_audit_logs" FOR SELECT USING ("public"."is_platform_admin"());
+
+
+
+CREATE POLICY "Platform admins can read platform admins" ON "public"."platform_admins" FOR SELECT USING ("public"."is_platform_admin"());
+
+
+
+CREATE POLICY "Profiles are editable by owner" ON "public"."profiles" FOR UPDATE USING (("id" = "auth"."uid"())) WITH CHECK (("id" = "auth"."uid"()));
+
+
+
+CREATE POLICY "Profiles are visible to owner" ON "public"."profiles" FOR SELECT USING (("id" = "auth"."uid"()));
+
+
+
+CREATE POLICY "Profiles can be inserted by owner" ON "public"."profiles" FOR INSERT WITH CHECK (("id" = "auth"."uid"()));
+
+
+
+CREATE POLICY "Users can create their initial owner membership" ON "public"."workspace_members" FOR INSERT WITH CHECK ((("auth"."uid"() IS NOT NULL) AND ("user_id" = "auth"."uid"()) AND ("role" = 'Owner'::"text") AND ("status" = 'Active'::"text") AND "public"."is_workspace_creator"("workspace_id")));
+
+
+
+CREATE POLICY "Workspace managers can create invited memberships" ON "public"."workspace_members" FOR INSERT WITH CHECK (("public"."is_workspace_manager"("workspace_id") AND ("status" = 'Invited'::"text") AND ("user_id" IS NULL) AND ("invited_email" IS NOT NULL)));
+
+
+
+CREATE POLICY "Workspace managers can delete AI jobs" ON "public"."ai_jobs" FOR DELETE USING ("public"."is_workspace_manager"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace managers can delete calendar events" ON "public"."client_calendar_events" FOR DELETE USING ("public"."is_workspace_manager"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace managers can delete client activity" ON "public"."client_activity" FOR DELETE USING ("public"."is_workspace_manager"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace managers can delete client notes" ON "public"."client_notes" FOR DELETE USING ("public"."is_workspace_manager"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace managers can delete clients" ON "public"."clients" FOR DELETE USING ("public"."is_workspace_manager"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace managers can delete document tag links" ON "public"."document_tag_links" FOR DELETE USING ("public"."is_workspace_manager"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace managers can delete document tags" ON "public"."document_tags" FOR DELETE USING ("public"."is_workspace_manager"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace managers can delete documents" ON "public"."documents" FOR DELETE USING ("public"."is_workspace_manager"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace managers can delete estimate line items" ON "public"."estimate_line_items" FOR DELETE USING ("public"."is_workspace_manager"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace managers can delete estimates" ON "public"."estimates" FOR DELETE USING ("public"."is_workspace_manager"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace managers can delete expenses" ON "public"."expenses" FOR DELETE USING ("public"."is_workspace_manager"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace managers can delete inventory" ON "public"."inventory_items" FOR DELETE USING ("public"."is_workspace_manager"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace managers can delete invoice line items" ON "public"."invoice_line_items" FOR DELETE USING ("public"."is_workspace_manager"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace managers can delete invoice payments" ON "public"."invoice_payments" FOR DELETE USING ("public"."is_workspace_manager"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace managers can delete invoices" ON "public"."invoices" FOR DELETE USING ("public"."is_workspace_manager"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace managers can delete job activity" ON "public"."job_activity" FOR DELETE USING ("public"."is_workspace_manager"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace managers can delete job materials" ON "public"."job_materials" FOR DELETE USING ("public"."is_workspace_manager"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace managers can delete jobs" ON "public"."jobs" FOR DELETE USING ("public"."is_workspace_manager"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace managers can delete route plans" ON "public"."route_plans" FOR DELETE USING ("public"."is_workspace_manager"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace managers can delete route stops" ON "public"."route_plan_stops" FOR DELETE USING ("public"."is_workspace_manager"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace managers can manage memberships" ON "public"."workspace_members" FOR UPDATE USING ("public"."is_workspace_manager"("workspace_id")) WITH CHECK ("public"."is_workspace_manager"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace managers can remove memberships" ON "public"."workspace_members" FOR DELETE USING ("public"."is_workspace_manager"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace managers can update AI review drafts" ON "public"."ai_review_drafts" FOR UPDATE USING ("public"."is_workspace_manager"("workspace_id")) WITH CHECK ("public"."is_workspace_manager"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can create AI review drafts" ON "public"."ai_review_drafts" FOR INSERT WITH CHECK (("public"."is_workspace_member"("workspace_id") AND ("status" = 'Pending'::"text")));
+
+
+
+CREATE POLICY "Workspace members can insert AI jobs" ON "public"."ai_jobs" FOR INSERT WITH CHECK ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can insert calendar events" ON "public"."client_calendar_events" FOR INSERT WITH CHECK ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can insert client activity" ON "public"."client_activity" FOR INSERT WITH CHECK ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can insert client notes" ON "public"."client_notes" FOR INSERT WITH CHECK ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can insert clients" ON "public"."clients" FOR INSERT WITH CHECK ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can insert document tag links" ON "public"."document_tag_links" FOR INSERT WITH CHECK ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can insert document tags" ON "public"."document_tags" FOR INSERT WITH CHECK ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can insert documents" ON "public"."documents" FOR INSERT WITH CHECK ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can insert estimate line items" ON "public"."estimate_line_items" FOR INSERT WITH CHECK ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can insert estimates" ON "public"."estimates" FOR INSERT WITH CHECK ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can insert expenses" ON "public"."expenses" FOR INSERT WITH CHECK ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can insert inventory" ON "public"."inventory_items" FOR INSERT WITH CHECK ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can insert invoice line items" ON "public"."invoice_line_items" FOR INSERT WITH CHECK ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can insert invoice payments" ON "public"."invoice_payments" FOR INSERT WITH CHECK ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can insert invoices" ON "public"."invoices" FOR INSERT WITH CHECK ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can insert job activity" ON "public"."job_activity" FOR INSERT WITH CHECK ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can insert job materials" ON "public"."job_materials" FOR INSERT WITH CHECK ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can insert jobs" ON "public"."jobs" FOR INSERT WITH CHECK ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can insert route plans" ON "public"."route_plans" FOR INSERT WITH CHECK ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can insert route stops" ON "public"."route_plan_stops" FOR INSERT WITH CHECK ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can insert settings" ON "public"."workspace_settings" FOR INSERT WITH CHECK ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can read AI jobs" ON "public"."ai_jobs" FOR SELECT USING ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can read AI review drafts" ON "public"."ai_review_drafts" FOR SELECT USING ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can read calendar events" ON "public"."client_calendar_events" FOR SELECT USING ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can read client activity" ON "public"."client_activity" FOR SELECT USING ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can read client notes" ON "public"."client_notes" FOR SELECT USING ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can read clients" ON "public"."clients" FOR SELECT USING ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can read document tag links" ON "public"."document_tag_links" FOR SELECT USING ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can read document tags" ON "public"."document_tags" FOR SELECT USING ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can read documents" ON "public"."documents" FOR SELECT USING ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can read estimate line items" ON "public"."estimate_line_items" FOR SELECT USING ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can read estimates" ON "public"."estimates" FOR SELECT USING ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can read expenses" ON "public"."expenses" FOR SELECT USING ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can read inventory" ON "public"."inventory_items" FOR SELECT USING ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can read invoice line items" ON "public"."invoice_line_items" FOR SELECT USING ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can read invoice payments" ON "public"."invoice_payments" FOR SELECT USING ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can read invoices" ON "public"."invoices" FOR SELECT USING ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can read job activity" ON "public"."job_activity" FOR SELECT USING ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can read job materials" ON "public"."job_materials" FOR SELECT USING ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can read jobs" ON "public"."jobs" FOR SELECT USING ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can read route plans" ON "public"."route_plans" FOR SELECT USING ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can read route stops" ON "public"."route_plan_stops" FOR SELECT USING ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can read settings" ON "public"."workspace_settings" FOR SELECT USING ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can update AI jobs" ON "public"."ai_jobs" FOR UPDATE USING ("public"."is_workspace_member"("workspace_id")) WITH CHECK ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can update calendar events" ON "public"."client_calendar_events" FOR UPDATE USING ("public"."is_workspace_member"("workspace_id")) WITH CHECK ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can update client activity" ON "public"."client_activity" FOR UPDATE USING ("public"."is_workspace_member"("workspace_id")) WITH CHECK ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can update client notes" ON "public"."client_notes" FOR UPDATE USING ("public"."is_workspace_member"("workspace_id")) WITH CHECK ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can update clients" ON "public"."clients" FOR UPDATE USING ("public"."is_workspace_member"("workspace_id")) WITH CHECK ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can update document tag links" ON "public"."document_tag_links" FOR UPDATE USING ("public"."is_workspace_member"("workspace_id")) WITH CHECK ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can update document tags" ON "public"."document_tags" FOR UPDATE USING ("public"."is_workspace_member"("workspace_id")) WITH CHECK ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can update documents" ON "public"."documents" FOR UPDATE USING ("public"."is_workspace_member"("workspace_id")) WITH CHECK ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can update estimate line items" ON "public"."estimate_line_items" FOR UPDATE USING ("public"."is_workspace_member"("workspace_id")) WITH CHECK ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can update estimates" ON "public"."estimates" FOR UPDATE USING ("public"."is_workspace_member"("workspace_id")) WITH CHECK ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can update expenses" ON "public"."expenses" FOR UPDATE USING ("public"."is_workspace_member"("workspace_id")) WITH CHECK ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can update inventory" ON "public"."inventory_items" FOR UPDATE USING ("public"."is_workspace_member"("workspace_id")) WITH CHECK ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can update invoice line items" ON "public"."invoice_line_items" FOR UPDATE USING ("public"."is_workspace_member"("workspace_id")) WITH CHECK ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can update invoice payments" ON "public"."invoice_payments" FOR UPDATE USING ("public"."is_workspace_member"("workspace_id")) WITH CHECK ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can update invoices" ON "public"."invoices" FOR UPDATE USING ("public"."is_workspace_member"("workspace_id")) WITH CHECK ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can update job activity" ON "public"."job_activity" FOR UPDATE USING ("public"."is_workspace_member"("workspace_id")) WITH CHECK ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can update job materials" ON "public"."job_materials" FOR UPDATE USING ("public"."is_workspace_member"("workspace_id")) WITH CHECK ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can update jobs" ON "public"."jobs" FOR UPDATE USING ("public"."is_workspace_member"("workspace_id")) WITH CHECK ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can update route plans" ON "public"."route_plans" FOR UPDATE USING ("public"."is_workspace_member"("workspace_id")) WITH CHECK ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can update route stops" ON "public"."route_plan_stops" FOR UPDATE USING ("public"."is_workspace_member"("workspace_id")) WITH CHECK ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can update settings" ON "public"."workspace_settings" FOR UPDATE USING ("public"."is_workspace_member"("workspace_id")) WITH CHECK ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can update workspaces" ON "public"."workspaces" FOR UPDATE USING ("public"."is_workspace_member"("id")) WITH CHECK ("public"."is_workspace_member"("id"));
+
+
+
+CREATE POLICY "Workspace members can view memberships" ON "public"."workspace_members" FOR SELECT USING (("public"."is_workspace_member"("workspace_id") OR ("user_id" = "auth"."uid"())));
+
+
+
+CREATE POLICY "Workspace members can view workspaces" ON "public"."workspaces" FOR SELECT USING ("public"."is_workspace_member"("id"));
+
+
+
+CREATE POLICY "Workspace owners can delete settings" ON "public"."workspace_settings" FOR DELETE USING ("public"."is_workspace_owner"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace owners can delete workspaces" ON "public"."workspaces" FOR DELETE USING ("public"."is_workspace_owner"("id"));
+
+
+
+ALTER TABLE "public"."admin_audit_logs" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."ai_jobs" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."ai_review_drafts" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."client_activity" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."client_calendar_events" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."client_notes" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."clients" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."document_tag_links" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."document_tags" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."documents" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."estimate_line_items" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."estimates" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."expenses" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."inventory_items" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."invoice_line_items" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."invoice_payments" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."invoices" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."job_activity" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."job_materials" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."jobs" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."platform_admins" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."profiles" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."route_plan_stops" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."route_plans" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."workspace_members" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."workspace_settings" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."workspaces" ENABLE ROW LEVEL SECURITY;
+
+
+GRANT USAGE ON SCHEMA "public" TO "postgres";
+GRANT USAGE ON SCHEMA "public" TO "anon";
+GRANT USAGE ON SCHEMA "public" TO "authenticated";
+GRANT USAGE ON SCHEMA "public" TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."accept_workspace_invites_for_current_user"() TO "anon";
+GRANT ALL ON FUNCTION "public"."accept_workspace_invites_for_current_user"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."accept_workspace_invites_for_current_user"() TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."workspaces" TO "anon";
+GRANT ALL ON TABLE "public"."workspaces" TO "authenticated";
+GRANT ALL ON TABLE "public"."workspaces" TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."create_workspace_with_owner"("workspace_id" "uuid", "workspace_name" "text", "workspace_type" "text") TO "anon";
+GRANT ALL ON FUNCTION "public"."create_workspace_with_owner"("workspace_id" "uuid", "workspace_name" "text", "workspace_type" "text") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."create_workspace_with_owner"("workspace_id" "uuid", "workspace_name" "text", "workspace_type" "text") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."get_platform_admin_summary"() FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."get_platform_admin_summary"() TO "anon";
+GRANT ALL ON FUNCTION "public"."get_platform_admin_summary"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."get_platform_admin_summary"() TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."handle_new_auth_user"() TO "anon";
+GRANT ALL ON FUNCTION "public"."handle_new_auth_user"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."handle_new_auth_user"() TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."has_workspace_role"("target_workspace_id" "uuid", "allowed_roles" "text"[]) FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."has_workspace_role"("target_workspace_id" "uuid", "allowed_roles" "text"[]) TO "anon";
+GRANT ALL ON FUNCTION "public"."has_workspace_role"("target_workspace_id" "uuid", "allowed_roles" "text"[]) TO "authenticated";
+GRANT ALL ON FUNCTION "public"."has_workspace_role"("target_workspace_id" "uuid", "allowed_roles" "text"[]) TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."is_platform_admin"() FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."is_platform_admin"() TO "anon";
+GRANT ALL ON FUNCTION "public"."is_platform_admin"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."is_platform_admin"() TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."is_workspace_creator"("target_workspace_id" "uuid") TO "anon";
+GRANT ALL ON FUNCTION "public"."is_workspace_creator"("target_workspace_id" "uuid") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."is_workspace_creator"("target_workspace_id" "uuid") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."is_workspace_manager"("target_workspace_id" "uuid") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."is_workspace_manager"("target_workspace_id" "uuid") TO "anon";
+GRANT ALL ON FUNCTION "public"."is_workspace_manager"("target_workspace_id" "uuid") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."is_workspace_manager"("target_workspace_id" "uuid") TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."is_workspace_member"("target_workspace_id" "uuid") TO "anon";
+GRANT ALL ON FUNCTION "public"."is_workspace_member"("target_workspace_id" "uuid") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."is_workspace_member"("target_workspace_id" "uuid") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."is_workspace_owner"("target_workspace_id" "uuid") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."is_workspace_owner"("target_workspace_id" "uuid") TO "anon";
+GRANT ALL ON FUNCTION "public"."is_workspace_owner"("target_workspace_id" "uuid") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."is_workspace_owner"("target_workspace_id" "uuid") TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."set_updated_at"() TO "anon";
+GRANT ALL ON FUNCTION "public"."set_updated_at"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."set_updated_at"() TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."storage_workspace_id"("object_name" "text") TO "anon";
+GRANT ALL ON FUNCTION "public"."storage_workspace_id"("object_name" "text") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."storage_workspace_id"("object_name" "text") TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."invoices" TO "anon";
+GRANT ALL ON TABLE "public"."invoices" TO "authenticated";
+GRANT ALL ON TABLE "public"."invoices" TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."upsert_invoice_with_lines"("invoice_payload" "jsonb", "line_items_payload" "jsonb") TO "anon";
+GRANT ALL ON FUNCTION "public"."upsert_invoice_with_lines"("invoice_payload" "jsonb", "line_items_payload" "jsonb") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."upsert_invoice_with_lines"("invoice_payload" "jsonb", "line_items_payload" "jsonb") TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."jobs" TO "anon";
+GRANT ALL ON TABLE "public"."jobs" TO "authenticated";
+GRANT ALL ON TABLE "public"."jobs" TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."upsert_job_with_materials"("job_payload" "jsonb", "materials_payload" "jsonb") TO "anon";
+GRANT ALL ON FUNCTION "public"."upsert_job_with_materials"("job_payload" "jsonb", "materials_payload" "jsonb") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."upsert_job_with_materials"("job_payload" "jsonb", "materials_payload" "jsonb") TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."route_plans" TO "anon";
+GRANT ALL ON TABLE "public"."route_plans" TO "authenticated";
+GRANT ALL ON TABLE "public"."route_plans" TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."upsert_route_with_stops"("route_payload" "jsonb", "stops_payload" "jsonb") TO "anon";
+GRANT ALL ON FUNCTION "public"."upsert_route_with_stops"("route_payload" "jsonb", "stops_payload" "jsonb") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."upsert_route_with_stops"("route_payload" "jsonb", "stops_payload" "jsonb") TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."admin_audit_logs" TO "anon";
+GRANT ALL ON TABLE "public"."admin_audit_logs" TO "authenticated";
+GRANT ALL ON TABLE "public"."admin_audit_logs" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."ai_jobs" TO "anon";
+GRANT ALL ON TABLE "public"."ai_jobs" TO "authenticated";
+GRANT ALL ON TABLE "public"."ai_jobs" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."ai_review_drafts" TO "anon";
+GRANT ALL ON TABLE "public"."ai_review_drafts" TO "authenticated";
+GRANT ALL ON TABLE "public"."ai_review_drafts" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."client_activity" TO "anon";
+GRANT ALL ON TABLE "public"."client_activity" TO "authenticated";
+GRANT ALL ON TABLE "public"."client_activity" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."client_calendar_events" TO "anon";
+GRANT ALL ON TABLE "public"."client_calendar_events" TO "authenticated";
+GRANT ALL ON TABLE "public"."client_calendar_events" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."client_notes" TO "anon";
+GRANT ALL ON TABLE "public"."client_notes" TO "authenticated";
+GRANT ALL ON TABLE "public"."client_notes" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."clients" TO "anon";
+GRANT ALL ON TABLE "public"."clients" TO "authenticated";
+GRANT ALL ON TABLE "public"."clients" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."document_tag_links" TO "anon";
+GRANT ALL ON TABLE "public"."document_tag_links" TO "authenticated";
+GRANT ALL ON TABLE "public"."document_tag_links" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."document_tags" TO "anon";
+GRANT ALL ON TABLE "public"."document_tags" TO "authenticated";
+GRANT ALL ON TABLE "public"."document_tags" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."documents" TO "anon";
+GRANT ALL ON TABLE "public"."documents" TO "authenticated";
+GRANT ALL ON TABLE "public"."documents" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."estimate_line_items" TO "anon";
+GRANT ALL ON TABLE "public"."estimate_line_items" TO "authenticated";
+GRANT ALL ON TABLE "public"."estimate_line_items" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."estimates" TO "anon";
+GRANT ALL ON TABLE "public"."estimates" TO "authenticated";
+GRANT ALL ON TABLE "public"."estimates" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."expenses" TO "anon";
+GRANT ALL ON TABLE "public"."expenses" TO "authenticated";
+GRANT ALL ON TABLE "public"."expenses" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."inventory_items" TO "anon";
+GRANT ALL ON TABLE "public"."inventory_items" TO "authenticated";
+GRANT ALL ON TABLE "public"."inventory_items" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."invoice_line_items" TO "anon";
+GRANT ALL ON TABLE "public"."invoice_line_items" TO "authenticated";
+GRANT ALL ON TABLE "public"."invoice_line_items" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."invoice_payments" TO "anon";
+GRANT ALL ON TABLE "public"."invoice_payments" TO "authenticated";
+GRANT ALL ON TABLE "public"."invoice_payments" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."job_activity" TO "anon";
+GRANT ALL ON TABLE "public"."job_activity" TO "authenticated";
+GRANT ALL ON TABLE "public"."job_activity" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."job_materials" TO "anon";
+GRANT ALL ON TABLE "public"."job_materials" TO "authenticated";
+GRANT ALL ON TABLE "public"."job_materials" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."platform_admins" TO "anon";
+GRANT ALL ON TABLE "public"."platform_admins" TO "authenticated";
+GRANT ALL ON TABLE "public"."platform_admins" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."profiles" TO "anon";
+GRANT ALL ON TABLE "public"."profiles" TO "authenticated";
+GRANT ALL ON TABLE "public"."profiles" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."route_plan_stops" TO "anon";
+GRANT ALL ON TABLE "public"."route_plan_stops" TO "authenticated";
+GRANT ALL ON TABLE "public"."route_plan_stops" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."workspace_members" TO "anon";
+GRANT ALL ON TABLE "public"."workspace_members" TO "authenticated";
+GRANT ALL ON TABLE "public"."workspace_members" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."workspace_settings" TO "anon";
+GRANT ALL ON TABLE "public"."workspace_settings" TO "authenticated";
+GRANT ALL ON TABLE "public"."workspace_settings" TO "service_role";
+
+
+
+ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON SEQUENCES TO "postgres";
+ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON SEQUENCES TO "anon";
+ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON SEQUENCES TO "authenticated";
+ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON SEQUENCES TO "service_role";
+
+
+
+
+
+
+ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON FUNCTIONS TO "postgres";
+ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON FUNCTIONS TO "anon";
+ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON FUNCTIONS TO "authenticated";
+ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON FUNCTIONS TO "service_role";
+
+
+
+
+
+
+ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TABLES TO "postgres";
+ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TABLES TO "anon";
+ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TABLES TO "authenticated";
+ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TABLES TO "service_role";
+
+
+
+
+
+
+\unrestrict RDaxbPPXlOHHDzUbZj1r3ZxJlJg0GoF0Yy2w2J688vn2gyD2MwZ3cZoqY08E92T
+
+RESET ALL;

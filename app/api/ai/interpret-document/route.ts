@@ -1,0 +1,92 @@
+import { NextRequest, NextResponse } from "next/server";
+
+import { interpretDocumentWithAI } from "@/lib/ai/providers/providerFactory";
+import { createReviewDraft } from "@/lib/db/aiReviewDrafts";
+import { isUuid } from "@/lib/db/ids";
+import { createServerSupabaseClient } from "@/lib/supabase/server";
+
+type InterpretDocumentRequest = {
+  workspaceId?: string;
+  documentId?: string;
+};
+
+function jsonError(message: string, status: number) {
+  return NextResponse.json({ error: message }, { status });
+}
+
+export async function POST(request: NextRequest) {
+  const supabase = await createServerSupabaseClient();
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser();
+
+  if (userError || !user) {
+    return jsonError("Sign in required to interpret documents.", 401);
+  }
+
+  let body: InterpretDocumentRequest;
+  try {
+    body = (await request.json()) as InterpretDocumentRequest;
+  } catch {
+    return jsonError("Invalid document interpretation request.", 400);
+  }
+
+  if (!isUuid(body.workspaceId) || !isUuid(body.documentId)) {
+    return jsonError("Workspace and document are required.", 400);
+  }
+
+  const { data: membership, error: membershipError } = await supabase
+    .from("workspace_members")
+    .select("id")
+    .eq("workspace_id", body.workspaceId)
+    .eq("user_id", user.id)
+    .eq("status", "Active")
+    .maybeSingle();
+
+  if (membershipError || !membership) {
+    return jsonError("You do not have access to this workspace.", 403);
+  }
+
+  const { data: document, error: documentError } = await supabase
+    .from("documents")
+    .select("id, workspace_id, name, file_name, extracted_text")
+    .eq("id", body.documentId)
+    .eq("workspace_id", body.workspaceId)
+    .maybeSingle();
+
+  if (documentError) {
+    return jsonError(documentError.message || "Unable to load document.", 500);
+  }
+
+  if (!document) return jsonError("Document not found.", 404);
+
+  const extractedText =
+    typeof document.extracted_text === "string" ? document.extracted_text.trim() : "";
+  if (!extractedText) {
+    return jsonError("Document does not have extracted text to interpret.", 400);
+  }
+
+  try {
+    const interpretation = await interpretDocumentWithAI({
+      workspaceId: body.workspaceId,
+      sourceId: body.documentId,
+      text: extractedText,
+    });
+    const reviewDraft = await createReviewDraft(supabase, {
+      reviewDraft: interpretation.reviewDraft,
+      sourceLabel: document.file_name ?? document.name ?? "Document",
+      rawInput: extractedText,
+      modelProvider: interpretation.provider,
+      modelName: interpretation.model,
+      createdBy: user.id,
+    });
+
+    return NextResponse.json({ reviewDraft });
+  } catch (error) {
+    return jsonError(
+      error instanceof Error ? error.message : "Unable to interpret document.",
+      500
+    );
+  }
+}

@@ -5,6 +5,11 @@ import Link from "next/link";
 
 import { useAuthSession } from "@/components/AuthSessionProvider";
 import { useWorkspace } from "@/components/WorkspaceContext";
+import {
+  createClientAction,
+  deleteClientAction,
+  updateClientAction,
+} from "@/lib/actions/clients";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
 import type { ClientRow } from "@/lib/clientTypes";
 import { createClientsRepository } from "@/lib/db/clients";
@@ -85,7 +90,7 @@ function isInvoiceLinkedToClient(invoice: InvoiceRow, client: ClientRow) {
 }
 
 export default function ClientsPage() {
-  const { activeWorkspace } = useWorkspace();
+  const { activeWorkspace, canDeleteBusinessRecords } = useWorkspace();
   const { isSupabaseConfigured, user } = useAuthSession();
   const isDatabaseMode = Boolean(isSupabaseConfigured && user);
 
@@ -344,9 +349,14 @@ export default function ClientsPage() {
     };
 
     try {
-      const createdClient = await clientsRepository.createClient(newClient);
+      const result = await createClientAction(clientsRepository, newClient);
 
-      if (!createdClient) return;
+      if (!result.ok) {
+        setClientLoadError(result.error);
+        return;
+      }
+
+      const createdClient = result.data;
 
       if (isDatabaseMode) {
         setDatabaseClientItems((current) => [...current, createdClient]);
@@ -406,9 +416,14 @@ export default function ClientsPage() {
     };
 
     try {
-      const savedClient = await clientsRepository.updateClient(updatedClient);
+      const result = await updateClientAction(clientsRepository, updatedClient);
 
-      if (!savedClient) return;
+      if (!result.ok) {
+        setClientLoadError(result.error);
+        return;
+      }
+
+      const savedClient = result.data;
 
       if (isDatabaseMode) {
         setDatabaseClientItems((current) =>
@@ -428,19 +443,32 @@ export default function ClientsPage() {
   }
 
   async function removeSelectedClients() {
+    if (!canDeleteBusinessRecords) return;
+
     try {
       const deleteResults = await Promise.all(
         selectedClientRows.map(async (client) => ({
           id: client.id,
-          deleted: await clientsRepository.deleteClient(
+          result: await deleteClientAction(
+            clientsRepository,
             client.id,
             client.workspaceId
           ),
         }))
       );
       const deletedClientIds = deleteResults
-        .filter((result) => result.deleted)
+        .filter((result) => result.result.ok)
         .map((result) => result.id);
+      const failedDelete = deleteResults.find((result) => !result.result.ok);
+
+      if (failedDelete && !deletedClientIds.length) {
+        setClientLoadError(
+          failedDelete.result.ok
+            ? "Unable to delete clients."
+            : failedDelete.result.error
+        );
+        return;
+      }
 
       if (isDatabaseMode) {
         setDatabaseClientItems((current) =>
@@ -475,7 +503,7 @@ export default function ClientsPage() {
           <button
             type="button"
             onClick={() => setShowDeleteModal(true)}
-            disabled={selectedClients.length === 0}
+            disabled={selectedClients.length === 0 || !canDeleteBusinessRecords}
             className="rounded-lg bg-red-600 px-6 py-3 text-white shadow hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
             Remove Client
@@ -879,7 +907,8 @@ export default function ClientsPage() {
               <button
                 type="button"
                 onClick={removeSelectedClients}
-                className="rounded-lg bg-red-600 px-4 py-2 text-white hover:bg-red-700"
+                disabled={!canDeleteBusinessRecords}
+                className="rounded-lg bg-red-600 px-4 py-2 text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-gray-400"
               >
                 Remove
               </button>

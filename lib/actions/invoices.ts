@@ -4,6 +4,7 @@ import { fail, ok, requireText, type ActionResult } from "@/lib/actions/shared";
 export type InvoiceActionsRepository = {
   createInvoice: (invoice: InvoiceRow) => Promise<InvoiceRow | null>;
   updateInvoice: (invoice: InvoiceRow) => Promise<InvoiceRow | null>;
+  deleteInvoice: (invoiceId: string, workspaceId?: string) => Promise<boolean>;
 };
 
 function validateInvoice(invoice: InvoiceRow) {
@@ -14,7 +15,7 @@ function validateInvoice(invoice: InvoiceRow) {
   };
 }
 
-export async function createInvoice(
+export async function createInvoiceAction(
   repository: InvoiceActionsRepository,
   invoice: InvoiceRow
 ): Promise<ActionResult<InvoiceRow>> {
@@ -26,7 +27,7 @@ export async function createInvoice(
   }
 }
 
-export async function updateInvoice(
+export async function updateInvoiceAction(
   repository: InvoiceActionsRepository,
   invoice: InvoiceRow
 ): Promise<ActionResult<InvoiceRow>> {
@@ -43,8 +44,28 @@ export async function markInvoicePaid(
   repository: InvoiceActionsRepository,
   invoice: InvoiceRow
 ): Promise<ActionResult<InvoiceRow>> {
-  return updateInvoice(repository, {
+  return updateInvoiceAction(repository, {
     ...invoice,
     status: "Paid",
   });
 }
+
+export async function deleteInvoiceAction(
+  repository: InvoiceActionsRepository,
+  invoiceId: string,
+  workspaceId?: string
+): Promise<ActionResult<boolean>> {
+  try {
+    const deleted = await repository.deleteInvoice(
+      requireText(invoiceId, "Invoice"),
+      workspaceId
+    );
+    return deleted ? ok(true) : fail("Unable to delete invoice.");
+  } catch (error) {
+    return fail(error instanceof Error ? error.message : "Unable to delete invoice.");
+  }
+}
+
+export const createInvoice = createInvoiceAction;
+export const updateInvoice = updateInvoiceAction;
+export const deleteInvoice = deleteInvoiceAction;

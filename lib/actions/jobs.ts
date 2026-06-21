@@ -4,7 +4,7 @@ import { fail, ok, requireText, type ActionResult } from "@/lib/actions/shared";
 export type JobActionsRepository = {
   createJob: (job: Job) => Promise<Job | null>;
   updateJob: (jobId: string, job: Job) => Promise<Job | null>;
-  deleteJob: (jobId: string) => Promise<boolean>;
+  deleteJob: (jobId: string, workspaceId?: string) => Promise<boolean>;
 };
 
 function validateJob(job: Job) {
@@ -15,7 +15,7 @@ function validateJob(job: Job) {
   };
 }
 
-export async function createJob(
+export async function createJobAction(
   repository: JobActionsRepository,
   job: Job
 ): Promise<ActionResult<Job>> {
@@ -27,7 +27,7 @@ export async function createJob(
   }
 }
 
-export async function updateJob(
+export async function updateJobAction(
   repository: JobActionsRepository,
   job: Job
 ): Promise<ActionResult<Job>> {
@@ -40,14 +40,19 @@ export async function updateJob(
   }
 }
 
-export async function deleteJob(
+export async function deleteJobAction(
   repository: JobActionsRepository,
-  jobId: string
+  jobId: string,
+  workspaceId?: string
 ): Promise<ActionResult<boolean>> {
   try {
-    const deleted = await repository.deleteJob(requireText(jobId, "Job"));
+    const deleted = await repository.deleteJob(requireText(jobId, "Job"), workspaceId);
     return deleted ? ok(true) : fail("Unable to delete job.");
   } catch (error) {
     return fail(error instanceof Error ? error.message : "Unable to delete job.");
   }
 }
+
+export const createJob = createJobAction;
+export const updateJob = updateJobAction;
+export const deleteJob = deleteJobAction;

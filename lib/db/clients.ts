@@ -5,6 +5,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { ClientRow } from "@/lib/clientTypes";
 import { assertUuid, isUuid } from "@/lib/db/ids";
 import { centsToMoneyString, moneyStringToCents } from "@/lib/db/money";
+import { createSignedInRecord } from "@/lib/db/serverCreate";
+import { mutateSignedInRecord } from "@/lib/db/serverMutate";
 
 type StoredStateSetter<T> = T | ((current: T) => T);
 
@@ -167,19 +169,11 @@ export function createClientsRepository({
       }
       assertUuid(client.workspaceId, "Workspace");
 
-      const { data, error } = await supabase
-        .from("clients")
-        .insert(mapClientRowToDatabaseWrite(client))
-        .select(
-          "id, workspace_id, name, status, balance_cents, email, phone, address, city, state, zip, notes, latitude, longitude"
-        )
-        .single();
-
-      if (error) {
-        throw new Error(error.message || "Unable to create client.");
-      }
-
-      return mapDatabaseClientToClientRow(data as ClientDatabaseRow);
+      const data = await createSignedInRecord<ClientDatabaseRow>(
+        "client",
+        mapClientRowToDatabaseWrite(client)
+      );
+      return mapDatabaseClientToClientRow(data);
     },
 
     async updateClient(client: ClientRow) {
@@ -195,21 +189,13 @@ export function createClientsRepository({
 
       const updateValues = mapClientRowToDatabaseWrite(client);
       delete updateValues.id;
-      const { data, error } = await supabase
-        .from("clients")
-        .update(updateValues)
-        .eq("id", client.id)
-        .eq("workspace_id", client.workspaceId)
-        .select(
-          "id, workspace_id, name, status, balance_cents, email, phone, address, city, state, zip, notes, latitude, longitude"
-        )
-        .single();
-
-      if (error) {
-        throw new Error(error.message || "Unable to update client.");
-      }
-
-      return mapDatabaseClientToClientRow(data as ClientDatabaseRow);
+      const data = await mutateSignedInRecord<ClientDatabaseRow>("client", "update", {
+        ...updateValues,
+        id: client.id,
+        workspace_id: client.workspaceId,
+      });
+      if (!data) throw new Error("Unable to update client.");
+      return mapDatabaseClientToClientRow(data);
     },
 
     async deleteClient(clientId: string, workspaceId?: string) {
@@ -222,17 +208,10 @@ export function createClientsRepository({
       if (!isUuid(clientId)) return true;
       if (workspaceId && !isUuid(workspaceId)) return true;
 
-      let query = supabase.from("clients").delete().eq("id", clientId);
-
-      if (workspaceId) {
-        query = query.eq("workspace_id", workspaceId);
-      }
-
-      const { error } = await query;
-
-      if (error) {
-        throw new Error(error.message || "Unable to delete client.");
-      }
+      await mutateSignedInRecord<boolean>("client", "delete", {
+        id: clientId,
+        workspace_id: workspaceId,
+      });
 
       return true;
     },

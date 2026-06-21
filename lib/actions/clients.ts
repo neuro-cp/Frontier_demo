@@ -4,10 +4,10 @@ import { fail, ok, requireText, type ActionResult } from "@/lib/actions/shared";
 export type ClientActionsRepository = {
   createClient: (client: ClientRow) => Promise<ClientRow | null>;
   updateClient: (client: ClientRow) => Promise<ClientRow | null>;
-  deleteClient: (clientId: string) => Promise<boolean>;
+  deleteClient: (clientId: string, workspaceId?: string) => Promise<boolean>;
 };
 
-export async function createClient(
+export async function createClientAction(
   repository: ClientActionsRepository,
   client: ClientRow
 ): Promise<ActionResult<ClientRow>> {
@@ -24,7 +24,7 @@ export async function createClient(
   }
 }
 
-export async function updateClient(
+export async function updateClientAction(
   repository: ClientActionsRepository,
   client: ClientRow
 ): Promise<ActionResult<ClientRow>> {
@@ -39,14 +39,22 @@ export async function updateClient(
   }
 }
 
-export async function deleteClient(
+export async function deleteClientAction(
   repository: ClientActionsRepository,
-  clientId: string
+  clientId: string,
+  workspaceId?: string
 ): Promise<ActionResult<boolean>> {
   try {
-    const deleted = await repository.deleteClient(requireText(clientId, "Client"));
+    const deleted = await repository.deleteClient(
+      requireText(clientId, "Client"),
+      workspaceId
+    );
     return deleted ? ok(true) : fail("Unable to delete client.");
   } catch (error) {
     return fail(error instanceof Error ? error.message : "Unable to delete client.");
   }
 }
+
+export const createClient = createClientAction;
+export const updateClient = updateClientAction;
+export const deleteClient = deleteClientAction;

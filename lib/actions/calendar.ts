@@ -4,7 +4,7 @@ import type { ClientCalendarEvent } from "@/lib/db/calendarEvents";
 export type CalendarActionsRepository = {
   createEvent: (event: ClientCalendarEvent) => Promise<ClientCalendarEvent | null>;
   updateEvent: (event: ClientCalendarEvent) => Promise<ClientCalendarEvent | null>;
-  deleteEvent: (eventId: string) => Promise<boolean>;
+  deleteEvent: (eventId: string, workspaceId?: string) => Promise<boolean>;
 };
 
 function validateCalendarEvent(event: ClientCalendarEvent) {
@@ -16,7 +16,7 @@ function validateCalendarEvent(event: ClientCalendarEvent) {
   };
 }
 
-export async function createCalendarEvent(
+export async function createCalendarEventAction(
   repository: CalendarActionsRepository,
   event: ClientCalendarEvent
 ): Promise<ActionResult<ClientCalendarEvent>> {
@@ -28,7 +28,7 @@ export async function createCalendarEvent(
   }
 }
 
-export async function updateCalendarEvent(
+export async function updateCalendarEventAction(
   repository: CalendarActionsRepository,
   event: ClientCalendarEvent
 ): Promise<ActionResult<ClientCalendarEvent>> {
@@ -41,14 +41,22 @@ export async function updateCalendarEvent(
   }
 }
 
-export async function deleteCalendarEvent(
+export async function deleteCalendarEventAction(
   repository: CalendarActionsRepository,
-  eventId: string
+  eventId: string,
+  workspaceId?: string
 ): Promise<ActionResult<boolean>> {
   try {
-    const deleted = await repository.deleteEvent(requireText(eventId, "Calendar event"));
+    const deleted = await repository.deleteEvent(
+      requireText(eventId, "Calendar event"),
+      workspaceId
+    );
     return deleted ? ok(true) : fail("Unable to delete calendar event.");
   } catch (error) {
     return fail(error instanceof Error ? error.message : "Unable to delete calendar event.");
   }
 }
+
+export const createCalendarEvent = createCalendarEventAction;
+export const updateCalendarEvent = updateCalendarEventAction;
+export const deleteCalendarEvent = deleteCalendarEventAction;

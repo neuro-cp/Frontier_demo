@@ -371,7 +371,7 @@ function NewInvoiceContent() {
         <section className="rounded-xl bg-white p-4 shadow dark:bg-gray-900 sm:p-6">
           <h2 className="text-xl font-bold">From</h2>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            Uses the saved business profile for this workspace.
+            Uses the saved business profile for this workspace. You can edit this information from the settings tab.
           </p>
 
           <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm dark:border-gray-800 dark:bg-gray-800">

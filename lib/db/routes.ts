@@ -1,6 +1,8 @@
 "use client";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { assertUuid, isUuid } from "@/lib/db/ids";
+import { createSignedInRecord } from "@/lib/db/serverCreate";
+import { mutateSignedInRecord } from "@/lib/db/serverMutate";
 export type RoutePlan = { id: string; workspaceId: string; name: string; googleMapsUrl?: string; totalDistanceMeters?: number | null; totalDurationSeconds?: number | null; notes?: string; stops: RouteStop[] };
 export type RouteStop = { id?: string; clientId: string; stopOrder: number; latitude: number | null; longitude: number | null; addressSnapshot: string };
 type DbRouteStop = { id: string; client_id: string | null; stop_order: number; latitude: number | null; longitude: number | null; address_snapshot: string | null };
@@ -10,10 +12,31 @@ export function createRoutesRepository({ isSignedIn, supabase }: { isSignedIn: b
   function dbToRoute(r: DbRoute): RoutePlan {
     return { id: r.id, workspaceId: r.workspace_id, name: r.name, googleMapsUrl: r.google_maps_url ?? undefined, totalDistanceMeters: r.total_distance_meters, totalDurationSeconds: r.total_duration_seconds, notes: r.notes ?? "", stops: (r.route_plan_stops ?? []).map((s) => ({ id: s.id, clientId: s.client_id ?? "", stopOrder: s.stop_order, latitude: s.latitude, longitude: s.longitude, addressSnapshot: s.address_snapshot ?? "" })) };
   }
+  function routeToDb(route: RoutePlan) {
+    return {
+      id: route.id,
+      workspace_id: route.workspaceId,
+      name: route.name,
+      google_maps_url: route.googleMapsUrl ?? null,
+      total_distance_meters: route.totalDistanceMeters ?? null,
+      total_duration_seconds: route.totalDurationSeconds ?? null,
+      notes: route.notes ?? null,
+    };
+  }
+  function stopsToDb(route: RoutePlan) {
+    return route.stops.map((s) => ({
+      id: s.id ?? crypto.randomUUID(),
+      client_id: s.clientId || null,
+      stop_order: s.stopOrder,
+      latitude: s.latitude,
+      longitude: s.longitude,
+      address_snapshot: s.addressSnapshot,
+    }));
+  }
   async function saveRouteWithStops(route: RoutePlan) {
     if (!useDb) return route;
-    const { error } = await supabase.rpc("upsert_route_with_stops", {
-      route_payload: {
+    const data = await mutateSignedInRecord<DbRoute>("route_plan", "update", {
+      route: {
         id: route.id,
         workspace_id: route.workspaceId,
         name: route.name,
@@ -22,7 +45,7 @@ export function createRoutesRepository({ isSignedIn, supabase }: { isSignedIn: b
         total_duration_seconds: route.totalDurationSeconds ?? null,
         notes: route.notes ?? null,
       },
-      stops_payload: route.stops.map((s) => ({
+      stops: route.stops.map((s) => ({
         id: s.id ?? "",
         client_id: s.clientId || "",
         stop_order: s.stopOrder,
@@ -31,8 +54,8 @@ export function createRoutesRepository({ isSignedIn, supabase }: { isSignedIn: b
         address_snapshot: s.addressSnapshot,
       })),
     });
-    if (error) throw new Error(error.message || "Unable to save route.");
-    return route;
+    if (!data) throw new Error("Unable to save route.");
+    return dbToRoute(data);
   }
   return {
     async getRoutes(workspaceId: string) {
@@ -45,7 +68,11 @@ export function createRoutesRepository({ isSignedIn, supabase }: { isSignedIn: b
     async createRoute(route: RoutePlan) {
       if (!useDb) return route;
       assertUuid(route.workspaceId, "Workspace");
-      return saveRouteWithStops(route);
+      const data = await createSignedInRecord<DbRoute>("route_plan", {
+        route: routeToDb(route),
+        stops: stopsToDb(route),
+      });
+      return dbToRoute(data);
     },
     async updateRoute(route: RoutePlan) {
       if (!useDb) return route;
@@ -53,11 +80,12 @@ export function createRoutesRepository({ isSignedIn, supabase }: { isSignedIn: b
       assertUuid(route.id, "Route");
       return saveRouteWithStops(route);
     },
-    async deleteRoute(id: string) {
+    async deleteRoute(id: string, workspaceId?: string) {
       if (!useDb) return true;
       if (!isUuid(id)) return true;
-      const { error } = await supabase.from("route_plans").delete().eq("id", id);
-      if (error) throw new Error(error.message || "Unable to delete route.");
+      await mutateSignedInRecord<boolean>("route_plan", "delete", {
+        route: { id, workspace_id: workspaceId },
+      });
       return true;
     },
   };

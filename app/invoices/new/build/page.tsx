@@ -6,6 +6,8 @@ import Link from "next/link";
 
 import { useAuthSession } from "@/components/AuthSessionProvider";
 import { useWorkspace } from "@/components/WorkspaceContext";
+import { createClientAction, updateClientAction } from "@/lib/actions/clients";
+import { createInvoiceAction, updateInvoiceAction } from "@/lib/actions/invoices";
 import {
   readStoredJson,
   removeStoredValue,
@@ -271,8 +273,11 @@ export default function InvoiceBuilderPage() {
 
       if (!isDatabaseMode) setSavedClients(updatedClients);
       else {
-        const saved = await clientsRepo.updateClient(updatedClients.find((client) => client.id === matchingClientById.id) as SharedClientRow);
-        if (saved) setDatabaseClients((current) => current.map((client) => client.id === saved.id ? saved : client));
+        const result = await updateClientAction(
+          clientsRepo,
+          updatedClients.find((client) => client.id === matchingClientById.id) as SharedClientRow
+        );
+        if (result.ok) setDatabaseClients((current) => current.map((client) => client.id === result.data.id ? result.data : client));
       }
       return matchingClientById.id;
     }
@@ -307,8 +312,11 @@ export default function InvoiceBuilderPage() {
 
       if (!isDatabaseMode) setSavedClients(updatedClients);
       else {
-        const saved = await clientsRepo.updateClient(updatedClients.find((client) => client.id === matchingClient.id) as SharedClientRow);
-        if (saved) setDatabaseClients((current) => current.map((client) => client.id === saved.id ? saved : client));
+        const result = await updateClientAction(
+          clientsRepo,
+          updatedClients.find((client) => client.id === matchingClient.id) as SharedClientRow
+        );
+        if (result.ok) setDatabaseClients((current) => current.map((client) => client.id === result.data.id ? result.data : client));
       }
       return matchingClient.id;
     }
@@ -328,9 +336,9 @@ export default function InvoiceBuilderPage() {
       notes: `Created from ${invoice.invoiceNumber}`,
     };
 
-    const created = await clientsRepo.createClient(newClient as SharedClientRow);
+    const createClientResult = await createClientAction(clientsRepo, newClient as SharedClientRow);
     if (!isDatabaseMode) setSavedClients([...existingClients, newClient]);
-    else if (created) setDatabaseClients((current) => [...current, created]);
+    else if (createClientResult.ok) setDatabaseClients((current) => [...current, createClientResult.data]);
     return newClient.id;
   }
 
@@ -414,10 +422,13 @@ export default function InvoiceBuilderPage() {
             savedInvoice,
           ];
 
-      const saved = isEditingExisting
-        ? await invoicesRepo.updateInvoice(savedInvoice as unknown as SharedInvoiceRow)
-        : await invoicesRepo.createInvoice(savedInvoice as unknown as SharedInvoiceRow);
-      if (!saved) return;
+      const result = isEditingExisting
+        ? await updateInvoiceAction(invoicesRepo, savedInvoice as unknown as SharedInvoiceRow)
+        : await createInvoiceAction(invoicesRepo, savedInvoice as unknown as SharedInvoiceRow);
+      if (!result.ok) {
+        setSaveError(result.error);
+        return;
+      }
       if (!isDatabaseMode) setSavedInvoices(updatedInvoices);
       removeStoredValue(storageKeys.invoiceDraft);
       router.push(`/invoices/${savedInvoice.id}`);

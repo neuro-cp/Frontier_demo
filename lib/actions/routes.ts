@@ -4,7 +4,7 @@ import type { RoutePlan } from "@/lib/db/routes";
 export type RouteActionsRepository = {
   createRoute: (route: RoutePlan) => Promise<RoutePlan | null>;
   updateRoute: (route: RoutePlan) => Promise<RoutePlan | null>;
-  deleteRoute: (routeId: string) => Promise<boolean>;
+  deleteRoute: (routeId: string, workspaceId?: string) => Promise<boolean>;
 };
 
 function validateRoute(route: RoutePlan) {
@@ -15,7 +15,7 @@ function validateRoute(route: RoutePlan) {
   };
 }
 
-export async function createRoutePlan(
+export async function createRoutePlanAction(
   repository: RouteActionsRepository,
   route: RoutePlan
 ): Promise<ActionResult<RoutePlan>> {
@@ -27,7 +27,7 @@ export async function createRoutePlan(
   }
 }
 
-export async function updateRoutePlan(
+export async function updateRoutePlanAction(
   repository: RouteActionsRepository,
   route: RoutePlan
 ): Promise<ActionResult<RoutePlan>> {
@@ -40,14 +40,19 @@ export async function updateRoutePlan(
   }
 }
 
-export async function deleteRoutePlan(
+export async function deleteRoutePlanAction(
   repository: RouteActionsRepository,
-  routeId: string
+  routeId: string,
+  workspaceId?: string
 ): Promise<ActionResult<boolean>> {
   try {
-    const deleted = await repository.deleteRoute(requireText(routeId, "Route"));
+    const deleted = await repository.deleteRoute(requireText(routeId, "Route"), workspaceId);
     return deleted ? ok(true) : fail("Unable to delete route plan.");
   } catch (error) {
     return fail(error instanceof Error ? error.message : "Unable to delete route plan.");
   }
 }
+
+export const createRoutePlan = createRoutePlanAction;
+export const updateRoutePlan = updateRoutePlanAction;
+export const deleteRoutePlan = deleteRoutePlanAction;

@@ -3,6 +3,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { assertUuid, isUuid } from "@/lib/db/ids";
 import { moneyStringToCents, centsToMoneyString } from "@/lib/db/money";
+import { createSignedInRecord } from "@/lib/db/serverCreate";
+import { mutateSignedInRecord } from "@/lib/db/serverMutate";
 import type { Job, JobMaterial } from "@/lib/jobTypes";
 
 type Setter<T> = (value: T | ((current: T) => T)) => void;
@@ -50,12 +52,12 @@ export function createJobsRepository({ isSignedIn, supabase, localJobs, setLocal
   }
   async function saveJobWithMaterials(job: Job) {
     if (!useDb) return job;
-    const { error } = await supabase.rpc("upsert_job_with_materials", {
-      job_payload: jobToDb(job),
-      materials_payload: materialsToRpcPayload(job.materials ?? []),
+    const data = await mutateSignedInRecord<DbJob>("job", "update", {
+      job: jobToDb(job),
+      materials: materialsToRpcPayload(job.materials ?? []),
     });
-    if (error) throw new Error(error.message || "Unable to save job.");
-    return job;
+    if (!data) throw new Error("Unable to save job.");
+    return dbToJob(data);
   }
   return {
     async getJobs(workspaceId: string) {
@@ -78,7 +80,11 @@ export function createJobsRepository({ isSignedIn, supabase, localJobs, setLocal
     async createJob(job: Job) {
       if (!useDb) return setLocalJobs((c) => [...c, job]), job;
       assertUuid(job.workspaceId, "Workspace");
-      return saveJobWithMaterials(job);
+      const data = await createSignedInRecord<DbJob>("job", {
+        job: jobToDb(job),
+        materials: materialsToRpcPayload(job.materials ?? []),
+      });
+      return dbToJob(data);
     },
     async updateJob(id: string, job: Job) {
       if (!useDb) return setLocalJobs((c) => c.map((j) => (j.id === id ? job : j))), job;
@@ -86,11 +92,12 @@ export function createJobsRepository({ isSignedIn, supabase, localJobs, setLocal
       assertUuid(id, "Job");
       return saveJobWithMaterials({ ...job, id });
     },
-    async deleteJob(id: string) {
+    async deleteJob(id: string, workspaceId?: string) {
       if (!useDb) return setLocalJobs((c) => c.filter((j) => j.id !== id)), true;
       if (!isUuid(id)) return true;
-      const { error } = await supabase.from("jobs").delete().eq("id", id);
-      if (error) throw new Error(error.message || "Unable to delete job.");
+      await mutateSignedInRecord<boolean>("job", "delete", {
+        job: { id, workspace_id: workspaceId },
+      });
       return true;
     },
     async getJobMaterials(jobId: string) {
@@ -104,18 +111,20 @@ export function createJobsRepository({ isSignedIn, supabase, localJobs, setLocal
       if (!useDb) return true;
       assertUuid(jobId, "Job");
       assertUuid(workspaceId, "Workspace");
-      const { error: deleteError } = await supabase.from("job_materials").delete().eq("job_id", jobId).eq("workspace_id", workspaceId);
-      if (deleteError) throw new Error(deleteError.message || "Unable to replace job materials.");
-      if (materials.length === 0) return true;
-      const { error } = await supabase.from("job_materials").insert(materials.map((m) => ({ workspace_id: workspaceId, job_id: jobId, name: m.name, quantity: m.quantity })));
-      if (error) throw new Error(error.message || "Unable to save job materials.");
+      await mutateSignedInRecord<boolean>("job_materials", "update", {
+        workspace_id: workspaceId,
+        job_id: jobId,
+        materials: materials.map((m) => ({ name: m.name, quantity: m.quantity })),
+      });
       return true;
     },
-    async deleteJobMaterials(jobId: string) {
+    async deleteJobMaterials(jobId: string, workspaceId?: string) {
       if (!useDb) return true;
       assertUuid(jobId, "Job");
-      const { error } = await supabase.from("job_materials").delete().eq("job_id", jobId);
-      if (error) throw new Error(error.message || "Unable to delete job materials.");
+      await mutateSignedInRecord<boolean>("job_materials", "delete", {
+        workspace_id: workspaceId,
+        job_id: jobId,
+      });
       return true;
     },
   };

@@ -6,6 +6,7 @@ import Link from "next/link";
 
 import DocumentAttachments from "@/app/documents/DocumentAttachments";
 import { useAuthSession } from "@/components/AuthSessionProvider";
+import { updateJobAction } from "@/lib/actions/jobs";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
 import type { ClientRow } from "@/lib/clientTypes";
 import { createClientsRepository } from "@/lib/db/clients";
@@ -202,8 +203,12 @@ export default function JobPage() {
     };
 
     try {
-      const saved = await jobsRepository.updateJob(job.id, updatedJob);
-      if (!saved) return;
+      const result = await updateJobAction(jobsRepository, updatedJob);
+      if (!result.ok) {
+        setDataError(result.error);
+        return;
+      }
+      const saved = result.data;
       if (isDatabaseMode) setDatabaseJob(saved);
       setDataError("");
       setEditOpen(false);

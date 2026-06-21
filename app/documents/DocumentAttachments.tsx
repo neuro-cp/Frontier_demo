@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { useAuthSession } from "@/components/AuthSessionProvider";
+import { useWorkspace } from "@/components/WorkspaceContext";
+import { deleteDocumentAction } from "@/lib/actions/documents";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
 import { createDocumentsRepository, type StoredDocument } from "@/lib/db/documents";
 import { createDocumentDownloadUrl, removeDocumentFile } from "@/lib/storage";
@@ -31,6 +33,7 @@ export default function DocumentAttachments({
   title = "Documents",
 }: DocumentAttachmentsProps) {
   const { isSupabaseConfigured, user } = useAuthSession();
+  const { canDeleteBusinessRecords } = useWorkspace();
   const isDatabaseMode = Boolean(isSupabaseConfigured && user);
   const [localDocuments, setLocalDocuments] = useStoredJsonState<StoredDocument[]>(
     storageKeys.documents,
@@ -96,6 +99,8 @@ export default function DocumentAttachments({
   }
 
   async function deleteDocument(document: StoredDocument) {
+    if (!canDeleteBusinessRecords) return;
+
     setError("");
     if (!window.confirm(`Delete "${document.fileName || document.name}"? This cannot be undone.`)) return;
 
@@ -103,7 +108,15 @@ export default function DocumentAttachments({
       if (isDatabaseMode && supabase && document.storagePath) {
         await removeDocumentFile({ supabase, path: document.storagePath });
       }
-      await documentsRepo.deleteDocument(document.id);
+      const result = await deleteDocumentAction(
+        documentsRepo,
+        document.id,
+        document.workspaceId
+      );
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
       if (isDatabaseMode) {
         setDatabaseDocuments((current) => current.filter((item) => item.id !== document.id));
       }
@@ -136,7 +149,7 @@ export default function DocumentAttachments({
                 <button type="button" onClick={() => downloadDocument(document)} className="rounded-lg border border-gray-300 px-3 py-2 text-sm font-semibold hover:bg-gray-100 dark:border-gray-700 dark:hover:bg-gray-800">
                   Download
                 </button>
-                <button type="button" onClick={() => deleteDocument(document)} className="rounded-lg bg-red-600 px-3 py-2 text-sm font-semibold text-white hover:bg-red-700">
+                <button type="button" onClick={() => deleteDocument(document)} disabled={!canDeleteBusinessRecords} className="rounded-lg bg-red-600 px-3 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50">
                   Delete
                 </button>
               </div>
