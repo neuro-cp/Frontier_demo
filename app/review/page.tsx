@@ -17,6 +17,14 @@ type ReviewDraftsResponse = {
   error?: string;
 };
 
+type ReviewFilter =
+  | "All"
+  | "Pending"
+  | "Approved"
+  | "Needs Changes"
+  | "Rejected"
+  | "Executed";
+
 function formatConfidence(confidence: number | null) {
   if (typeof confidence !== "number") return "Unscored";
   return `${Math.round(confidence * 100)}%`;
@@ -58,6 +66,11 @@ export default function ReviewQueuePage() {
   const [isLoading, setIsLoading] = useState(false);
   const [updatingId, setUpdatingId] = useState("");
   const [executingId, setExecutingId] = useState("");
+  const [filter, setFilter] = useState<ReviewFilter>("All");
+  const [transcriptText, setTranscriptText] = useState("");
+  const [transcriptLabel, setTranscriptLabel] = useState("");
+  const [isGeneratingTranscriptDraft, setIsGeneratingTranscriptDraft] =
+    useState(false);
   const [error, setError] = useState("");
 
   const workspaceReady = isUuid(activeWorkspace.id);
@@ -65,6 +78,13 @@ export default function ReviewQueuePage() {
     () => reviewDrafts.filter((draft) => draft.status === "Pending").length,
     [reviewDrafts]
   );
+  const filteredReviewDrafts = useMemo(() => {
+    if (filter === "All") return reviewDrafts;
+    if (filter === "Executed") {
+      return reviewDrafts.filter((draft) => draft.executionStatus === "Executed");
+    }
+    return reviewDrafts.filter((draft) => draft.status === filter);
+  }, [filter, reviewDrafts]);
 
   const loadReviewDrafts = useCallback(async () => {
     if (!user || !workspaceReady) {
@@ -173,6 +193,41 @@ export default function ReviewQueuePage() {
     }
   }
 
+  async function generateTranscriptDraft() {
+    if (!workspaceReady || !transcriptText.trim() || isGeneratingTranscriptDraft) {
+      return;
+    }
+
+    setIsGeneratingTranscriptDraft(true);
+    setError("");
+    try {
+      const response = await fetch("/api/ai/interpret-transcript", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          workspaceId: activeWorkspace.id,
+          transcript: transcriptText.trim(),
+          sourceLabel: transcriptLabel.trim() || "Transcript",
+        }),
+      });
+      const payload = (await response.json()) as ReviewDraftsResponse;
+      if (!response.ok || !payload.reviewDraft) {
+        throw new Error(payload.error || "Unable to generate transcript draft.");
+      }
+      setReviewDrafts((current) => [payload.reviewDraft as AiReviewDraft, ...current]);
+      setTranscriptText("");
+      setTranscriptLabel("");
+    } catch (draftError) {
+      setError(
+        draftError instanceof Error
+          ? draftError.message
+          : "Unable to generate transcript draft."
+      );
+    } finally {
+      setIsGeneratingTranscriptDraft(false);
+    }
+  }
+
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-6">
       <section>
@@ -212,17 +267,78 @@ export default function ReviewQueuePage() {
         </div>
       )}
 
+      {user && workspaceReady && (
+        <section className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-end">
+            <div className="flex-1">
+              <label className="mb-2 block text-sm font-semibold">
+                Transcript
+              </label>
+              <textarea
+                rows={3}
+                value={transcriptText}
+                onChange={(event) => setTranscriptText(event.target.value)}
+                placeholder="Paste a transcript or command..."
+                className="w-full rounded-lg border border-gray-300 bg-white px-4 py-3 text-sm dark:border-gray-700 dark:bg-gray-950"
+              />
+            </div>
+            <div className="lg:w-64">
+              <label className="mb-2 block text-sm font-semibold">
+                Source Label
+              </label>
+              <input
+                value={transcriptLabel}
+                onChange={(event) => setTranscriptLabel(event.target.value)}
+                placeholder="Optional"
+                className="w-full rounded-lg border border-gray-300 bg-white px-4 py-3 text-sm dark:border-gray-700 dark:bg-gray-950"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={generateTranscriptDraft}
+              disabled={
+                !canDeleteBusinessRecords ||
+                !transcriptText.trim() ||
+                isGeneratingTranscriptDraft
+              }
+              className="rounded-lg bg-blue-600 px-5 py-3 text-sm font-bold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isGeneratingTranscriptDraft ? "Generating..." : "Generate Draft"}
+            </button>
+          </div>
+        </section>
+      )}
+
+      <div className="flex flex-wrap gap-2">
+        {(["All", "Pending", "Approved", "Needs Changes", "Rejected", "Executed"] as const).map(
+          (item) => (
+            <button
+              key={item}
+              type="button"
+              onClick={() => setFilter(item)}
+              className={`rounded-lg border px-4 py-2 text-sm font-bold ${
+                filter === item
+                  ? "border-blue-600 bg-blue-600 text-white"
+                  : "border-gray-300 hover:bg-gray-100 dark:border-gray-700 dark:hover:bg-gray-800"
+              }`}
+            >
+              {item}
+            </button>
+          )
+        )}
+      </div>
+
       {isLoading ? (
         <div className="rounded-lg border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-gray-900">
           Loading review drafts...
         </div>
-      ) : reviewDrafts.length === 0 ? (
+      ) : filteredReviewDrafts.length === 0 ? (
         <div className="rounded-lg border border-dashed border-gray-300 bg-white p-8 text-center text-gray-600 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-400">
           No AI review drafts for {activeWorkspace.name}.
         </div>
       ) : (
         <div className="space-y-4">
-          {reviewDrafts.map((draft) => (
+          {filteredReviewDrafts.map((draft) => (
             <article
               key={draft.id}
               className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-gray-900"
@@ -252,6 +368,9 @@ export default function ReviewQueuePage() {
                   </h2>
                   <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
                     Created {formatDate(draft.createdAt)}
+                  </p>
+                  <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                    Source {draft.sourceId || "inline transcript"}
                   </p>
                 </div>
 
@@ -322,6 +441,15 @@ export default function ReviewQueuePage() {
                 <p className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200">
                   {draft.executionError}
                 </p>
+              )}
+
+              {Object.keys(draft.executionResult).length > 0 && (
+                <div className="mt-5">
+                  <h3 className="font-bold">Execution Result</h3>
+                  <pre className="mt-3 max-h-72 overflow-auto rounded-lg bg-gray-950 p-3 text-xs text-gray-100">
+                    {JSON.stringify(draft.executionResult, null, 2)}
+                  </pre>
+                </div>
               )}
 
               {draft.warnings.length > 0 && (

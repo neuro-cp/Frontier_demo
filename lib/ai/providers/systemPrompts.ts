@@ -12,11 +12,11 @@ Output shape:
 Required payload keys:
 - create_client: {"name":"Client Name"}
 - update_client: {"clientId":"id"}
-- create_job: {"title":"Job title"}
+- create_job: {"name":"Job title","clientName":"Optional Client Name"}
 - update_job: {"jobId":"id"}
-- create_invoice: {"lineItems":[]}
+- create_invoice: {"clientName":"Optional Client Name","lineItems":[{"description":"Work","quantity":1,"unitPrice":100}]}
 - update_invoice: {"invoiceId":"id"}
-- create_expense: {"amount":123.45}
+- create_expense: {"description":"Vendor or expense","category":"Materials","amount":123.45}
 - update_inventory: {"itemId":"id"}
 - create_calendar_event: {"title":"Event title","date":"YYYY-MM-DD"}
 Use warnings for uncertainty.
