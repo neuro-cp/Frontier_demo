@@ -33,7 +33,9 @@ export async function POST(request: NextRequest) {
     return jsonError("Invalid transcript interpretation request.", 400);
   }
 
-  if (!isUuid(body.workspaceId)) {
+  const workspaceId = body.workspaceId;
+
+  if (!workspaceId || !isUuid(workspaceId)) {
     return jsonError("Workspace is required.", 400);
   }
 
@@ -43,7 +45,7 @@ export async function POST(request: NextRequest) {
   const { data: membership, error: membershipError } = await supabase
     .from("workspace_members")
     .select("id")
-    .eq("workspace_id", body.workspaceId)
+    .eq("workspace_id", workspaceId)
     .eq("user_id", user.id)
     .eq("status", "Active")
     .maybeSingle();
@@ -54,7 +56,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const interpretation = await interpretTranscriptWithAI({
-      workspaceId: body.workspaceId,
+      workspaceId,
       text: transcript,
     });
     const reviewDraft = await createReviewDraft(supabase, {

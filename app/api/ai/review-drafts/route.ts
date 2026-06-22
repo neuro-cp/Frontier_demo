@@ -64,7 +64,7 @@ async function requireUserAndWorkspace(workspaceId: string) {
 
 export async function GET(request: NextRequest) {
   const workspaceId = request.nextUrl.searchParams.get("workspaceId");
-  if (!isUuid(workspaceId)) {
+  if (!workspaceId || !isUuid(workspaceId)) {
     return jsonError("Workspace is required.", 400);
   }
 
@@ -90,7 +90,10 @@ export async function PATCH(request: NextRequest) {
     return jsonError("Invalid review draft request.", 400);
   }
 
-  if (!isUuid(body.workspaceId) || !isUuid(body.id)) {
+  const workspaceId = body.workspaceId;
+  const draftId = body.id;
+
+  if (!workspaceId || !draftId || !isUuid(workspaceId) || !isUuid(draftId)) {
     return jsonError("Workspace and review draft are required.", 400);
   }
 
@@ -98,7 +101,7 @@ export async function PATCH(request: NextRequest) {
     return jsonError("Review draft status is invalid.", 400);
   }
 
-  const auth = await requireUserAndWorkspace(body.workspaceId);
+  const auth = await requireUserAndWorkspace(workspaceId);
   if (!auth.ok) return auth.response;
 
   if (auth.role !== "Owner" && auth.role !== "Manager") {
@@ -107,8 +110,8 @@ export async function PATCH(request: NextRequest) {
 
   try {
     const reviewDraft = await updateReviewDraftStatus(auth.supabase, {
-      id: body.id,
-      workspaceId: body.workspaceId,
+      id: draftId,
+      workspaceId,
       status: body.status,
       reviewedBy: auth.user.id,
     });

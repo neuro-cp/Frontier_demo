@@ -1,5 +1,5 @@
 
-\restrict VWmPX3PttHPaxcP2wpTa1PbaYn5JUsyjYEIagBBP3bCs4VZZcH8J9RCjWXkPVp4
+\restrict rS1CzC0pWoSDbQobc2NcPvKcLSgzg8zf4YRxo0K09aKEmjKoqAqYl7yZ5V6NX2z
 
 
 SET statement_timeout = 0;
@@ -745,7 +745,13 @@ CREATE TABLE IF NOT EXISTS "public"."ai_review_drafts" (
     "rejected_at" timestamp with time zone,
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
     "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "execution_status" "text" DEFAULT 'Not Executed'::"text" NOT NULL,
+    "executed_at" timestamp with time zone,
+    "executed_by" "uuid",
+    "execution_result" "jsonb" DEFAULT '{}'::"jsonb" NOT NULL,
+    "execution_error" "text",
     CONSTRAINT "ai_review_drafts_actions_array_check" CHECK (("jsonb_typeof"("actions") = 'array'::"text")),
+    CONSTRAINT "ai_review_drafts_execution_status_check" CHECK (("execution_status" = ANY (ARRAY['Not Executed'::"text", 'Executed'::"text", 'Failed'::"text"]))),
     CONSTRAINT "ai_review_drafts_no_delete_actions_check" CHECK ((NOT "jsonb_path_exists"("actions", '$[*]?(@."type" like_regex "^delete_")'::"jsonpath"))),
     CONSTRAINT "ai_review_drafts_source_type_check" CHECK (("source_type" = ANY (ARRAY['ocr'::"text", 'transcript'::"text"]))),
     CONSTRAINT "ai_review_drafts_status_check" CHECK (("status" = ANY (ARRAY['Pending'::"text", 'Approved'::"text", 'Rejected'::"text", 'Needs Changes'::"text"]))),
@@ -1316,6 +1322,10 @@ CREATE INDEX "ai_review_drafts_created_by_idx" ON "public"."ai_review_drafts" US
 
 
 
+CREATE INDEX "ai_review_drafts_execution_status_idx" ON "public"."ai_review_drafts" USING "btree" ("workspace_id", "execution_status");
+
+
+
 CREATE INDEX "ai_review_drafts_source_idx" ON "public"."ai_review_drafts" USING "btree" ("source_type", "source_id");
 
 
@@ -1721,6 +1731,11 @@ ALTER TABLE ONLY "public"."ai_jobs"
 
 ALTER TABLE ONLY "public"."ai_review_drafts"
     ADD CONSTRAINT "ai_review_drafts_created_by_fkey" FOREIGN KEY ("created_by") REFERENCES "public"."profiles"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."ai_review_drafts"
+    ADD CONSTRAINT "ai_review_drafts_executed_by_fkey" FOREIGN KEY ("executed_by") REFERENCES "public"."profiles"("id") ON DELETE SET NULL;
 
 
 
@@ -2793,6 +2808,6 @@ ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TAB
 
 
 
-\unrestrict VWmPX3PttHPaxcP2wpTa1PbaYn5JUsyjYEIagBBP3bCs4VZZcH8J9RCjWXkPVp4
+\unrestrict rS1CzC0pWoSDbQobc2NcPvKcLSgzg8zf4YRxo0K09aKEmjKoqAqYl7yZ5V6NX2z
 
 RESET ALL;

@@ -32,14 +32,17 @@ export async function POST(request: NextRequest) {
     return jsonError("Invalid document interpretation request.", 400);
   }
 
-  if (!isUuid(body.workspaceId) || !isUuid(body.documentId)) {
+  const workspaceId = body.workspaceId;
+  const documentId = body.documentId;
+
+  if (!workspaceId || !documentId || !isUuid(workspaceId) || !isUuid(documentId)) {
     return jsonError("Workspace and document are required.", 400);
   }
 
   const { data: membership, error: membershipError } = await supabase
     .from("workspace_members")
     .select("id")
-    .eq("workspace_id", body.workspaceId)
+    .eq("workspace_id", workspaceId)
     .eq("user_id", user.id)
     .eq("status", "Active")
     .maybeSingle();
@@ -51,8 +54,8 @@ export async function POST(request: NextRequest) {
   const { data: document, error: documentError } = await supabase
     .from("documents")
     .select("id, workspace_id, name, file_name, extracted_text")
-    .eq("id", body.documentId)
-    .eq("workspace_id", body.workspaceId)
+    .eq("id", documentId)
+    .eq("workspace_id", workspaceId)
     .maybeSingle();
 
   if (documentError) {
@@ -69,8 +72,8 @@ export async function POST(request: NextRequest) {
 
   try {
     const interpretation = await interpretDocumentWithAI({
-      workspaceId: body.workspaceId,
-      sourceId: body.documentId,
+      workspaceId,
+      sourceId: documentId,
       text: extractedText,
     });
     const reviewDraft = await createReviewDraft(supabase, {

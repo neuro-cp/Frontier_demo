@@ -10,6 +10,11 @@ export type AiReviewDraftStatus =
   | "Rejected"
   | "Needs Changes";
 
+export type AiReviewDraftExecutionStatus =
+  | "Not Executed"
+  | "Executed"
+  | "Failed";
+
 export type AiReviewDraft = {
   id: string;
   workspaceId: string;
@@ -28,6 +33,11 @@ export type AiReviewDraft = {
   reviewedAt: string | null;
   approvedAt: string | null;
   rejectedAt: string | null;
+  executionStatus: AiReviewDraftExecutionStatus;
+  executedAt: string | null;
+  executedBy: string | null;
+  executionResult: Record<string, unknown>;
+  executionError: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -50,6 +60,11 @@ type DbAiReviewDraft = {
   reviewed_at: string | null;
   approved_at: string | null;
   rejected_at: string | null;
+  execution_status?: AiReviewDraftExecutionStatus;
+  executed_at?: string | null;
+  executed_by?: string | null;
+  execution_result?: Record<string, unknown> | null;
+  execution_error?: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -68,6 +83,15 @@ export type UpdateAiReviewDraftStatusInput = {
   workspaceId: string;
   status: AiReviewDraftStatus;
   reviewedBy?: string | null;
+};
+
+export type UpdateAiReviewDraftExecutionInput = {
+  id: string;
+  workspaceId: string;
+  executionStatus: AiReviewDraftExecutionStatus;
+  executedBy?: string | null;
+  executionResult?: Record<string, unknown>;
+  executionError?: string | null;
 };
 
 function dbToAiReviewDraft(row: DbAiReviewDraft): AiReviewDraft {
@@ -89,6 +113,11 @@ function dbToAiReviewDraft(row: DbAiReviewDraft): AiReviewDraft {
     reviewedAt: row.reviewed_at,
     approvedAt: row.approved_at,
     rejectedAt: row.rejected_at,
+    executionStatus: row.execution_status ?? "Not Executed",
+    executedAt: row.executed_at ?? null,
+    executedBy: row.executed_by ?? null,
+    executionResult: row.execution_result ?? {},
+    executionError: row.execution_error ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -121,6 +150,35 @@ export async function createReviewDraft(
 
   if (error || !data) {
     throw new Error(error?.message || "Unable to create AI review draft.");
+  }
+
+  return dbToAiReviewDraft(data as DbAiReviewDraft);
+}
+
+export async function updateReviewDraftExecution(
+  supabase: SupabaseClient,
+  input: UpdateAiReviewDraftExecutionInput
+) {
+  const now = new Date().toISOString();
+  const { data, error } = await supabase
+    .from("ai_review_drafts")
+    .update({
+      execution_status: input.executionStatus,
+      executed_at:
+        input.executionStatus === "Executed" || input.executionStatus === "Failed"
+          ? now
+          : null,
+      executed_by: input.executedBy ?? null,
+      execution_result: input.executionResult ?? {},
+      execution_error: input.executionError ?? null,
+    })
+    .eq("id", input.id)
+    .eq("workspace_id", input.workspaceId)
+    .select("*")
+    .single();
+
+  if (error || !data) {
+    throw new Error(error?.message || "Unable to update AI review draft execution.");
   }
 
   return dbToAiReviewDraft(data as DbAiReviewDraft);
