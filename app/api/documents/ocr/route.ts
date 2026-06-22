@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { runOcrExtraction } from "@/lib/ocr/provider";
+import { getOcrProviderMode, runOcrExtraction } from "@/lib/ocr/provider";
+import { DOCUMENT_STORAGE_BUCKET } from "@/lib/storage";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 
 type OcrRequestBody = {
@@ -48,7 +49,7 @@ export async function POST(request: NextRequest) {
 
   const { data: document, error: documentError } = await supabase
     .from("documents")
-    .select("id, workspace_id, name, file_name, mime_type, storage_path, notes, document_type, detected_type")
+    .select("id, workspace_id, name, file_name, mime_type, storage_bucket, storage_path, notes, document_type, detected_type")
     .eq("id", body.documentId)
     .eq("workspace_id", body.workspaceId)
     .maybeSingle();
@@ -61,6 +62,8 @@ export async function POST(request: NextRequest) {
     return jsonError("Document not found.", 404);
   }
 
+  const providerMode = getOcrProviderMode();
+
   const { data: aiJob, error: jobError } = await supabase
     .from("ai_jobs")
     .insert({
@@ -70,7 +73,7 @@ export async function POST(request: NextRequest) {
       job_type: "document_ocr",
       status: "Queued",
       model_provider: "frontier",
-      model_name: "mock-ocr",
+      model_name: providerMode === "worker" ? "ocrmypdf-tesseract" : `${providerMode}-ocr`,
       prompt_version: "ocr-foundation-v1",
       created_by: user.id,
       input_ref: document.storage_path,
@@ -128,6 +131,22 @@ export async function POST(request: NextRequest) {
       })
       .eq("id", aiJob.id);
 
+    let storedFile: Blob | undefined;
+    if (providerMode === "worker") {
+      if (!document.storage_path) {
+        throw new Error("This document does not have a stored file to process.");
+      }
+
+      const { data, error } = await supabase.storage
+        .from(document.storage_bucket || DOCUMENT_STORAGE_BUCKET)
+        .download(document.storage_path);
+
+      if (error || !data) {
+        throw new Error(error?.message || "Unable to load the stored document for OCR.");
+      }
+      storedFile = data;
+    }
+
     const extraction = await runOcrExtraction({
       documentId: document.id,
       workspaceId: document.workspace_id,
@@ -136,6 +155,7 @@ export async function POST(request: NextRequest) {
       storagePath: document.storage_path,
       notes: document.notes,
       documentType: document.document_type ?? document.detected_type,
+      file: storedFile,
     });
 
     const extractedJson = {

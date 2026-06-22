@@ -1,8 +1,15 @@
+import "server-only";
+
+import { runOcrWorker } from "@/lib/ocr/workerClient";
+
 export type OcrProviderMode =
   | "mock"
   | "manual"
+  | "worker"
   | "future_openai"
   | "future_google_document_ai";
+
+export type OcrProviderName = OcrProviderMode | "ocrmypdf-tesseract";
 
 export type OcrInput = {
   documentId: string;
@@ -12,6 +19,7 @@ export type OcrInput = {
   storagePath?: string | null;
   notes?: string | null;
   documentType?: string | null;
+  file?: Blob | ArrayBuffer | Uint8Array;
 };
 
 export type OcrStructuredData = {
@@ -25,7 +33,7 @@ export type OcrStructuredData = {
 };
 
 export type OcrExtractionResult = {
-  provider: OcrProviderMode;
+  provider: OcrProviderName;
   text: string;
   structuredData: OcrStructuredData;
   confidence: number;
@@ -95,12 +103,19 @@ function createManualProvider(): OcrProvider {
 export function getOcrProviderMode(): OcrProviderMode {
   const configured = process.env.FRONTIER_OCR_PROVIDER as OcrProviderMode | undefined;
   if (
+    configured === "mock" ||
     configured === "manual" ||
+    configured === "worker" ||
     configured === "future_openai" ||
     configured === "future_google_document_ai"
   ) {
     return configured;
   }
+
+  if (process.env.OCR_WORKER_URL?.trim() && process.env.OCR_SHARED_SECRET?.trim()) {
+    return "worker";
+  }
+
   return "mock";
 }
 
@@ -123,6 +138,37 @@ export function createOcrProvider(): OcrProvider {
 }
 
 export async function runOcrExtraction(input: OcrInput): Promise<OcrExtractionResult> {
+  const mode = getOcrProviderMode();
+
+  if (mode === "worker") {
+    if (!input.file) throw new Error("The stored PDF could not be loaded for OCR.");
+
+    const result = await runOcrWorker({
+      file: input.file,
+      fileName: input.fileName,
+      contentType: input.mimeType || "application/pdf",
+    });
+
+    if (!result.ok) throw new Error(result.error.message);
+
+    const structuredData: OcrStructuredData = {
+      documentType: normalizeDocumentType(input.documentType),
+      summary: result.data.text.split("\n").find(Boolean)?.slice(0, 180) || "OCR completed.",
+      fields: {
+        fileName: input.fileName || "",
+        mimeType: input.mimeType || "",
+        storagePath: input.storagePath || "",
+      },
+    };
+
+    return {
+      provider: result.data.provider,
+      text: result.data.text,
+      structuredData,
+      confidence: 0.7,
+    };
+  }
+
   const provider = createOcrProvider();
   const text = await provider.extractTextFromDocument(input);
   const structuredData = await provider.extractStructuredData(input, text);
