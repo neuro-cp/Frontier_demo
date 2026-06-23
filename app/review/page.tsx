@@ -16,6 +16,10 @@ import type { ClientRow } from "@/lib/clientTypes";
 import type { Job } from "@/lib/jobTypes";
 import { getAiFormTarget, saveAiFormHydration } from "@/lib/ai/formHydration";
 import {
+  normalizeImageForAi,
+  type NormalizedImageResult,
+} from "@/lib/images/normalizeImage";
+import {
   advanceVoiceSession,
   createVoiceSession,
   type VoiceClarificationResponse,
@@ -129,9 +133,12 @@ export default function ReviewQueuePage() {
   const [isGeneratingTranscriptDraft, setIsGeneratingTranscriptDraft] =
     useState(false);
   const [imageFile, setImageFile] = useState<File | null>(null);
+  const [originalImageFile, setOriginalImageFile] = useState<File | null>(null);
   const [imagePreviewUrl, setImagePreviewUrl] = useState("");
   const [imageAnalysis, setImageAnalysis] =
     useState<ImageAnalysisResponse["analysis"] | null>(null);
+  const [imageNormalization, setImageNormalization] =
+    useState<NormalizedImageResult | null>(null);
   const [isAnalyzingImage, setIsAnalyzingImage] = useState(false);
   const [voiceTurns, setVoiceTurns] = useState<VoiceTurn[]>([]);
   const [isVoiceSessionActive, setIsVoiceSessionActive] = useState(false);
@@ -509,11 +516,33 @@ export default function ReviewQueuePage() {
     await transcribeAudioSource(audioFile, audioFile.name);
   }
 
-  function selectImageFile(file: File | null) {
+  async function selectImageFile(file: File | null) {
     if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
-    setImageFile(file);
+    setOriginalImageFile(file);
+    setImageNormalization(null);
     setImageAnalysis(null);
-    setImagePreviewUrl(file ? URL.createObjectURL(file) : "");
+    setError("");
+
+    if (!file) {
+      setImageFile(null);
+      setImagePreviewUrl("");
+      return;
+    }
+
+    try {
+      const normalized = await normalizeImageForAi(file);
+      setImageNormalization(normalized);
+      setImageFile(normalized.file);
+      setImagePreviewUrl(URL.createObjectURL(normalized.file));
+    } catch (normalizationError) {
+      setImageFile(null);
+      setImagePreviewUrl("");
+      setError(
+        normalizationError instanceof Error
+          ? normalizationError.message
+          : "Unable to normalize image."
+      );
+    }
   }
 
   async function analyzeImage() {
@@ -527,6 +556,13 @@ export default function ReviewQueuePage() {
       formData.append("workspaceId", activeWorkspace.id);
       formData.append("sourceLabel", imageFile.name);
       formData.append("file", imageFile);
+      if (
+        originalImageFile &&
+        originalImageFile !== imageFile &&
+        originalImageFile.type.startsWith("image/")
+      ) {
+        formData.append("fallbackFile", originalImageFile);
+      }
 
       const response = await fetch("/api/images/analyze", {
         method: "POST",
@@ -1098,7 +1134,9 @@ export default function ReviewQueuePage() {
                   type="file"
                   accept="image/jpeg,image/jpg,image/png,image/webp"
                   capture="environment"
-                  onChange={(event) => selectImageFile(event.target.files?.[0] ?? null)}
+                  onChange={(event) => {
+                    void selectImageFile(event.target.files?.[0] ?? null);
+                  }}
                   className="block w-full text-sm file:mr-4 file:rounded-lg file:border-0 file:bg-gray-100 file:px-4 file:py-2 file:font-semibold dark:file:bg-gray-800"
                 />
                 <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
@@ -1127,6 +1165,13 @@ export default function ReviewQueuePage() {
                   <div className="mt-1 text-gray-600 dark:text-gray-400">
                     {imageFile?.type || "Unknown type"} {imageFile?.size ? `- ${imageFile.size} bytes` : ""}
                   </div>
+                  {imageNormalization && (
+                    <div className="mt-1 text-gray-600 dark:text-gray-400">
+                      {imageNormalization.normalizationStatus.replace("_", " ")}:
+                      {" "}
+                      {imageNormalization.originalSizeBytes} bytes to {imageNormalization.normalizedSizeBytes} bytes
+                    </div>
+                  )}
                   {imageAnalysis && (
                     <pre className="mt-3 max-h-48 overflow-auto rounded-lg bg-gray-950 p-3 text-xs text-gray-100">
                       {JSON.stringify(imageAnalysis, null, 2)}

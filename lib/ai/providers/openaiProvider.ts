@@ -17,7 +17,7 @@ export function createOpenAiProvider(): AiProviderClient {
 
   return {
     name: "openai",
-    async completeJson(request: AiProviderRequest) {
+    async completeText(request: AiProviderRequest) {
       const controller = new AbortController();
       const timeout = setTimeout(
         () => controller.abort(),
@@ -47,7 +47,7 @@ export function createOpenAiProvider(): AiProviderClient {
             ],
             response_format: { type: "json_object" },
             temperature: 0,
-            max_tokens: 220,
+            max_tokens: request.maxTokens ?? (request.imageDataUrl ? 700 : 220),
           }),
         });
 
@@ -58,7 +58,7 @@ export function createOpenAiProvider(): AiProviderClient {
         const data = (await response.json()) as {
           choices?: Array<{ message?: { content?: string } }>;
         };
-        return extractJsonObject(data.choices?.[0]?.message?.content ?? "");
+        return data.choices?.[0]?.message?.content ?? "";
       } catch (error) {
         if (error instanceof AiProviderError) throw error;
         if (error instanceof Error && error.name === "AbortError") {
@@ -68,6 +68,9 @@ export function createOpenAiProvider(): AiProviderClient {
       } finally {
         clearTimeout(timeout);
       }
+    },
+    async completeJson(request: AiProviderRequest) {
+      return extractJsonObject(await this.completeText(request));
     },
   };
 }

@@ -50,6 +50,7 @@ export function validateSuggestedAction(action: SuggestedAction): AiValidationRe
       message: `Unsupported action type: ${action.type}.`,
       path: "type",
     });
+    return { ok: false, warnings };
   }
 
   if (action.confidence < CONFIDENCE_THRESHOLDS.suggestedAction) {

@@ -676,9 +676,15 @@ async function executeCreateInvoice(
   const matchedClient = await findClientByName(
     serviceClient,
     workspaceId,
-    textValue(payload.clientName) || textValue(payload.client)
+    textValue(payload.clientName) ||
+      textValue(payload.billToName) ||
+      textValue(payload.billToCompany) ||
+      textValue(payload.client)
   );
-  const invoiceDate = dateValue(payload.invoiceDate) || new Date().toISOString().slice(0, 10);
+  const invoiceDate =
+    dateValue(payload.invoiceDate) ||
+    dateValue(payload.date) ||
+    new Date().toISOString().slice(0, 10);
   const invoice: InvoiceRow = {
     id: crypto.randomUUID(),
     workspaceId,
@@ -687,26 +693,33 @@ async function executeCreateInvoice(
     invoiceDate,
     sourceClientId: matchedClient?.id,
     jobId: textValue(payload.jobId) || undefined,
-    companyName: "",
-    companyAddress: "",
-    companyCity: "",
-    companyState: "",
-    companyZip: "",
-    companyPhone: "",
-    companyEmail: "",
-    billToName: matchedClient?.name ?? optionalTextValue(payload.clientName),
-    billToCompany: "",
-    billToAddress: "",
-    billToCity: "",
-    billToState: "",
-    billToZip: "",
-    billToPhone: "",
-    billToEmail: "",
+    companyName: optionalTextValue(payload.companyName),
+    companyAddress: optionalTextValue(payload.companyAddress),
+    companyCity: optionalTextValue(payload.companyCity),
+    companyState: optionalTextValue(payload.companyState),
+    companyZip: optionalTextValue(payload.companyZip),
+    companyPhone: optionalTextValue(payload.companyPhone),
+    companyEmail: optionalTextValue(payload.companyEmail),
+    billToName:
+      matchedClient?.name ??
+      optionalTextValue(payload.billToName) ??
+      optionalTextValue(payload.clientName),
+    billToCompany: optionalTextValue(payload.billToCompany),
+    billToAddress:
+      matchedClient?.address ??
+      optionalTextValue(payload.billToAddress),
+    billToCity: matchedClient?.city ?? optionalTextValue(payload.billToCity),
+    billToState: matchedClient?.state ?? optionalTextValue(payload.billToState),
+    billToZip: matchedClient?.zip ?? optionalTextValue(payload.billToZip),
+    billToPhone: matchedClient?.phone ?? optionalTextValue(payload.billToPhone),
+    billToEmail: matchedClient?.email ?? optionalTextValue(payload.billToEmail),
     lineItems: lineItemsFromPayload(payload),
     discountType: "None",
     discountValue: "0",
     taxRate: String(numberValue(payload.taxRate)),
-    footerMessage: "",
+    footerMessage:
+      optionalTextValue(payload.notes) ??
+      optionalTextValue(payload.paymentInstructions),
     contactMessage: "",
     status: "Draft",
   };

@@ -177,7 +177,11 @@ function NewInvoiceContent() {
       setSelectedClientId(payloadString(payload, "clientId") || "new");
       setSelectedJobId(payloadString(payload, "jobId"));
       setInvoiceNumber(payloadString(payload, "invoiceNumber"));
-      setInvoiceDate(payloadString(payload, "date") || getTodayDate());
+      setInvoiceDate(
+        payloadString(payload, "invoiceDate") ||
+          payloadString(payload, "date") ||
+          getTodayDate()
+      );
       setBillToName(payloadString(payload, "clientName") || payloadString(payload, "billToName"));
       setBillToCompany(payloadString(payload, "billToCompany"));
       setBillToAddress(payloadString(payload, "billToAddress"));
@@ -186,7 +190,11 @@ function NewInvoiceContent() {
       setBillToZip(payloadString(payload, "billToZip"));
       setBillToPhone(payloadString(payload, "billToPhone"));
       setBillToEmail(payloadString(payload, "billToEmail"));
-      setFooterMessage(payloadString(payload, "notes") || "Thank you for your business!");
+      setFooterMessage(
+        payloadString(payload, "notes") ||
+          payloadString(payload, "paymentInstructions") ||
+          "Thank you for your business!"
+      );
     });
   }, [activeWorkspace.id]);
 

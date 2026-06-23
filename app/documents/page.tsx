@@ -21,6 +21,10 @@ import { createJobsRepository } from "@/lib/db/jobs";
 import type { InvoiceRow } from "@/lib/frontierInvoices";
 import type { Job } from "@/lib/jobTypes";
 import {
+  normalizeImageForAi,
+  type NormalizedImageResult,
+} from "@/lib/images/normalizeImage";
+import {
   DOCUMENT_STORAGE_BUCKET,
   buildDocumentStoragePath,
   createDocumentDownloadUrl,
@@ -58,6 +62,20 @@ type ApiDocument = {
   reviewed_by?: string | null;
   confidence?: number | null;
   document_type?: string | null;
+  original_file_name?: string | null;
+  original_mime_type?: string | null;
+  original_size_bytes?: number | null;
+  normalized_file_name?: string | null;
+  normalized_mime_type?: string | null;
+  normalized_size_bytes?: number | null;
+  normalization_status?: string | null;
+};
+
+type ApiReviewDraft = {
+  id: string;
+  sourceId: string | null;
+  sourceType: string;
+  status?: string | null;
 };
 
 function getJobDisplayName(job: Job) {
@@ -93,6 +111,13 @@ function apiDocumentToStoredDocument(document: ApiDocument): StoredDocument {
     reviewedBy: document.reviewed_by ?? "",
     confidence: document.confidence ?? null,
     documentType: document.document_type ?? document.detected_type ?? "",
+    originalFileName: document.original_file_name ?? "",
+    originalMimeType: document.original_mime_type ?? "",
+    originalSizeBytes: document.original_size_bytes ?? undefined,
+    normalizedFileName: document.normalized_file_name ?? "",
+    normalizedMimeType: document.normalized_mime_type ?? "",
+    normalizedSizeBytes: document.normalized_size_bytes ?? undefined,
+    normalizationStatus: document.normalization_status ?? "",
   };
 }
 
@@ -129,6 +154,8 @@ export default function DocumentsPage() {
   const [mimeType, setMimeType] = useState("");
   const [sizeBytes, setSizeBytes] = useState(0);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [originalSelectedFile, setOriginalSelectedFile] = useState<File | null>(null);
+  const [normalization, setNormalization] = useState<NormalizedImageResult | null>(null);
   const [notes, setNotes] = useState("");
   const [clientId, setClientId] = useState("");
   const [jobId, setJobId] = useState("");
@@ -139,6 +166,8 @@ export default function DocumentsPage() {
   const [processingDocumentIds, setProcessingDocumentIds] = useState<string[]>([]);
   const [draftingDocumentIds, setDraftingDocumentIds] = useState<string[]>([]);
   const [analyzingImageDocumentIds, setAnalyzingImageDocumentIds] = useState<string[]>([]);
+  const [reviewDraftByDocumentId, setReviewDraftByDocumentId] = useState<Record<string, string>>({});
+  const [reviewDraftStatusByDocumentId, setReviewDraftStatusByDocumentId] = useState<Record<string, string>>({});
   const [reviewDocumentId, setReviewDocumentId] = useState("");
   const [reviewDocumentType, setReviewDocumentType] = useState("unknown");
   const [reviewText, setReviewText] = useState("");
@@ -176,6 +205,43 @@ export default function DocumentsPage() {
       });
     return () => { cancelled = true; };
   }, [activeWorkspace.id, clientsRepo, documentsRepo, invoicesRepo, isDatabaseMode, jobsRepo]);
+
+  useEffect(() => {
+    if (!isDatabaseMode) {
+      queueMicrotask(() => {
+        setReviewDraftByDocumentId({});
+        setReviewDraftStatusByDocumentId({});
+      });
+      return;
+    }
+
+    let cancelled = false;
+    fetch(`/api/ai/review-drafts?workspaceId=${encodeURIComponent(activeWorkspace.id)}`)
+      .then((response) => response.json())
+      .then((payload: { reviewDrafts?: ApiReviewDraft[] }) => {
+        if (cancelled) return;
+        const next: Record<string, string> = {};
+        const nextStatus: Record<string, string> = {};
+        for (const draft of payload.reviewDrafts ?? []) {
+          if (draft.sourceId && (draft.sourceType === "ocr" || draft.sourceType === "image")) {
+            next[draft.sourceId] = draft.id;
+            nextStatus[draft.sourceId] = draft.status ?? "Pending";
+          }
+        }
+        setReviewDraftByDocumentId(next);
+        setReviewDraftStatusByDocumentId(nextStatus);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setReviewDraftByDocumentId({});
+          setReviewDraftStatusByDocumentId({});
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeWorkspace.id, isDatabaseMode]);
 
   const workspaceDocuments = documents.filter(
     (document) => document.workspaceId === activeWorkspace.id
@@ -218,6 +284,8 @@ export default function DocumentsPage() {
     setMimeType("");
     setSizeBytes(0);
     setSelectedFile(null);
+    setOriginalSelectedFile(null);
+    setNormalization(null);
     setNotes("");
     setClientId("");
     setJobId("");
@@ -272,6 +340,13 @@ export default function DocumentsPage() {
       invoiceId,
       createdAt: new Date().toISOString(),
       uploadedBy: user?.id,
+      originalFileName: normalization?.originalFileName || originalSelectedFile?.name || selectedFile?.name || "",
+      originalMimeType: normalization?.originalMimeType || originalSelectedFile?.type || selectedFile?.type || "",
+      originalSizeBytes: normalization?.originalSizeBytes ?? originalSelectedFile?.size ?? selectedFile?.size,
+      normalizedFileName: normalization?.normalizedFileName || selectedFile?.name || "",
+      normalizedMimeType: normalization?.normalizedMimeType || selectedFile?.type || "",
+      normalizedSizeBytes: normalization?.normalizedSizeBytes ?? selectedFile?.size,
+      normalizationStatus: normalization?.normalizationStatus || (selectedFile?.type.startsWith("image/") ? "kept_original" : "not_applicable"),
     };
 
     try {
@@ -435,6 +510,14 @@ export default function DocumentsPage() {
         throw new Error(payload.error || "Unable to generate review draft.");
       }
 
+      setReviewDraftByDocumentId((current) => ({
+        ...current,
+        [document.id]: payload.reviewDraft?.id ?? "",
+      }));
+      setReviewDraftStatusByDocumentId((current) => ({
+        ...current,
+        [document.id]: "Pending",
+      }));
       setDocumentNotice("AI review draft created. Open Review Queue to approve it.");
     } catch (error) {
       setDocumentError(
@@ -451,6 +534,108 @@ export default function DocumentsPage() {
     return ["image/jpeg", "image/jpg", "image/png", "image/webp"].includes(
       (document.mimeType || "").toLowerCase()
     );
+  }
+
+  function isPdfDocument(document: StoredDocument) {
+    return (document.mimeType || "").toLowerCase() === "application/pdf";
+  }
+
+  function getDocumentStatus(document: StoredDocument) {
+    const draftStatus = reviewDraftStatusByDocumentId[document.id];
+    const isImage = isImageDocument(document);
+
+    if (draftStatus === "Approved") {
+      return {
+        label: isImage ? "approved" : "reviewed",
+        detail: isImage ? "Image draft approved" : "OCR draft approved",
+        className:
+          "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300",
+      };
+    }
+    if (draftStatus === "Rejected") {
+      return {
+        label: "rejected",
+        detail: isImage ? "Image draft rejected" : "OCR draft rejected",
+        className: "bg-red-100 text-red-800 dark:bg-red-950/50 dark:text-red-300",
+      };
+    }
+    if (draftStatus === "Needs Changes") {
+      return {
+        label: "needs changes",
+        detail: isImage ? "Image draft needs changes" : "OCR draft needs changes",
+        className: "bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300",
+      };
+    }
+    if (draftStatus === "Pending") {
+      return {
+        label: isImage ? "analyzed" : "needs review",
+        detail: isImage ? "Image draft pending" : "AI draft pending",
+        className: "bg-blue-100 text-blue-800 dark:bg-blue-950/50 dark:text-blue-300",
+      };
+    }
+    if (isImage) {
+      return {
+        label: document.processingStatus === "reviewed" ? "analyzed" : "uploaded",
+        detail: document.processingStatus === "reviewed" ? "Image analyzed" : "Image uploaded",
+        className: "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200",
+      };
+    }
+
+    const reviewed = document.extractionStatus.toLowerCase() === "reviewed";
+    const processing = document.processingStatus === "processing";
+    const hasExtraction = Boolean(document.extractedText || document.extractedJson);
+    return {
+      label: reviewed
+        ? "reviewed"
+        : processing
+          ? "processing"
+          : hasExtraction
+            ? "needs review"
+            : "uploaded",
+      detail: `OCR: ${document.processingStatus || "uploaded"}`,
+      className: reviewed
+        ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300"
+        : processing || hasExtraction
+          ? "bg-yellow-100 text-yellow-800 dark:bg-yellow-950/50 dark:text-yellow-300"
+          : "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200",
+    };
+  }
+
+  async function handleSelectedFile(file: File | null) {
+    setOriginalSelectedFile(file);
+    setDocumentError("");
+    setNormalization(null);
+
+    if (!file) {
+      setSelectedFile(null);
+      setFileName("");
+      setMimeType("");
+      setSizeBytes(0);
+      return;
+    }
+
+    if (!file.type.startsWith("image/")) {
+      setSelectedFile(file);
+      setFileName(file.name);
+      setMimeType(file.type);
+      setSizeBytes(file.size);
+      return;
+    }
+
+    try {
+      const normalized = await normalizeImageForAi(file);
+      setNormalization(normalized);
+      setSelectedFile(normalized.file);
+      setFileName(normalized.file.name);
+      setMimeType(normalized.file.type);
+      setSizeBytes(normalized.file.size);
+    } catch (error) {
+      setSelectedFile(null);
+      setFileName("");
+      setMimeType("");
+      setSizeBytes(0);
+      setDocumentError(error instanceof Error ? error.message : "Unable to normalize image.");
+    }
   }
 
   async function analyzeImageDocument(document: StoredDocument) {
@@ -485,6 +670,14 @@ export default function DocumentsPage() {
       if (!response.ok || !payload.reviewDraft) {
         throw new Error(payload.error || "Unable to analyze image.");
       }
+      setReviewDraftByDocumentId((current) => ({
+        ...current,
+        [document.id]: payload.reviewDraft?.id ?? "",
+      }));
+      setReviewDraftStatusByDocumentId((current) => ({
+        ...current,
+        [document.id]: "Pending",
+      }));
       setDocumentNotice("Image analysis draft created. Open Review Queue to approve it.");
     } catch (error) {
       setDocumentError(error instanceof Error ? error.message : "Unable to analyze image.");
@@ -500,6 +693,21 @@ export default function DocumentsPage() {
     setReviewDocumentType(document.documentType || "unknown");
     setReviewText(document.extractedText || "");
     setReviewJsonText(JSON.stringify(document.extractedJson ?? {}, null, 2));
+  }
+
+  function openReviewQueue(draftId?: string) {
+    window.location.assign(draftId ? `/review?draftId=${encodeURIComponent(draftId)}` : "/review");
+  }
+
+  async function handleDocumentAction(document: StoredDocument, action: string) {
+    if (!action) return;
+    if (action === "run-ocr") return runOcr(document);
+    if (action === "review-ocr") return openReview(document);
+    if (action === "generate-draft") return generateDraft(document);
+    if (action === "analyze-image") return analyzeImageDocument(document);
+    if (action === "review-draft") return openReviewQueue(reviewDraftByDocumentId[document.id]);
+    if (action === "download") return downloadDocument(document);
+    if (action === "delete") return deleteDocument(document.id);
   }
 
   function closeReview() {
@@ -566,7 +774,7 @@ export default function DocumentsPage() {
 
   return (
     <div className="space-y-8">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
         <button
           type="button"
           onClick={() => setIsUploadOpen(true)}
@@ -574,6 +782,15 @@ export default function DocumentsPage() {
         >
           + Upload Document
         </button>
+        {isDatabaseMode && (
+          <button
+            type="button"
+            onClick={() => openReviewQueue()}
+            className="w-full rounded-lg border border-gray-300 px-6 py-3 text-center font-semibold text-gray-950 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-100 dark:hover:bg-gray-800 sm:w-auto"
+          >
+            Open Review Queue
+          </button>
+        )}
       </div>
 
       <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-200">
@@ -593,8 +810,17 @@ export default function DocumentsPage() {
       )}
 
       {documentNotice && (
-        <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm font-semibold text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300">
-          {documentNotice}
+        <div className="flex flex-col gap-3 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm font-semibold text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300 sm:flex-row sm:items-center sm:justify-between">
+          <span>{documentNotice}</span>
+          {documentNotice.includes("Review Queue") && (
+            <button
+              type="button"
+              onClick={() => openReviewQueue()}
+              className="rounded-lg border border-emerald-300 px-3 py-2 text-sm font-bold hover:bg-emerald-100 dark:border-emerald-800 dark:hover:bg-emerald-950"
+            >
+              Open Review Queue
+            </button>
+          )}
         </div>
       )}
 
@@ -604,7 +830,7 @@ export default function DocumentsPage() {
             <tr className="border-b border-gray-200 text-left text-sm uppercase tracking-wide text-gray-500 dark:border-gray-800 dark:text-gray-400">
               <th className="px-6 py-4">Name</th>
               <th className="px-6 py-4">Detected Type</th>
-              <th className="px-6 py-4">Extraction Status</th>
+              <th className="px-6 py-4">Status</th>
               <th className="px-6 py-4">Client</th>
               <th className="px-6 py-4">Job</th>
               <th className="px-6 py-4">File</th>
@@ -624,12 +850,24 @@ export default function DocumentsPage() {
                 </td>
               </tr>
             ) : (
-              workspaceDocuments.map((document) => (
-                <tr
-                  key={document.id}
-                  id={`document-${document.id}`}
-                  className="border-b border-gray-100 dark:border-gray-800"
-                >
+              workspaceDocuments.map((document) => {
+                const isPdf = isPdfDocument(document);
+                const isImage = isImageDocument(document);
+                const draftId = reviewDraftByDocumentId[document.id];
+                const hasOcrReview = Boolean(document.extractedText || document.extractedJson);
+                const isProcessing =
+                  processingDocumentIds.includes(document.id) ||
+                  document.processingStatus === "processing";
+                const isDrafting = draftingDocumentIds.includes(document.id);
+                const isAnalyzing = analyzingImageDocumentIds.includes(document.id);
+                const documentStatus = getDocumentStatus(document);
+
+                return (
+                  <tr
+                    key={document.id}
+                    id={`document-${document.id}`}
+                    className="border-b border-gray-100 dark:border-gray-800"
+                  >
                   <td className="px-6 py-4 font-semibold">{document.name}</td>
 
                   <td className="px-6 py-4 text-gray-600 dark:text-gray-300">
@@ -637,13 +875,13 @@ export default function DocumentsPage() {
                   </td>
 
                   <td className="px-6 py-4">
-                    <span className="rounded-full bg-yellow-100 px-3 py-1 text-sm font-semibold text-yellow-800 dark:bg-yellow-950/50 dark:text-yellow-300">
-                      {document.extractionStatus}
+                    <span className={`rounded-full px-3 py-1 text-sm font-semibold ${documentStatus.className}`}>
+                      {documentStatus.label}
                     </span>
                     <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                      OCR: {document.processingStatus || "uploaded"}
+                      {documentStatus.detail}
                     </div>
-                    {document.ocrProvider && (
+                    {isPdf && document.ocrProvider && (
                       <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                         Provider: {document.ocrProvider}
                       </div>
@@ -669,78 +907,41 @@ export default function DocumentsPage() {
                     </div>
                   </td>
 
-                  <td className="px-6 py-4 text-right">
-                    <div className="flex flex-wrap justify-end gap-2">
-                      <button
-                        type="button"
-                        onClick={() => runOcr(document)}
-                        disabled={
-                          !isDatabaseMode ||
-                          processingDocumentIds.includes(document.id) ||
-                          document.processingStatus === "processing"
-                        }
-                        className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                    <td className="px-6 py-4 text-right">
+                      <select
+                        aria-label={`Actions for ${document.name}`}
+                        value=""
+                        disabled={isProcessing || isDrafting || isAnalyzing}
+                        onChange={(event) => {
+                          const action = event.target.value;
+                          event.currentTarget.value = "";
+                          void handleDocumentAction(document, action);
+                        }}
+                        className="w-44 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-semibold text-gray-950 shadow-sm dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100"
                       >
-                        {processingDocumentIds.includes(document.id) ||
-                        document.processingStatus === "processing"
-                          ? "Processing..."
-                          : "Run OCR"}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => openReview(document)}
-                        disabled={!document.extractedText && !document.extractedJson}
-                        className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:hover:bg-gray-800"
-                      >
-                        Review
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => generateDraft(document)}
-                        disabled={
-                          !isDatabaseMode ||
-                          !document.extractedText ||
-                          draftingDocumentIds.includes(document.id)
-                        }
-                        className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        {draftingDocumentIds.includes(document.id)
-                          ? "Generating..."
-                          : "Generate Draft"}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => analyzeImageDocument(document)}
-                        disabled={
-                          !isDatabaseMode ||
-                          !isImageDocument(document) ||
-                          analyzingImageDocumentIds.includes(document.id)
-                        }
-                        className="rounded-lg bg-purple-600 px-4 py-2 text-sm font-semibold text-white hover:bg-purple-700 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        {analyzingImageDocumentIds.includes(document.id)
-                          ? "Analyzing..."
-                          : "Analyze Image"}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => downloadDocument(document)}
-                        className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold hover:bg-gray-100 dark:border-gray-700 dark:hover:bg-gray-800"
-                      >
-                        Download
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => deleteDocument(document.id)}
-                        disabled={!canDeleteBusinessRecords}
-                        className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))
+                        <option value="">
+                          {isProcessing
+                            ? "Processing..."
+                            : isDrafting
+                              ? "Generating..."
+                              : isAnalyzing
+                                ? "Analyzing..."
+                                : "Actions"}
+                        </option>
+                        {isPdf && isDatabaseMode && <option value="run-ocr">Run OCR</option>}
+                        {isPdf && hasOcrReview && <option value="review-ocr">Review OCR</option>}
+                        {isPdf && isDatabaseMode && document.extractedText && (
+                          <option value="generate-draft">Generate Draft</option>
+                        )}
+                        {isImage && isDatabaseMode && <option value="analyze-image">Analyze Image</option>}
+                        {draftId && <option value="review-draft">Review Draft</option>}
+                        {isDatabaseMode && document.storagePath && <option value="download">Download</option>}
+                        {canDeleteBusinessRecords && <option value="delete">Delete</option>}
+                      </select>
+                    </td>
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>
@@ -978,13 +1179,18 @@ export default function DocumentsPage() {
                   type="file"
                   onChange={(event) => {
                     const file = event.target.files?.[0];
-                    setSelectedFile(file ?? null);
-                    setFileName(file?.name ?? "");
-                    setMimeType(file?.type ?? "");
-                    setSizeBytes(file?.size ?? 0);
+                    void handleSelectedFile(file ?? null);
                   }}
                   className="block w-full text-sm text-gray-900 dark:text-gray-100"
                 />
+                {normalization && (
+                  <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
+                    Image {normalization.normalizationStatus.replace("_", " ")}:
+                    {" "}
+                    {normalization.originalSizeBytes} bytes to {normalization.normalizedSizeBytes} bytes
+                    ({normalization.normalizedMimeType}).
+                  </p>
+                )}
               </div>
 
               <div>

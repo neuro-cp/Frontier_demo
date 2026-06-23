@@ -1058,6 +1058,13 @@ CREATE TABLE IF NOT EXISTS "public"."documents" (
     "document_type" "text",
     "material_catalog_item_id" "uuid",
     "job_material_allocation_id" "uuid",
+    "original_file_name" "text",
+    "original_mime_type" "text",
+    "original_size_bytes" bigint,
+    "normalized_file_name" "text",
+    "normalized_mime_type" "text",
+    "normalized_size_bytes" bigint,
+    "normalization_status" "text",
     CONSTRAINT "documents_processing_status_check" CHECK (("processing_status" = ANY (ARRAY['uploaded'::"text", 'queued'::"text", 'processing'::"text", 'needs_review'::"text", 'reviewed'::"text", 'failed'::"text"])))
 );
 

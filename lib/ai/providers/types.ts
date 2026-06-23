@@ -33,10 +33,12 @@ export type AiProviderRequest = {
   model: string;
   imageDataUrl?: string;
   timeoutMs?: number;
+  maxTokens?: number;
 };
 
 export type AiProviderClient = {
   name: AiProviderName;
+  completeText(request: AiProviderRequest): Promise<string>;
   completeJson(request: AiProviderRequest): Promise<unknown>;
 };
 

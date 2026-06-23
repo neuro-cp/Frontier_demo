@@ -26,6 +26,21 @@ function toDataUrl(mimeType: string, bytes: ArrayBuffer) {
   return `data:${mimeType};base64,${Buffer.from(bytes).toString("base64")}`;
 }
 
+async function readImageFile(file: File) {
+  const mimeType = file.type || "";
+  if (!isSupportedImageType(mimeType)) {
+    throw new Error("Only JPG, PNG, and WebP images are supported.");
+  }
+  if (file.size > maxImageBytes) {
+    throw new Error("Image must be 10 MB or smaller.");
+  }
+  return {
+    bytes: await file.arrayBuffer(),
+    mimeType,
+    label: file.name || "Image upload",
+  };
+}
+
 export async function POST(request: NextRequest) {
   let formData: FormData;
   try {
@@ -38,6 +53,7 @@ export async function POST(request: NextRequest) {
   const documentId = formData.get("documentId");
   const sourceLabel = formData.get("sourceLabel");
   const file = formData.get("file");
+  const fallbackFile = formData.get("fallbackFile");
 
   if (typeof workspaceId !== "string") {
     return jsonError("Workspace is required.", 400);
@@ -69,16 +85,25 @@ export async function POST(request: NextRequest) {
       ? sourceLabel.trim()
       : "Image upload";
   let sourceId: string | undefined;
+  let fallbackImage:
+    | { bytes: ArrayBuffer; mimeType: string; label: string }
+    | null = null;
 
   if (file instanceof File) {
-    mimeType = file.type || "";
-    if (!isSupportedImageType(mimeType)) {
-      return jsonError("Only JPG, PNG, and WebP images are supported.", 400);
+    let primaryImage: Awaited<ReturnType<typeof readImageFile>>;
+    try {
+      primaryImage = await readImageFile(file);
+      if (fallbackFile instanceof File) {
+        fallbackImage = await readImageFile(fallbackFile);
+      }
+    } catch (error) {
+      return jsonError(
+        error instanceof Error ? error.message : "Invalid image upload.",
+        400
+      );
     }
-    if (file.size > maxImageBytes) {
-      return jsonError("Image must be 10 MB or smaller.", 413);
-    }
-    imageBytes = await file.arrayBuffer();
+    mimeType = primaryImage.mimeType;
+    imageBytes = primaryImage.bytes;
     label = sourceLabel?.toString().trim() || file.name || label;
   } else if (typeof documentId === "string" && documentId.trim()) {
     const { data: document, error } = await access.serviceClient
@@ -116,13 +141,53 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const interpretation = await interpretImageWithAI({
-      workspaceId,
-      sourceId,
-      imageDataUrl: toDataUrl(mimeType, imageBytes),
-      mimeType,
-      sourceLabel: label,
-    });
+    let usedFullResolutionRetry = false;
+    let interpretation;
+
+    try {
+      interpretation = await interpretImageWithAI({
+        workspaceId,
+        sourceId,
+        imageDataUrl: toDataUrl(mimeType, imageBytes),
+        mimeType,
+        sourceLabel: label,
+      });
+    } catch (primaryError) {
+      if (!fallbackImage || fallbackImage.bytes.byteLength === imageBytes.byteLength) {
+        throw primaryError;
+      }
+      interpretation = await interpretImageWithAI({
+        workspaceId,
+        sourceId,
+        imageDataUrl: toDataUrl(fallbackImage.mimeType, fallbackImage.bytes),
+        mimeType: fallbackImage.mimeType,
+        sourceLabel: `${fallbackImage.label} full resolution retry`,
+      });
+      usedFullResolutionRetry = true;
+    }
+
+    if (
+      fallbackImage &&
+      fallbackImage.bytes.byteLength !== imageBytes.byteLength &&
+      !usedFullResolutionRetry
+    ) {
+      try {
+        if (!interpretation.result.actions.length) {
+          interpretation = await interpretImageWithAI({
+            workspaceId,
+            sourceId,
+            imageDataUrl: toDataUrl(fallbackImage.mimeType, fallbackImage.bytes),
+            mimeType: fallbackImage.mimeType,
+            sourceLabel: `${fallbackImage.label} full resolution retry`,
+          });
+          usedFullResolutionRetry = true;
+        }
+      } catch (retryError) {
+        console.warn("Full resolution image retry failed.", {
+          message: retryError instanceof Error ? retryError.message : "Unknown retry failure",
+        });
+      }
+    }
     const reviewDraft = await createReviewDraft(access.serviceClient, {
       reviewDraft: interpretation.reviewDraft,
       sourceLabel: label,
@@ -132,12 +197,25 @@ export async function POST(request: NextRequest) {
       createdBy: access.userId,
     });
 
+    console.info("Saved image review draft. " + JSON.stringify({
+      draftId: reviewDraft.id,
+      sourceId: reviewDraft.sourceId,
+      provider: interpretation.provider,
+      model: interpretation.model,
+      confidence: reviewDraft.confidence,
+      actionCount: reviewDraft.actions.length,
+      actionTypes: reviewDraft.actions.map((action) => action.type),
+      warnings: reviewDraft.warnings,
+      usedFullResolutionRetry,
+    }));
+
     return NextResponse.json({
       reviewDraft,
       analysis: {
         provider: interpretation.provider,
         model: interpretation.model,
         usedFallback: interpretation.usedFallback,
+        usedFullResolutionRetry,
         confidence: interpretation.result.confidence,
         warnings: interpretation.result.warnings,
         actions: interpretation.result.actions,
@@ -150,4 +228,3 @@ export async function POST(request: NextRequest) {
     );
   }
 }
-
