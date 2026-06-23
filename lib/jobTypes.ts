@@ -19,6 +19,7 @@ export type Job = {
   status: JobStatus;
   value: string;
   date: string;
+  time?: string;
   materials: JobMaterial[];
   notes?: string;
 };

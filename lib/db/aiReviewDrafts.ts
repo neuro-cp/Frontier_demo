@@ -21,6 +21,7 @@ export type AiReviewDraft = {
   sourceType: AiSourceType;
   sourceId: string | null;
   sourceLabel: string | null;
+  summary: string | null;
   status: AiReviewDraftStatus;
   confidence: number | null;
   warnings: InterpretationWarning[];
@@ -48,6 +49,7 @@ type DbAiReviewDraft = {
   source_type: AiSourceType;
   source_id: string | null;
   source_label: string | null;
+  summary: string | null;
   status: AiReviewDraftStatus;
   confidence: number | null;
   warnings: InterpretationWarning[];
@@ -94,6 +96,16 @@ export type UpdateAiReviewDraftExecutionInput = {
   executionError?: string | null;
 };
 
+export type AiReviewDraftRevision = {
+  id: string;
+  sourceLabel: string | null;
+  summary: string | null;
+  actions: SuggestedAction[];
+  warnings: InterpretationWarning[];
+  changedBy: string | null;
+  createdAt: string;
+};
+
 function dbToAiReviewDraft(row: DbAiReviewDraft): AiReviewDraft {
   return {
     id: row.id,
@@ -101,6 +113,7 @@ function dbToAiReviewDraft(row: DbAiReviewDraft): AiReviewDraft {
     sourceType: row.source_type,
     sourceId: row.source_id,
     sourceLabel: row.source_label,
+    summary: row.summary,
     status: row.status,
     confidence: row.confidence,
     warnings: row.warnings ?? [],
@@ -136,6 +149,7 @@ export async function createReviewDraft(
       source_type: reviewDraft.sourceType,
       source_id: reviewDraft.sourceId ?? null,
       source_label: input.sourceLabel ?? null,
+      summary: null,
       status: "Pending",
       confidence: reviewDraft.confidence,
       warnings: reviewDraft.warnings,
@@ -153,6 +167,59 @@ export async function createReviewDraft(
   }
 
   return dbToAiReviewDraft(data as DbAiReviewDraft);
+}
+
+export async function updateReviewDraftContent(
+  supabase: SupabaseClient,
+  input: {
+    id: string;
+    workspaceId: string;
+    sourceLabel: string;
+    summary: string;
+    actions: SuggestedAction[];
+  }
+) {
+  const { data, error } = await supabase
+    .from("ai_review_drafts")
+    .update({
+      source_label: input.sourceLabel.trim() || null,
+      summary: input.summary.trim() || null,
+      actions: input.actions,
+    })
+    .eq("id", input.id)
+    .eq("workspace_id", input.workspaceId)
+    .in("status", ["Pending", "Needs Changes"])
+    .neq("execution_status", "Executed")
+    .select("*")
+    .single();
+
+  if (error || !data) {
+    throw new Error(error?.message || "Unable to save review draft changes.");
+  }
+  return dbToAiReviewDraft(data as DbAiReviewDraft);
+}
+
+export async function getReviewDraftRevisions(
+  supabase: SupabaseClient,
+  workspaceId: string,
+  draftId: string
+) {
+  const { data, error } = await supabase
+    .from("ai_review_draft_revisions")
+    .select("id, source_label, summary, actions, warnings, changed_by, created_at")
+    .eq("workspace_id", workspaceId)
+    .eq("review_draft_id", draftId)
+    .order("created_at", { ascending: false });
+  if (error) throw new Error(error.message || "Unable to load draft revisions.");
+  return (data ?? []).map((row) => ({
+    id: row.id,
+    sourceLabel: row.source_label,
+    summary: row.summary,
+    actions: (row.actions ?? []) as SuggestedAction[],
+    warnings: (row.warnings ?? []) as InterpretationWarning[],
+    changedBy: row.changed_by,
+    createdAt: row.created_at,
+  })) as AiReviewDraftRevision[];
 }
 
 export async function updateReviewDraftExecution(

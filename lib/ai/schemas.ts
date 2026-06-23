@@ -132,6 +132,18 @@ export const ACTION_PAYLOAD_SCHEMAS: Record<AiActionType, ActionPayloadSchema> =
       notes: { type: "string" },
     },
   },
+  create_material_allocation: {
+    actionType: "create_material_allocation",
+    requiredFields: ["materials"],
+    fields: {
+      jobId: { type: "string" },
+      jobName: { type: "string" },
+      mode: { type: "string" },
+      materials: { type: "array", required: true },
+      notes: { type: "string" },
+      sourceDocumentId: { type: "string" },
+    },
+  },
   create_calendar_event: {
     actionType: "create_calendar_event",
     requiredFields: ["title", "date"],

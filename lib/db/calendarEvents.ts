@@ -4,9 +4,9 @@ import { assertUuid, isUuid } from "@/lib/db/ids";
 import { createSignedInRecord } from "@/lib/db/serverCreate";
 import { mutateSignedInRecord } from "@/lib/db/serverMutate";
 type Setter<T> = (value: T | ((current: T) => T)) => void;
-export type ClientCalendarEvent = { id: string; workspaceId: string; clientId: string; clientName: string; title: string; date: string };
-type DbEvent = { id: string; workspace_id: string; client_id: string | null; client_name_snapshot: string | null; title: string; event_date: string };
-const dbToEvent = (e: DbEvent): ClientCalendarEvent => ({ id: e.id, workspaceId: e.workspace_id, clientId: e.client_id ?? "", clientName: e.client_name_snapshot ?? "", title: e.title, date: e.event_date });
+export type ClientCalendarEvent = { id: string; workspaceId: string; clientId: string; clientName: string; title: string; date: string; time?: string };
+type DbEvent = { id: string; workspace_id: string; client_id: string | null; client_name_snapshot: string | null; title: string; event_date: string; event_time: string | null };
+const dbToEvent = (e: DbEvent): ClientCalendarEvent => ({ id: e.id, workspaceId: e.workspace_id, clientId: e.client_id ?? "", clientName: e.client_name_snapshot ?? "", title: e.title, date: e.event_date, time: e.event_time?.slice(0, 5) ?? "" });
 export function createCalendarEventsRepository({ isSignedIn, supabase, localEvents, setLocalEvents }: { isSignedIn: boolean; supabase: SupabaseClient | null; localEvents: ClientCalendarEvent[]; setLocalEvents: Setter<ClientCalendarEvent[]> }) {
   const useDb = isSignedIn && supabase;
   return {
@@ -20,7 +20,7 @@ export function createCalendarEventsRepository({ isSignedIn, supabase, localEven
     async createEvent(event: ClientCalendarEvent) {
       if (!useDb) return setLocalEvents((c) => [...c, event]), event;
       assertUuid(event.workspaceId, "Workspace");
-      const data = await createSignedInRecord<DbEvent>("calendar_event", { id: event.id, workspace_id: event.workspaceId, client_id: event.clientId || null, client_name_snapshot: event.clientName, title: event.title, event_date: event.date });
+      const data = await createSignedInRecord<DbEvent>("calendar_event", { id: event.id, workspace_id: event.workspaceId, client_id: event.clientId || null, client_name_snapshot: event.clientName, title: event.title, event_date: event.date, event_time: event.time || null });
       return dbToEvent(data);
     },
     async updateEvent(event: ClientCalendarEvent) {
@@ -34,6 +34,7 @@ export function createCalendarEventsRepository({ isSignedIn, supabase, localEven
         client_name_snapshot: event.clientName,
         title: event.title,
         event_date: event.date,
+        event_time: event.time || null,
       });
       if (!data) throw new Error("Unable to update event.");
       return dbToEvent(data);

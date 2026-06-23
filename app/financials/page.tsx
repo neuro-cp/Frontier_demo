@@ -21,6 +21,7 @@ import {
 } from "@/lib/frontierInvoices";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { getWorkspaceDisplayName } from "@/lib/workspaceDisplay";
+import { consumeAiFormHydration, payloadNumber, payloadString } from "@/lib/ai/formHydration";
 
 type FinancialInvoice = { id: string; invoice: InvoiceRow };
 
@@ -100,6 +101,21 @@ export default function FinancialsPage() {
   const expensesRepo = useMemo(() => createExpensesRepository({ isSignedIn: isDatabaseMode, supabase, localExpenses, setLocalExpenses }), [isDatabaseMode, localExpenses, setLocalExpenses, supabase]);
   const savedInvoices = isDatabaseMode ? dbInvoices : localInvoices;
   const expenseItems = isDatabaseMode ? dbExpenses : localExpenses;
+
+  useEffect(() => {
+    const hydration = consumeAiFormHydration("expense", activeWorkspace.id);
+    if (!hydration) return;
+
+    queueMicrotask(() => {
+      const vendor = payloadString(hydration.payload, "vendor");
+      const notes = payloadString(hydration.payload, "notes");
+      setExpenseDescription(notes || vendor);
+      setExpenseCategory(payloadString(hydration.payload, "category") || "Materials");
+      const amount = payloadNumber(hydration.payload, "amount");
+      setExpenseAmount(amount === null ? "" : String(amount));
+      setNewExpenseOpen(true);
+    });
+  }, [activeWorkspace.id]);
 
   useEffect(() => {
     if (!isDatabaseMode) return;

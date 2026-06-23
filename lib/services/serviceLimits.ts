@@ -3,6 +3,18 @@ import "server-only";
 import { readPositiveInt } from "@/lib/rateLimit/policy";
 
 export const serviceLimits = {
+  ocr: {
+    maxRequestsPerUserPerDay: () => readPositiveInt("OCR_MAX_REQUESTS_PER_USER_PER_DAY", 20),
+    maxRequestsPerWorkspacePerDay: () => readPositiveInt("OCR_MAX_REQUESTS_PER_WORKSPACE_PER_DAY", 100),
+  },
+  speech: {
+    maxRequestsPerUserPerDay: () => readPositiveInt("SPEECH_MAX_REQUESTS_PER_USER_PER_DAY", 20),
+    maxRequestsPerWorkspacePerDay: () => readPositiveInt("SPEECH_MAX_REQUESTS_PER_WORKSPACE_PER_DAY", 100),
+  },
+  aiDrafts: {
+    maxRequestsPerUserPerDay: () => readPositiveInt("AI_MAX_REQUESTS_PER_USER_PER_DAY", 50),
+    maxRequestsPerWorkspacePerDay: () => readPositiveInt("AI_MAX_REQUESTS_PER_WORKSPACE_PER_DAY", 200),
+  },
   geocode: {
     maxRequestsPerUserPerDay: () =>
       readPositiveInt("GEOCODE_MAX_REQUESTS_PER_USER_PER_DAY", 25),

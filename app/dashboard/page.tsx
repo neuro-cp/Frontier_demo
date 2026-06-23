@@ -1,7 +1,5 @@
 "use client";
 
-"use client";
-
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
@@ -151,6 +149,11 @@ export default function DashboardPage() {
 
   return (
     <div className="w-full max-w-full">
+      {!user && (
+        <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-200">
+          Local demo mode stores data only in this browser. Sign in to use cloud storage, OCR, speech, AI drafts, and external route services.
+        </div>
+      )}
       {dataError && (
         <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
           {dataError}
@@ -185,22 +188,24 @@ export default function DashboardPage() {
             + Invoice
           </Link>
 
-          <button
-            type="button"
-            disabled
-            title="Coming with document and voice capture workflows"
-            className="cursor-not-allowed rounded-lg bg-gray-300 px-4 py-2 text-sm font-semibold text-gray-600 dark:bg-gray-800 dark:text-gray-400"
-          >
-            Speech
-          </button>
-          <button
-            type="button"
-            disabled
-            title="Coming with document and image extraction workflows"
-            className="cursor-not-allowed rounded-lg bg-gray-300 px-4 py-2 text-sm font-semibold text-gray-600 dark:bg-gray-800 dark:text-gray-400"
+          {user ? (
+            <Link
+              href="/review#audio-intake"
+              title="Upload audio for transcription and review"
+              className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold hover:bg-gray-100 dark:border-gray-700 dark:hover:bg-gray-800"
+            >
+              Speech
+            </Link>
+          ) : (
+            <button type="button" disabled title="Sign in to use speech transcription" className="cursor-not-allowed rounded-lg bg-gray-300 px-4 py-2 text-sm font-semibold text-gray-600 dark:bg-gray-800 dark:text-gray-400">Speech</button>
+          )}
+          <Link
+            href="/documents"
+            title="Upload a document for OCR extraction"
+            className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold hover:bg-gray-100 dark:border-gray-700 dark:hover:bg-gray-800"
           >
             Image
-          </button>
+          </Link>
         </div>
       </div>
 

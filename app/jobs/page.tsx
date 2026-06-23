@@ -19,6 +19,7 @@ import {
 } from "@/lib/frontierInvoices";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { getWorkspaceDisplayName } from "@/lib/workspaceDisplay";
+import { consumeAiFormHydration, payloadNumber, payloadString } from "@/lib/ai/formHydration";
 
 function getStatusColor(status: JobStatus) {
   switch (status) {
@@ -62,6 +63,7 @@ export default function JobsPage() {
   const [status, setStatus] = useState<JobStatus>("Lead");
   const [value, setValue] = useState("");
   const [date, setDate] = useState("");
+  const [time, setTime] = useState("");
   const [notes, setNotes] = useState("");
   const [localClientItems, setLocalClientItems] = useStoredJsonState<ClientRow[]>(
     storageKeys.clients,
@@ -79,6 +81,38 @@ export default function JobsPage() {
   const jobItems = isDatabaseMode ? databaseJobItems : localJobItems;
   const clientItems = isDatabaseMode ? databaseClientItems : localClientItems;
   const invoiceItems = isDatabaseMode ? databaseInvoiceItems : localInvoiceItems;
+
+  useEffect(() => {
+    const hydration = consumeAiFormHydration("job", activeWorkspace.id);
+    if (!hydration) return;
+
+    queueMicrotask(() => {
+      const payload = hydration.payload;
+      setClientId(payloadString(payload, "clientId"));
+      setJobName(payloadString(payload, "title") || payloadString(payload, "name"));
+      setDate(payloadString(payload, "date"));
+      setTime(payloadString(payload, "time"));
+      setNotes(payloadString(payload, "notes"));
+      const amount = payloadNumber(payload, "value");
+      setValue(amount === null ? "" : String(amount));
+      const nextStatus = payloadString(payload, "status") as JobStatus;
+      if (["Lead", "Quoted", "Scheduled", "Completed", "Paid"].includes(nextStatus)) {
+        setStatus(nextStatus);
+      }
+      const rawMaterials = payload.materials;
+      if (Array.isArray(rawMaterials)) {
+        setMaterials(
+          rawMaterials.flatMap((item) => {
+            if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+            const name = typeof item.name === "string" ? item.name : "";
+            const quantity = typeof item.quantity === "number" ? item.quantity : 0;
+            return name && quantity > 0 ? [{ name, quantity }] : [];
+          })
+        );
+      }
+      setNewJobOpen(true);
+    });
+  }, [activeWorkspace.id]);
 
   useEffect(() => {
     if (!isDatabaseMode) return;
@@ -152,6 +186,7 @@ export default function JobsPage() {
     setStatus("Lead");
     setValue("");
     setDate("");
+    setTime("");
     setNotes("");
     setMaterialName("");
     setMaterialQuantity("");
@@ -250,6 +285,7 @@ export default function JobsPage() {
       status,
       value: formattedValue,
       date,
+      time,
       materials,
       notes,
     };
@@ -368,6 +404,16 @@ export default function JobsPage() {
                 type="date"
                 value={date}
                 onChange={(event) => setDate(event.target.value)}
+                className="w-full rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800"
+              />
+            </div>
+
+            <div>
+              <label className="mb-2 block text-sm font-medium">Scheduled Time</label>
+              <input
+                type="time"
+                value={time}
+                onChange={(event) => setTime(event.target.value)}
                 className="w-full rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800"
               />
             </div>
@@ -501,7 +547,9 @@ export default function JobsPage() {
                       </span>
                     </td>
 
-                    <td className="p-4">{job.date || "-"}</td>
+                    <td className="p-4">
+                      {job.date || "-"}{job.time ? ` at ${job.time}` : ""}
+                    </td>
                     <td className="p-4 text-right font-medium">{job.value}</td>
                     <td className="p-4 text-right">
                       {firstInvoice ? (

@@ -12,6 +12,7 @@ import {
 } from "@/lib/actions/clients";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
 import type { ClientRow } from "@/lib/clientTypes";
+import { consumeAiFormHydration, payloadNumber, payloadString } from "@/lib/ai/formHydration";
 import { createClientsRepository } from "@/lib/db/clients";
 import { InvoiceRow } from "@/lib/frontierInvoices";
 import type { Job } from "@/lib/jobTypes";
@@ -153,6 +154,25 @@ export default function ClientsPage() {
     [isDatabaseMode, localClientItems, setLocalClientItems, supabase]
   );
   const clientItems = isDatabaseMode ? databaseClientItems : localClientItems;
+
+  useEffect(() => {
+    const hydration = consumeAiFormHydration("client", activeWorkspace.id);
+    if (!hydration) return;
+
+    queueMicrotask(() => {
+      setClientName(payloadString(hydration.payload, "name"));
+      setClientEmail(payloadString(hydration.payload, "email"));
+      setClientPhone(payloadString(hydration.payload, "phone"));
+      setClientAddress(payloadString(hydration.payload, "address"));
+      setClientCity(payloadString(hydration.payload, "city"));
+      setClientState(payloadString(hydration.payload, "state"));
+      setClientZip(payloadString(hydration.payload, "zip"));
+      setClientNotes(payloadString(hydration.payload, "notes"));
+      const balance = payloadNumber(hydration.payload, "balance");
+      setClientBalance(balance === null ? "" : String(balance));
+      setNewClientOpen(true);
+    });
+  }, [activeWorkspace.id]);
 
   useEffect(() => {
     if (!isDatabaseMode) {

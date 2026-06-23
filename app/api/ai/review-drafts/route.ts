@@ -1,10 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import {
+  getReviewDraftById,
+  getReviewDraftRevisions,
   getReviewDrafts,
+  updateReviewDraftContent,
   updateReviewDraftStatus,
   type AiReviewDraftStatus,
 } from "@/lib/db/aiReviewDrafts";
+import type { SuggestedAction } from "@/lib/ai/types";
+import { validateSuggestedAction } from "@/lib/ai/validators";
 import { isUuid } from "@/lib/db/ids";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 
@@ -19,6 +24,10 @@ type UpdateReviewDraftRequest = {
   id?: string;
   workspaceId?: string;
   status?: AiReviewDraftStatus;
+  mode?: "status" | "content";
+  sourceLabel?: string;
+  summary?: string;
+  actions?: SuggestedAction[];
 };
 
 function jsonError(message: string, status: number) {
@@ -72,6 +81,16 @@ export async function GET(request: NextRequest) {
   if (!auth.ok) return auth.response;
 
   try {
+    const draftId = request.nextUrl.searchParams.get("draftId");
+    if (draftId) {
+      if (!isUuid(draftId)) return jsonError("Review draft is invalid.", 400);
+      const [reviewDraft, revisions] = await Promise.all([
+        getReviewDraftById(auth.supabase, workspaceId, draftId),
+        getReviewDraftRevisions(auth.supabase, workspaceId, draftId),
+      ]);
+      if (!reviewDraft) return jsonError("Review draft not found.", 404);
+      return NextResponse.json({ reviewDraft, revisions });
+    }
     const reviewDrafts = await getReviewDrafts(auth.supabase, workspaceId);
     return NextResponse.json({ reviewDrafts });
   } catch (error) {
@@ -97,10 +116,6 @@ export async function PATCH(request: NextRequest) {
     return jsonError("Workspace and review draft are required.", 400);
   }
 
-  if (!body.status || !allowedStatuses.includes(body.status)) {
-    return jsonError("Review draft status is invalid.", 400);
-  }
-
   const auth = await requireUserAndWorkspace(workspaceId);
   if (!auth.ok) return auth.response;
 
@@ -109,6 +124,29 @@ export async function PATCH(request: NextRequest) {
   }
 
   try {
+    if (body.mode === "content") {
+      if (!Array.isArray(body.actions) || body.actions.length === 0) {
+        return jsonError("At least one action draft is required.", 400);
+      }
+      const invalidAction = body.actions.find(
+        (action) => !validateSuggestedAction(action).ok
+      );
+      if (invalidAction) {
+        return jsonError(`Action ${invalidAction.type} has invalid fields.`, 400);
+      }
+      const reviewDraft = await updateReviewDraftContent(auth.supabase, {
+        id: draftId,
+        workspaceId,
+        sourceLabel: body.sourceLabel ?? "",
+        summary: body.summary ?? "",
+        actions: body.actions,
+      });
+      return NextResponse.json({ reviewDraft });
+    }
+
+    if (!body.status || !allowedStatuses.includes(body.status)) {
+      return jsonError("Review draft status is invalid.", 400);
+    }
     const reviewDraft = await updateReviewDraftStatus(auth.supabase, {
       id: draftId,
       workspaceId,

@@ -11,6 +11,7 @@ export type AiActionType =
   | "update_invoice"
   | "create_expense"
   | "update_inventory"
+  | "create_material_allocation"
   | "create_calendar_event";
 
 export type InterpretationWarningCode =

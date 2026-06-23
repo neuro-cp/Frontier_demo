@@ -36,12 +36,16 @@ function failure(code: string, message: string): SpeechWorkerResult {
 }
 
 function toBlob(file: SpeechUpload["file"], contentType: string) {
-  if (file instanceof Blob) return file;
+  if (file instanceof Blob) return file.type === contentType ? file : file.slice(0, file.size, contentType);
   if (file instanceof Uint8Array) {
     const copy = new Uint8Array(file);
     return new Blob([copy.buffer], { type: contentType });
   }
   return new Blob([file], { type: contentType });
+}
+
+function responsePreview(text: string) {
+  return text.replace(/\s+/g, " ").slice(0, 240);
 }
 
 export async function runSpeechWorker(
@@ -55,6 +59,12 @@ export async function runSpeechWorker(
   const secret = process.env.SPEECH_SHARED_SECRET ?? "";
   const secretHeader = process.env.SPEECH_SECRET_HEADER || "x-worker-secret";
   const contentType = upload.contentType || "audio/wav";
+  const fileSize =
+    upload.file instanceof Blob
+      ? upload.file.size
+      : upload.file instanceof Uint8Array
+        ? upload.file.byteLength
+        : upload.file.byteLength;
 
   const formData = new FormData();
   formData.append(
@@ -67,12 +77,26 @@ export async function runSpeechWorker(
   if (secret) headers.set(secretHeader, secret);
 
   try {
+    console.info("[speech] worker request", {
+      fileName: upload.fileName || "audio.wav",
+      contentType,
+      fileSize,
+      workerUrlConfigured: Boolean(workerUrl),
+    });
+
     const response = await fetch(new URL("/transcribe", workerUrl), {
       method: "POST",
       headers,
       body: formData,
     });
-    const payload = (await response.json()) as WorkerErrorPayload & {
+    const responseText = await response.text();
+    console.info("[speech] worker response", {
+      status: response.status,
+      ok: response.ok,
+      preview: responsePreview(responseText),
+    });
+
+    let payload: WorkerErrorPayload & {
       provider?: "faster-whisper";
       status?: "transcribed";
       language?: string;
@@ -80,6 +104,11 @@ export async function runSpeechWorker(
       text?: string;
       segments?: SpeechWorkerSegment[];
     };
+    try {
+      payload = JSON.parse(responseText) as typeof payload;
+    } catch {
+      return failure("request_failed", "Speech worker returned an unreadable response.");
+    }
 
     if (!response.ok) {
       return failure(
@@ -113,7 +142,10 @@ export async function runSpeechWorker(
         segments: payload.segments,
       },
     };
-  } catch {
+  } catch (error) {
+    console.warn("[speech] worker request failed", {
+      message: error instanceof Error ? error.message : "Unknown speech worker error.",
+    });
     return failure("request_failed", "Speech worker is unavailable.");
   }
 }

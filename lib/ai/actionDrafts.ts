@@ -9,6 +9,7 @@ export const ALLOWED_AI_ACTION_TYPES = [
   "update_invoice",
   "create_expense",
   "update_inventory",
+  "create_material_allocation",
   "create_calendar_event",
 ] as const satisfies readonly AiActionType[];
 

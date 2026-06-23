@@ -10,7 +10,7 @@ import type { Job, JobMaterial } from "@/lib/jobTypes";
 type Setter<T> = (value: T | ((current: T) => T)) => void;
 type Options = { isSignedIn: boolean; supabase: SupabaseClient | null; localJobs: Job[]; setLocalJobs: Setter<Job[]> };
 
-type DbJob = { id: string; workspace_id: string; client_id: string | null; client_name_snapshot: string | null; name: string; status: Job["status"]; estimated_value_cents: number; scheduled_date: string | null; notes: string | null; job_materials?: DbMaterial[] };
+type DbJob = { id: string; workspace_id: string; client_id: string | null; client_name_snapshot: string | null; name: string; status: Job["status"]; estimated_value_cents: number; scheduled_date: string | null; scheduled_time: string | null; notes: string | null; job_materials?: DbMaterial[] };
 type DbMaterial = { id?: string; workspace_id: string; job_id: string; name: string; quantity: number };
 
 function dbToJob(row: DbJob): Job {
@@ -23,6 +23,7 @@ function dbToJob(row: DbJob): Job {
     status: row.status,
     value: centsToMoneyString(row.estimated_value_cents),
     date: row.scheduled_date ?? "",
+    time: row.scheduled_time?.slice(0, 5) ?? "",
     notes: row.notes ?? "",
     materials: (row.job_materials ?? []).map((m) => ({ name: m.name, quantity: Number(m.quantity) })),
   };
@@ -38,6 +39,7 @@ function jobToDb(job: Job) {
     status: job.status,
     estimated_value_cents: moneyStringToCents(job.value),
     scheduled_date: job.date || null,
+    scheduled_time: job.time || null,
     notes: job.notes ?? null,
   };
 }

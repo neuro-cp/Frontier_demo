@@ -91,7 +91,7 @@ export default function DocumentAttachments({
     }
 
     try {
-      const url = await createDocumentDownloadUrl({ supabase, path: document.storagePath });
+      const url = await createDocumentDownloadUrl({ workspaceId: document.workspaceId, path: document.storagePath });
       window.open(url, "_blank", "noopener,noreferrer");
     } catch (downloadError) {
       setError(downloadError instanceof Error ? downloadError.message : "Unable to download document.");
@@ -106,7 +106,7 @@ export default function DocumentAttachments({
 
     try {
       if (isDatabaseMode && supabase && document.storagePath) {
-        await removeDocumentFile({ supabase, path: document.storagePath });
+        await removeDocumentFile({ workspaceId: document.workspaceId, path: document.storagePath });
       }
       const result = await deleteDocumentAction(
         documentsRepo,

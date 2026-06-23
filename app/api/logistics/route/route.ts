@@ -3,7 +3,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { orderStopsNearestNeighbor } from "@/lib/logistics/nearestNeighbor";
 import { buildGoogleMapsDirectionsUrl, type LogisticsCoordinate } from "@/lib/logistics/providers";
 import { checkUserAndWorkspaceDailyLimits } from "@/lib/rateLimit/dailyCounters";
-import { jsonError, requireWorkspaceAccess } from "@/lib/services/routeProtection";
+import { canUseLogistics } from "@/lib/plans/capabilities";
+import { jsonError, planUpgradeError, requireWorkspaceAccess } from "@/lib/services/routeProtection";
 import { serviceLimits } from "@/lib/services/serviceLimits";
 
 type RouteStopInput = LogisticsCoordinate & {
@@ -50,6 +51,7 @@ export async function POST(request: NextRequest) {
 
   const access = await requireWorkspaceAccess(body.workspaceId);
   if (!access.ok) return access.response;
+  if (!canUseLogistics(access.plan)) return planUpgradeError();
 
   checkUserAndWorkspaceDailyLimits({
     service: "route",

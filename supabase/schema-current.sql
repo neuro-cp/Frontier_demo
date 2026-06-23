@@ -1,5 +1,4 @@
 
-\restrict rS1CzC0pWoSDbQobc2NcPvKcLSgzg8zf4YRxo0K09aKEmjKoqAqYl7yZ5V6NX2z
 
 
 SET statement_timeout = 0;
@@ -67,9 +66,143 @@ $$;
 
 ALTER FUNCTION "public"."accept_workspace_invites_for_current_user"() OWNER TO "postgres";
 
+
+CREATE OR REPLACE FUNCTION "public"."capture_ai_review_draft_revision"() RETURNS "trigger"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+begin
+  if old.source_label is distinct from new.source_label
+     or old.summary is distinct from new.summary
+     or old.actions is distinct from new.actions
+     or old.warnings is distinct from new.warnings then
+    insert into public.ai_review_draft_revisions (
+      workspace_id,
+      review_draft_id,
+      source_label,
+      summary,
+      actions,
+      warnings,
+      changed_by
+    ) values (
+      old.workspace_id,
+      old.id,
+      old.source_label,
+      old.summary,
+      old.actions,
+      old.warnings,
+      auth.uid()
+    );
+  end if;
+  return new;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."capture_ai_review_draft_revision"() OWNER TO "postgres";
+
 SET default_tablespace = '';
 
 SET default_table_access_method = "heap";
+
+
+CREATE TABLE IF NOT EXISTS "public"."job_material_allocations" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "workspace_id" "uuid" NOT NULL,
+    "job_id" "uuid",
+    "material_id" "uuid" NOT NULL,
+    "quantity" numeric NOT NULL,
+    "mode" "text" DEFAULT 'Append'::"text" NOT NULL,
+    "status" "text" DEFAULT 'Draft'::"text" NOT NULL,
+    "source_document_id" "uuid",
+    "review_draft_id" "uuid",
+    "notes" "text",
+    "created_by" "uuid" DEFAULT "auth"."uid"(),
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "job_material_allocations_mode_check" CHECK (("mode" = ANY (ARRAY['Append'::"text", 'Merge'::"text", 'Replace'::"text"]))),
+    CONSTRAINT "job_material_allocations_quantity_check" CHECK (("quantity" > (0)::numeric)),
+    CONSTRAINT "job_material_allocations_status_check" CHECK (("status" = ANY (ARRAY['Draft'::"text", 'Applied'::"text", 'Rejected'::"text"])))
+);
+
+
+ALTER TABLE "public"."job_material_allocations" OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."create_material_allocation_draft"("target_workspace_id" "uuid", "target_job_id" "uuid", "allocation_mode" "text", "material_rows" "jsonb", "source_document_id" "uuid" DEFAULT NULL::"uuid", "source_review_draft_id" "uuid" DEFAULT NULL::"uuid") RETURNS SETOF "public"."job_material_allocations"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  material_row jsonb;
+  inventory_id uuid;
+  catalog_id uuid;
+  material_name text;
+  material_quantity numeric;
+begin
+  if not public.is_workspace_member(target_workspace_id) then
+    raise exception 'Workspace access denied.';
+  end if;
+  if allocation_mode not in ('Append', 'Merge', 'Replace') then
+    raise exception 'Invalid allocation mode.';
+  end if;
+  if not exists (
+    select 1 from public.jobs
+    where id = target_job_id and workspace_id = target_workspace_id
+  ) then
+    raise exception 'Job does not belong to this workspace.';
+  end if;
+  if source_document_id is not null and not exists (
+    select 1 from public.documents
+    where id = source_document_id and workspace_id = target_workspace_id
+  ) then
+    raise exception 'Document does not belong to this workspace.';
+  end if;
+  if source_review_draft_id is not null and not exists (
+    select 1 from public.ai_review_drafts
+    where id = source_review_draft_id and workspace_id = target_workspace_id
+  ) then
+    raise exception 'Review draft does not belong to this workspace.';
+  end if;
+
+  for material_row in select value from jsonb_array_elements(material_rows)
+  loop
+    material_name := nullif(trim(material_row->>'name'), '');
+    material_quantity := nullif(material_row->>'quantity', '')::numeric;
+    if material_name is null or material_quantity is null or material_quantity <= 0 then
+      raise exception 'Each material requires a name and positive quantity.';
+    end if;
+
+    select id into inventory_id
+    from public.inventory_items
+    where workspace_id = target_workspace_id and lower(name) = lower(material_name)
+    limit 1;
+
+    if inventory_id is null then
+      insert into public.inventory_items (workspace_id, name, current_qty, target_qty)
+      values (target_workspace_id, material_name, null, null)
+      returning id into inventory_id;
+    end if;
+
+    select id into catalog_id
+    from public.material_catalog_items
+    where inventory_item_id = inventory_id;
+
+    return query
+      insert into public.job_material_allocations (
+        workspace_id, job_id, material_id, quantity, mode, status,
+        source_document_id, review_draft_id, notes, created_by
+      ) values (
+        target_workspace_id, target_job_id, catalog_id, material_quantity,
+        allocation_mode, 'Draft', source_document_id, source_review_draft_id,
+        nullif(material_row->>'notes', ''), auth.uid()
+      ) returning *;
+  end loop;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."create_material_allocation_draft"("target_workspace_id" "uuid", "target_job_id" "uuid", "allocation_mode" "text", "material_rows" "jsonb", "source_document_id" "uuid", "source_review_draft_id" "uuid") OWNER TO "postgres";
 
 
 CREATE TABLE IF NOT EXISTS "public"."workspaces" (
@@ -120,6 +253,25 @@ $$;
 
 
 ALTER FUNCTION "public"."create_workspace_with_owner"("workspace_id" "uuid", "workspace_name" "text", "workspace_type" "text") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."ensure_material_catalog_item"() RETURNS "trigger"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+begin
+  insert into public.material_catalog_items (workspace_id, inventory_item_id, name)
+  values (new.workspace_id, new.id, new.name)
+  on conflict (inventory_item_id) do update
+    set name = excluded.name,
+        workspace_id = excluded.workspace_id,
+        updated_at = now();
+  return new;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."ensure_material_catalog_item"() OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."get_platform_admin_summary"() RETURNS TABLE("admin_email" "text", "auth_user_count" bigint, "profile_count" bigint, "workspace_count" bigint, "client_count" bigint, "job_count" bigint, "invoice_count" bigint, "document_count" bigint, "route_plan_count" bigint)
@@ -493,6 +645,7 @@ CREATE TABLE IF NOT EXISTS "public"."jobs" (
     "notes" "text",
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
     "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "scheduled_time" time without time zone,
     CONSTRAINT "jobs_status_check" CHECK (("status" = ANY (ARRAY['Lead'::"text", 'Quoted'::"text", 'Scheduled'::"text", 'Completed'::"text", 'Paid'::"text"])))
 );
 
@@ -526,6 +679,7 @@ begin
     status,
     estimated_value_cents,
     scheduled_date,
+    scheduled_time,
     notes
   )
   values (
@@ -537,6 +691,7 @@ begin
     coalesce(job_payload ->> 'status', 'Lead'),
     coalesce(nullif(job_payload ->> 'estimated_value_cents', '')::integer, 0),
     nullif(job_payload ->> 'scheduled_date', '')::date,
+    nullif(job_payload ->> 'scheduled_time', '')::time,
     job_payload ->> 'notes'
   )
   on conflict (id) do update
@@ -546,6 +701,7 @@ begin
         status = excluded.status,
         estimated_value_cents = excluded.estimated_value_cents,
         scheduled_date = excluded.scheduled_date,
+        scheduled_time = excluded.scheduled_time,
         notes = excluded.notes,
         updated_at = now()
   returning * into target_job;
@@ -557,12 +713,7 @@ begin
   for material_item in
     select * from jsonb_array_elements(coalesce(materials_payload, '[]'::jsonb))
   loop
-    insert into public.job_materials (
-      workspace_id,
-      job_id,
-      name,
-      quantity
-    )
+    insert into public.job_materials (workspace_id, job_id, name, quantity)
     values (
       target_workspace_id,
       target_job_id,
@@ -725,6 +876,22 @@ CREATE TABLE IF NOT EXISTS "public"."ai_jobs" (
 ALTER TABLE "public"."ai_jobs" OWNER TO "postgres";
 
 
+CREATE TABLE IF NOT EXISTS "public"."ai_review_draft_revisions" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "workspace_id" "uuid" NOT NULL,
+    "review_draft_id" "uuid" NOT NULL,
+    "source_label" "text",
+    "summary" "text",
+    "actions" "jsonb" DEFAULT '[]'::"jsonb" NOT NULL,
+    "warnings" "jsonb" DEFAULT '[]'::"jsonb" NOT NULL,
+    "changed_by" "uuid",
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL
+);
+
+
+ALTER TABLE "public"."ai_review_draft_revisions" OWNER TO "postgres";
+
+
 CREATE TABLE IF NOT EXISTS "public"."ai_review_drafts" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
     "workspace_id" "uuid" NOT NULL,
@@ -750,6 +917,7 @@ CREATE TABLE IF NOT EXISTS "public"."ai_review_drafts" (
     "executed_by" "uuid",
     "execution_result" "jsonb" DEFAULT '{}'::"jsonb" NOT NULL,
     "execution_error" "text",
+    "summary" "text",
     CONSTRAINT "ai_review_drafts_actions_array_check" CHECK (("jsonb_typeof"("actions") = 'array'::"text")),
     CONSTRAINT "ai_review_drafts_execution_status_check" CHECK (("execution_status" = ANY (ARRAY['Not Executed'::"text", 'Executed'::"text", 'Failed'::"text"]))),
     CONSTRAINT "ai_review_drafts_no_delete_actions_check" CHECK ((NOT "jsonb_path_exists"("actions", '$[*]?(@."type" like_regex "^delete_")'::"jsonpath"))),
@@ -787,7 +955,8 @@ CREATE TABLE IF NOT EXISTS "public"."client_calendar_events" (
     "event_date" "date" NOT NULL,
     "notes" "text",
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
-    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "event_time" time without time zone
 );
 
 
@@ -887,6 +1056,8 @@ CREATE TABLE IF NOT EXISTS "public"."documents" (
     "reviewed_by" "uuid",
     "confidence" numeric,
     "document_type" "text",
+    "material_catalog_item_id" "uuid",
+    "job_material_allocation_id" "uuid",
     CONSTRAINT "documents_processing_status_check" CHECK (("processing_status" = ANY (ARRAY['uploaded'::"text", 'queued'::"text", 'processing'::"text", 'needs_review'::"text", 'reviewed'::"text", 'failed'::"text"])))
 );
 
@@ -978,6 +1149,25 @@ CREATE TABLE IF NOT EXISTS "public"."inventory_items" (
 ALTER TABLE "public"."inventory_items" OWNER TO "postgres";
 
 
+CREATE TABLE IF NOT EXISTS "public"."inventory_lots" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "workspace_id" "uuid" NOT NULL,
+    "material_id" "uuid" NOT NULL,
+    "vendor_sku_id" "uuid",
+    "quantity" numeric DEFAULT 0 NOT NULL,
+    "unit_cost_cents" bigint,
+    "received_at" "date",
+    "lot_reference" "text",
+    "notes" "text",
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "inventory_lots_quantity_check" CHECK (("quantity" >= (0)::numeric))
+);
+
+
+ALTER TABLE "public"."inventory_lots" OWNER TO "postgres";
+
+
 CREATE TABLE IF NOT EXISTS "public"."invoice_line_items" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
     "workspace_id" "uuid" NOT NULL,
@@ -1038,6 +1228,39 @@ CREATE TABLE IF NOT EXISTS "public"."job_materials" (
 
 
 ALTER TABLE "public"."job_materials" OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."material_catalog_items" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "workspace_id" "uuid" NOT NULL,
+    "inventory_item_id" "uuid" NOT NULL,
+    "name" "text" NOT NULL,
+    "description" "text",
+    "category" "text",
+    "unit" "text",
+    "default_cost_cents" bigint,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL
+);
+
+
+ALTER TABLE "public"."material_catalog_items" OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."material_vendor_skus" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "workspace_id" "uuid" NOT NULL,
+    "material_id" "uuid" NOT NULL,
+    "vendor_name" "text" NOT NULL,
+    "sku" "text" NOT NULL,
+    "unit_cost_cents" bigint,
+    "notes" "text",
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL
+);
+
+
+ALTER TABLE "public"."material_vendor_skus" OWNER TO "postgres";
 
 
 CREATE TABLE IF NOT EXISTS "public"."platform_admins" (
@@ -1143,6 +1366,11 @@ ALTER TABLE ONLY "public"."ai_jobs"
 
 
 
+ALTER TABLE ONLY "public"."ai_review_draft_revisions"
+    ADD CONSTRAINT "ai_review_draft_revisions_pkey" PRIMARY KEY ("id");
+
+
+
 ALTER TABLE ONLY "public"."ai_review_drafts"
     ADD CONSTRAINT "ai_review_drafts_pkey" PRIMARY KEY ("id");
 
@@ -1208,6 +1436,11 @@ ALTER TABLE ONLY "public"."inventory_items"
 
 
 
+ALTER TABLE ONLY "public"."inventory_lots"
+    ADD CONSTRAINT "inventory_lots_pkey" PRIMARY KEY ("id");
+
+
+
 ALTER TABLE ONLY "public"."invoice_line_items"
     ADD CONSTRAINT "invoice_line_items_pkey" PRIMARY KEY ("id");
 
@@ -1228,6 +1461,11 @@ ALTER TABLE ONLY "public"."job_activity"
 
 
 
+ALTER TABLE ONLY "public"."job_material_allocations"
+    ADD CONSTRAINT "job_material_allocations_pkey" PRIMARY KEY ("id");
+
+
+
 ALTER TABLE ONLY "public"."job_materials"
     ADD CONSTRAINT "job_materials_pkey" PRIMARY KEY ("id");
 
@@ -1235,6 +1473,26 @@ ALTER TABLE ONLY "public"."job_materials"
 
 ALTER TABLE ONLY "public"."jobs"
     ADD CONSTRAINT "jobs_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."material_catalog_items"
+    ADD CONSTRAINT "material_catalog_items_inventory_item_id_key" UNIQUE ("inventory_item_id");
+
+
+
+ALTER TABLE ONLY "public"."material_catalog_items"
+    ADD CONSTRAINT "material_catalog_items_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."material_vendor_skus"
+    ADD CONSTRAINT "material_vendor_skus_material_id_vendor_name_sku_key" UNIQUE ("material_id", "vendor_name", "sku");
+
+
+
+ALTER TABLE ONLY "public"."material_vendor_skus"
+    ADD CONSTRAINT "material_vendor_skus_pkey" PRIMARY KEY ("id");
 
 
 
@@ -1314,6 +1572,10 @@ CREATE INDEX "ai_jobs_workspace_idx" ON "public"."ai_jobs" USING "btree" ("works
 
 
 
+CREATE INDEX "ai_review_draft_revisions_draft_idx" ON "public"."ai_review_draft_revisions" USING "btree" ("review_draft_id", "created_at" DESC);
+
+
+
 CREATE INDEX "ai_review_drafts_created_at_idx" ON "public"."ai_review_drafts" USING "btree" ("created_at" DESC);
 
 
@@ -1351,6 +1613,10 @@ CREATE INDEX "client_calendar_events_client_idx" ON "public"."client_calendar_ev
 
 
 CREATE INDEX "client_calendar_events_date_idx" ON "public"."client_calendar_events" USING "btree" ("event_date");
+
+
+
+CREATE INDEX "client_calendar_events_schedule_idx" ON "public"."client_calendar_events" USING "btree" ("workspace_id", "event_date", "event_time");
 
 
 
@@ -1422,6 +1688,14 @@ CREATE INDEX "documents_job_idx" ON "public"."documents" USING "btree" ("job_id"
 
 
 
+CREATE INDEX "documents_material_allocation_idx" ON "public"."documents" USING "btree" ("job_material_allocation_id");
+
+
+
+CREATE INDEX "documents_material_catalog_idx" ON "public"."documents" USING "btree" ("material_catalog_item_id");
+
+
+
 CREATE INDEX "documents_processing_status_idx" ON "public"."documents" USING "btree" ("processing_status");
 
 
@@ -1490,6 +1764,10 @@ CREATE UNIQUE INDEX "inventory_items_workspace_name_uidx" ON "public"."inventory
 
 
 
+CREATE INDEX "inventory_lots_material_idx" ON "public"."inventory_lots" USING "btree" ("material_id");
+
+
+
 CREATE INDEX "invoice_line_items_invoice_idx" ON "public"."invoice_line_items" USING "btree" ("invoice_id");
 
 
@@ -1546,6 +1824,18 @@ CREATE INDEX "job_activity_workspace_idx" ON "public"."job_activity" USING "btre
 
 
 
+CREATE INDEX "job_material_allocations_job_idx" ON "public"."job_material_allocations" USING "btree" ("job_id");
+
+
+
+CREATE INDEX "job_material_allocations_material_idx" ON "public"."job_material_allocations" USING "btree" ("material_id");
+
+
+
+CREATE INDEX "job_material_allocations_review_idx" ON "public"."job_material_allocations" USING "btree" ("review_draft_id");
+
+
+
 CREATE INDEX "job_materials_job_idx" ON "public"."job_materials" USING "btree" ("job_id");
 
 
@@ -1562,11 +1852,23 @@ CREATE INDEX "jobs_client_idx" ON "public"."jobs" USING "btree" ("client_id");
 
 
 
+CREATE INDEX "jobs_schedule_idx" ON "public"."jobs" USING "btree" ("workspace_id", "scheduled_date", "scheduled_time");
+
+
+
 CREATE INDEX "jobs_scheduled_date_idx" ON "public"."jobs" USING "btree" ("scheduled_date");
 
 
 
 CREATE INDEX "jobs_workspace_idx" ON "public"."jobs" USING "btree" ("workspace_id");
+
+
+
+CREATE INDEX "material_catalog_items_workspace_idx" ON "public"."material_catalog_items" USING "btree" ("workspace_id");
+
+
+
+CREATE INDEX "material_vendor_skus_material_idx" ON "public"."material_vendor_skus" USING "btree" ("material_id");
 
 
 
@@ -1606,6 +1908,10 @@ CREATE OR REPLACE TRIGGER "ai_jobs_set_updated_at" BEFORE UPDATE ON "public"."ai
 
 
 
+CREATE OR REPLACE TRIGGER "ai_review_drafts_capture_revision" BEFORE UPDATE ON "public"."ai_review_drafts" FOR EACH ROW EXECUTE FUNCTION "public"."capture_ai_review_draft_revision"();
+
+
+
 CREATE OR REPLACE TRIGGER "ai_review_drafts_set_updated_at" BEFORE UPDATE ON "public"."ai_review_drafts" FOR EACH ROW EXECUTE FUNCTION "public"."set_updated_at"();
 
 
@@ -1638,7 +1944,15 @@ CREATE OR REPLACE TRIGGER "expenses_set_updated_at" BEFORE UPDATE ON "public"."e
 
 
 
+CREATE OR REPLACE TRIGGER "inventory_items_ensure_catalog" AFTER INSERT OR UPDATE OF "name", "workspace_id" ON "public"."inventory_items" FOR EACH ROW EXECUTE FUNCTION "public"."ensure_material_catalog_item"();
+
+
+
 CREATE OR REPLACE TRIGGER "inventory_items_set_updated_at" BEFORE UPDATE ON "public"."inventory_items" FOR EACH ROW EXECUTE FUNCTION "public"."set_updated_at"();
+
+
+
+CREATE OR REPLACE TRIGGER "inventory_lots_set_updated_at" BEFORE UPDATE ON "public"."inventory_lots" FOR EACH ROW EXECUTE FUNCTION "public"."set_updated_at"();
 
 
 
@@ -1650,7 +1964,19 @@ CREATE OR REPLACE TRIGGER "invoices_set_updated_at" BEFORE UPDATE ON "public"."i
 
 
 
+CREATE OR REPLACE TRIGGER "job_material_allocations_set_updated_at" BEFORE UPDATE ON "public"."job_material_allocations" FOR EACH ROW EXECUTE FUNCTION "public"."set_updated_at"();
+
+
+
 CREATE OR REPLACE TRIGGER "jobs_set_updated_at" BEFORE UPDATE ON "public"."jobs" FOR EACH ROW EXECUTE FUNCTION "public"."set_updated_at"();
+
+
+
+CREATE OR REPLACE TRIGGER "material_catalog_items_set_updated_at" BEFORE UPDATE ON "public"."material_catalog_items" FOR EACH ROW EXECUTE FUNCTION "public"."set_updated_at"();
+
+
+
+CREATE OR REPLACE TRIGGER "material_vendor_skus_set_updated_at" BEFORE UPDATE ON "public"."material_vendor_skus" FOR EACH ROW EXECUTE FUNCTION "public"."set_updated_at"();
 
 
 
@@ -1726,6 +2052,21 @@ ALTER TABLE ONLY "public"."ai_jobs"
 
 ALTER TABLE ONLY "public"."ai_jobs"
     ADD CONSTRAINT "ai_jobs_workspace_id_fkey" FOREIGN KEY ("workspace_id") REFERENCES "public"."workspaces"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."ai_review_draft_revisions"
+    ADD CONSTRAINT "ai_review_draft_revisions_changed_by_fkey" FOREIGN KEY ("changed_by") REFERENCES "public"."profiles"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."ai_review_draft_revisions"
+    ADD CONSTRAINT "ai_review_draft_revisions_review_draft_id_fkey" FOREIGN KEY ("review_draft_id") REFERENCES "public"."ai_review_drafts"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."ai_review_draft_revisions"
+    ADD CONSTRAINT "ai_review_draft_revisions_workspace_id_fkey" FOREIGN KEY ("workspace_id") REFERENCES "public"."workspaces"("id") ON DELETE CASCADE;
 
 
 
@@ -1845,6 +2186,16 @@ ALTER TABLE ONLY "public"."documents"
 
 
 ALTER TABLE ONLY "public"."documents"
+    ADD CONSTRAINT "documents_job_material_allocation_id_fkey" FOREIGN KEY ("job_material_allocation_id") REFERENCES "public"."job_material_allocations"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."documents"
+    ADD CONSTRAINT "documents_material_catalog_item_id_fkey" FOREIGN KEY ("material_catalog_item_id") REFERENCES "public"."material_catalog_items"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."documents"
     ADD CONSTRAINT "documents_reviewed_by_fkey" FOREIGN KEY ("reviewed_by") REFERENCES "public"."profiles"("id") ON DELETE SET NULL;
 
 
@@ -1896,6 +2247,21 @@ ALTER TABLE ONLY "public"."expenses"
 
 ALTER TABLE ONLY "public"."inventory_items"
     ADD CONSTRAINT "inventory_items_workspace_id_fkey" FOREIGN KEY ("workspace_id") REFERENCES "public"."workspaces"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."inventory_lots"
+    ADD CONSTRAINT "inventory_lots_material_id_fkey" FOREIGN KEY ("material_id") REFERENCES "public"."material_catalog_items"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."inventory_lots"
+    ADD CONSTRAINT "inventory_lots_vendor_sku_id_fkey" FOREIGN KEY ("vendor_sku_id") REFERENCES "public"."material_vendor_skus"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."inventory_lots"
+    ADD CONSTRAINT "inventory_lots_workspace_id_fkey" FOREIGN KEY ("workspace_id") REFERENCES "public"."workspaces"("id") ON DELETE CASCADE;
 
 
 
@@ -1954,6 +2320,36 @@ ALTER TABLE ONLY "public"."job_activity"
 
 
 
+ALTER TABLE ONLY "public"."job_material_allocations"
+    ADD CONSTRAINT "job_material_allocations_created_by_fkey" FOREIGN KEY ("created_by") REFERENCES "public"."profiles"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."job_material_allocations"
+    ADD CONSTRAINT "job_material_allocations_job_id_fkey" FOREIGN KEY ("job_id") REFERENCES "public"."jobs"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."job_material_allocations"
+    ADD CONSTRAINT "job_material_allocations_material_id_fkey" FOREIGN KEY ("material_id") REFERENCES "public"."material_catalog_items"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."job_material_allocations"
+    ADD CONSTRAINT "job_material_allocations_review_draft_id_fkey" FOREIGN KEY ("review_draft_id") REFERENCES "public"."ai_review_drafts"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."job_material_allocations"
+    ADD CONSTRAINT "job_material_allocations_source_document_id_fkey" FOREIGN KEY ("source_document_id") REFERENCES "public"."documents"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."job_material_allocations"
+    ADD CONSTRAINT "job_material_allocations_workspace_id_fkey" FOREIGN KEY ("workspace_id") REFERENCES "public"."workspaces"("id") ON DELETE CASCADE;
+
+
+
 ALTER TABLE ONLY "public"."job_materials"
     ADD CONSTRAINT "job_materials_job_id_fkey" FOREIGN KEY ("job_id") REFERENCES "public"."jobs"("id") ON DELETE CASCADE;
 
@@ -1971,6 +2367,26 @@ ALTER TABLE ONLY "public"."jobs"
 
 ALTER TABLE ONLY "public"."jobs"
     ADD CONSTRAINT "jobs_workspace_id_fkey" FOREIGN KEY ("workspace_id") REFERENCES "public"."workspaces"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."material_catalog_items"
+    ADD CONSTRAINT "material_catalog_items_inventory_item_id_fkey" FOREIGN KEY ("inventory_item_id") REFERENCES "public"."inventory_items"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."material_catalog_items"
+    ADD CONSTRAINT "material_catalog_items_workspace_id_fkey" FOREIGN KEY ("workspace_id") REFERENCES "public"."workspaces"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."material_vendor_skus"
+    ADD CONSTRAINT "material_vendor_skus_material_id_fkey" FOREIGN KEY ("material_id") REFERENCES "public"."material_catalog_items"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."material_vendor_skus"
+    ADD CONSTRAINT "material_vendor_skus_workspace_id_fkey" FOREIGN KEY ("workspace_id") REFERENCES "public"."workspaces"("id") ON DELETE CASCADE;
 
 
 
@@ -2109,6 +2525,10 @@ CREATE POLICY "Workspace managers can delete inventory" ON "public"."inventory_i
 
 
 
+CREATE POLICY "Workspace managers can delete inventory lots" ON "public"."inventory_lots" FOR DELETE USING ("public"."is_workspace_manager"("workspace_id"));
+
+
+
 CREATE POLICY "Workspace managers can delete invoice line items" ON "public"."invoice_line_items" FOR DELETE USING ("public"."is_workspace_manager"("workspace_id"));
 
 
@@ -2133,11 +2553,23 @@ CREATE POLICY "Workspace managers can delete jobs" ON "public"."jobs" FOR DELETE
 
 
 
+CREATE POLICY "Workspace managers can delete material allocations" ON "public"."job_material_allocations" FOR DELETE USING ("public"."is_workspace_manager"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace managers can delete material catalog" ON "public"."material_catalog_items" FOR DELETE USING ("public"."is_workspace_manager"("workspace_id"));
+
+
+
 CREATE POLICY "Workspace managers can delete route plans" ON "public"."route_plans" FOR DELETE USING ("public"."is_workspace_manager"("workspace_id"));
 
 
 
 CREATE POLICY "Workspace managers can delete route stops" ON "public"."route_plan_stops" FOR DELETE USING ("public"."is_workspace_manager"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace managers can delete vendor SKUs" ON "public"."material_vendor_skus" FOR DELETE USING ("public"."is_workspace_manager"("workspace_id"));
 
 
 
@@ -2150,6 +2582,10 @@ CREATE POLICY "Workspace managers can remove memberships" ON "public"."workspace
 
 
 CREATE POLICY "Workspace managers can update AI review drafts" ON "public"."ai_review_drafts" FOR UPDATE USING ("public"."is_workspace_manager"("workspace_id")) WITH CHECK ("public"."is_workspace_manager"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace managers can update material allocations" ON "public"."job_material_allocations" FOR UPDATE USING ("public"."is_workspace_manager"("workspace_id")) WITH CHECK ("public"."is_workspace_manager"("workspace_id"));
 
 
 
@@ -2189,6 +2625,10 @@ CREATE POLICY "Workspace members can insert documents" ON "public"."documents" F
 
 
 
+CREATE POLICY "Workspace members can insert draft material allocations" ON "public"."job_material_allocations" FOR INSERT WITH CHECK (("public"."is_workspace_member"("workspace_id") AND ("status" = 'Draft'::"text")));
+
+
+
 CREATE POLICY "Workspace members can insert estimate line items" ON "public"."estimate_line_items" FOR INSERT WITH CHECK ("public"."is_workspace_member"("workspace_id"));
 
 
@@ -2202,6 +2642,10 @@ CREATE POLICY "Workspace members can insert expenses" ON "public"."expenses" FOR
 
 
 CREATE POLICY "Workspace members can insert inventory" ON "public"."inventory_items" FOR INSERT WITH CHECK ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can insert inventory lots" ON "public"."inventory_lots" FOR INSERT WITH CHECK ("public"."is_workspace_member"("workspace_id"));
 
 
 
@@ -2229,6 +2673,10 @@ CREATE POLICY "Workspace members can insert jobs" ON "public"."jobs" FOR INSERT 
 
 
 
+CREATE POLICY "Workspace members can insert material catalog" ON "public"."material_catalog_items" FOR INSERT WITH CHECK ("public"."is_workspace_member"("workspace_id"));
+
+
+
 CREATE POLICY "Workspace members can insert route plans" ON "public"."route_plans" FOR INSERT WITH CHECK ("public"."is_workspace_member"("workspace_id"));
 
 
@@ -2238,6 +2686,10 @@ CREATE POLICY "Workspace members can insert route stops" ON "public"."route_plan
 
 
 CREATE POLICY "Workspace members can insert settings" ON "public"."workspace_settings" FOR INSERT WITH CHECK ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can insert vendor SKUs" ON "public"."material_vendor_skus" FOR INSERT WITH CHECK ("public"."is_workspace_member"("workspace_id"));
 
 
 
@@ -2293,6 +2745,10 @@ CREATE POLICY "Workspace members can read inventory" ON "public"."inventory_item
 
 
 
+CREATE POLICY "Workspace members can read inventory lots" ON "public"."inventory_lots" FOR SELECT USING ("public"."is_workspace_member"("workspace_id"));
+
+
+
 CREATE POLICY "Workspace members can read invoice line items" ON "public"."invoice_line_items" FOR SELECT USING ("public"."is_workspace_member"("workspace_id"));
 
 
@@ -2317,6 +2773,18 @@ CREATE POLICY "Workspace members can read jobs" ON "public"."jobs" FOR SELECT US
 
 
 
+CREATE POLICY "Workspace members can read material allocations" ON "public"."job_material_allocations" FOR SELECT USING ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can read material catalog" ON "public"."material_catalog_items" FOR SELECT USING ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can read review draft revisions" ON "public"."ai_review_draft_revisions" FOR SELECT USING ("public"."is_workspace_member"("workspace_id"));
+
+
+
 CREATE POLICY "Workspace members can read route plans" ON "public"."route_plans" FOR SELECT USING ("public"."is_workspace_member"("workspace_id"));
 
 
@@ -2326,6 +2794,10 @@ CREATE POLICY "Workspace members can read route stops" ON "public"."route_plan_s
 
 
 CREATE POLICY "Workspace members can read settings" ON "public"."workspace_settings" FOR SELECT USING ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can read vendor SKUs" ON "public"."material_vendor_skus" FOR SELECT USING ("public"."is_workspace_member"("workspace_id"));
 
 
 
@@ -2377,6 +2849,10 @@ CREATE POLICY "Workspace members can update inventory" ON "public"."inventory_it
 
 
 
+CREATE POLICY "Workspace members can update inventory lots" ON "public"."inventory_lots" FOR UPDATE USING ("public"."is_workspace_member"("workspace_id")) WITH CHECK ("public"."is_workspace_member"("workspace_id"));
+
+
+
 CREATE POLICY "Workspace members can update invoice line items" ON "public"."invoice_line_items" FOR UPDATE USING ("public"."is_workspace_member"("workspace_id")) WITH CHECK ("public"."is_workspace_member"("workspace_id"));
 
 
@@ -2401,6 +2877,10 @@ CREATE POLICY "Workspace members can update jobs" ON "public"."jobs" FOR UPDATE 
 
 
 
+CREATE POLICY "Workspace members can update material catalog" ON "public"."material_catalog_items" FOR UPDATE USING ("public"."is_workspace_member"("workspace_id")) WITH CHECK ("public"."is_workspace_member"("workspace_id"));
+
+
+
 CREATE POLICY "Workspace members can update route plans" ON "public"."route_plans" FOR UPDATE USING ("public"."is_workspace_member"("workspace_id")) WITH CHECK ("public"."is_workspace_member"("workspace_id"));
 
 
@@ -2410,6 +2890,10 @@ CREATE POLICY "Workspace members can update route stops" ON "public"."route_plan
 
 
 CREATE POLICY "Workspace members can update settings" ON "public"."workspace_settings" FOR UPDATE USING ("public"."is_workspace_member"("workspace_id")) WITH CHECK ("public"."is_workspace_member"("workspace_id"));
+
+
+
+CREATE POLICY "Workspace members can update vendor SKUs" ON "public"."material_vendor_skus" FOR UPDATE USING ("public"."is_workspace_member"("workspace_id")) WITH CHECK ("public"."is_workspace_member"("workspace_id"));
 
 
 
@@ -2437,6 +2921,9 @@ ALTER TABLE "public"."admin_audit_logs" ENABLE ROW LEVEL SECURITY;
 
 
 ALTER TABLE "public"."ai_jobs" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."ai_review_draft_revisions" ENABLE ROW LEVEL SECURITY;
 
 
 ALTER TABLE "public"."ai_review_drafts" ENABLE ROW LEVEL SECURITY;
@@ -2475,6 +2962,9 @@ ALTER TABLE "public"."expenses" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."inventory_items" ENABLE ROW LEVEL SECURITY;
 
 
+ALTER TABLE "public"."inventory_lots" ENABLE ROW LEVEL SECURITY;
+
+
 ALTER TABLE "public"."invoice_line_items" ENABLE ROW LEVEL SECURITY;
 
 
@@ -2487,10 +2977,19 @@ ALTER TABLE "public"."invoices" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."job_activity" ENABLE ROW LEVEL SECURITY;
 
 
+ALTER TABLE "public"."job_material_allocations" ENABLE ROW LEVEL SECURITY;
+
+
 ALTER TABLE "public"."job_materials" ENABLE ROW LEVEL SECURITY;
 
 
 ALTER TABLE "public"."jobs" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."material_catalog_items" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."material_vendor_skus" ENABLE ROW LEVEL SECURITY;
 
 
 ALTER TABLE "public"."platform_admins" ENABLE ROW LEVEL SECURITY;
@@ -2527,6 +3026,25 @@ GRANT ALL ON FUNCTION "public"."accept_workspace_invites_for_current_user"() TO 
 
 
 
+GRANT ALL ON FUNCTION "public"."capture_ai_review_draft_revision"() TO "anon";
+GRANT ALL ON FUNCTION "public"."capture_ai_review_draft_revision"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."capture_ai_review_draft_revision"() TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."job_material_allocations" TO "anon";
+GRANT ALL ON TABLE "public"."job_material_allocations" TO "authenticated";
+GRANT ALL ON TABLE "public"."job_material_allocations" TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."create_material_allocation_draft"("target_workspace_id" "uuid", "target_job_id" "uuid", "allocation_mode" "text", "material_rows" "jsonb", "source_document_id" "uuid", "source_review_draft_id" "uuid") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."create_material_allocation_draft"("target_workspace_id" "uuid", "target_job_id" "uuid", "allocation_mode" "text", "material_rows" "jsonb", "source_document_id" "uuid", "source_review_draft_id" "uuid") TO "anon";
+GRANT ALL ON FUNCTION "public"."create_material_allocation_draft"("target_workspace_id" "uuid", "target_job_id" "uuid", "allocation_mode" "text", "material_rows" "jsonb", "source_document_id" "uuid", "source_review_draft_id" "uuid") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."create_material_allocation_draft"("target_workspace_id" "uuid", "target_job_id" "uuid", "allocation_mode" "text", "material_rows" "jsonb", "source_document_id" "uuid", "source_review_draft_id" "uuid") TO "service_role";
+
+
+
 GRANT ALL ON TABLE "public"."workspaces" TO "anon";
 GRANT ALL ON TABLE "public"."workspaces" TO "authenticated";
 GRANT ALL ON TABLE "public"."workspaces" TO "service_role";
@@ -2536,6 +3054,12 @@ GRANT ALL ON TABLE "public"."workspaces" TO "service_role";
 GRANT ALL ON FUNCTION "public"."create_workspace_with_owner"("workspace_id" "uuid", "workspace_name" "text", "workspace_type" "text") TO "anon";
 GRANT ALL ON FUNCTION "public"."create_workspace_with_owner"("workspace_id" "uuid", "workspace_name" "text", "workspace_type" "text") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."create_workspace_with_owner"("workspace_id" "uuid", "workspace_name" "text", "workspace_type" "text") TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."ensure_material_catalog_item"() TO "anon";
+GRANT ALL ON FUNCTION "public"."ensure_material_catalog_item"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."ensure_material_catalog_item"() TO "service_role";
 
 
 
@@ -2652,6 +3176,12 @@ GRANT ALL ON TABLE "public"."ai_jobs" TO "service_role";
 
 
 
+GRANT ALL ON TABLE "public"."ai_review_draft_revisions" TO "anon";
+GRANT ALL ON TABLE "public"."ai_review_draft_revisions" TO "authenticated";
+GRANT ALL ON TABLE "public"."ai_review_draft_revisions" TO "service_role";
+
+
+
 GRANT ALL ON TABLE "public"."ai_review_drafts" TO "anon";
 GRANT ALL ON TABLE "public"."ai_review_drafts" TO "authenticated";
 GRANT ALL ON TABLE "public"."ai_review_drafts" TO "service_role";
@@ -2724,6 +3254,12 @@ GRANT ALL ON TABLE "public"."inventory_items" TO "service_role";
 
 
 
+GRANT ALL ON TABLE "public"."inventory_lots" TO "anon";
+GRANT ALL ON TABLE "public"."inventory_lots" TO "authenticated";
+GRANT ALL ON TABLE "public"."inventory_lots" TO "service_role";
+
+
+
 GRANT ALL ON TABLE "public"."invoice_line_items" TO "anon";
 GRANT ALL ON TABLE "public"."invoice_line_items" TO "authenticated";
 GRANT ALL ON TABLE "public"."invoice_line_items" TO "service_role";
@@ -2745,6 +3281,18 @@ GRANT ALL ON TABLE "public"."job_activity" TO "service_role";
 GRANT ALL ON TABLE "public"."job_materials" TO "anon";
 GRANT ALL ON TABLE "public"."job_materials" TO "authenticated";
 GRANT ALL ON TABLE "public"."job_materials" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."material_catalog_items" TO "anon";
+GRANT ALL ON TABLE "public"."material_catalog_items" TO "authenticated";
+GRANT ALL ON TABLE "public"."material_catalog_items" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."material_vendor_skus" TO "anon";
+GRANT ALL ON TABLE "public"."material_vendor_skus" TO "authenticated";
+GRANT ALL ON TABLE "public"."material_vendor_skus" TO "service_role";
 
 
 
@@ -2802,12 +3350,3 @@ ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TAB
 ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TABLES TO "anon";
 ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TABLES TO "authenticated";
 ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TABLES TO "service_role";
-
-
-
-
-
-
-\unrestrict rS1CzC0pWoSDbQobc2NcPvKcLSgzg8zf4YRxo0K09aKEmjKoqAqYl7yZ5V6NX2z
-
-RESET ALL;

@@ -15,6 +15,8 @@ import type { ClientRow } from "@/lib/clientTypes";
 import { InvoiceRow, InvoiceSetupDraft } from "@/lib/frontierInvoices";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { getWorkspaceDisplayName } from "@/lib/workspaceDisplay";
+import { consumeAiFormHydration, payloadString } from "@/lib/ai/formHydration";
+import type { DraftPayload } from "@/lib/ai/types";
 
 type WorkspaceInvoiceSettings = {
   workspaceId: string;
@@ -161,6 +163,32 @@ function NewInvoiceContent() {
     formatPhone(startingClient?.phone ?? "")
   );
   const [billToEmail, setBillToEmail] = useState(startingClient?.email ?? "");
+  const [aiInvoicePayload, setAiInvoicePayload] = useState<DraftPayload | null>(null);
+  const [footerMessage, setFooterMessage] = useState("Thank you for your business!");
+  const [contactMessage, setContactMessage] = useState("Please contact us with any questions about this invoice.");
+
+  useEffect(() => {
+    const hydration = consumeAiFormHydration("invoice", activeWorkspace.id);
+    if (!hydration) return;
+
+    queueMicrotask(() => {
+      const payload = hydration.payload;
+      setAiInvoicePayload(payload);
+      setSelectedClientId(payloadString(payload, "clientId") || "new");
+      setSelectedJobId(payloadString(payload, "jobId"));
+      setInvoiceNumber(payloadString(payload, "invoiceNumber"));
+      setInvoiceDate(payloadString(payload, "date") || getTodayDate());
+      setBillToName(payloadString(payload, "clientName") || payloadString(payload, "billToName"));
+      setBillToCompany(payloadString(payload, "billToCompany"));
+      setBillToAddress(payloadString(payload, "billToAddress"));
+      setBillToCity(payloadString(payload, "billToCity"));
+      setBillToState(payloadString(payload, "billToState"));
+      setBillToZip(payloadString(payload, "billToZip"));
+      setBillToPhone(payloadString(payload, "billToPhone"));
+      setBillToEmail(payloadString(payload, "billToEmail"));
+      setFooterMessage(payloadString(payload, "notes") || "Thank you for your business!");
+    });
+  }, [activeWorkspace.id]);
 
   useEffect(() => {
     if (!startingJob || selectedJobId === startingJob.id) return;
@@ -183,9 +211,6 @@ function NewInvoiceContent() {
       }
     });
   }, [selectedJobId, startingClient, startingJob]);
-
-  const [footerMessage, setFooterMessage] = useState("Thank you for your business!");
-  const [contactMessage, setContactMessage] = useState("Please contact us with any questions about this invoice.");
 
   const savedWorkspaceSettings = workspaceSettings.find(
     (settings) => settings.workspaceId === activeWorkspace.id
@@ -296,12 +321,31 @@ function NewInvoiceContent() {
       contactMessage: contactMessage.trim(),
     };
 
+    if (aiInvoicePayload) {
+      const rawLineItems = aiInvoicePayload.lineItems;
+      if (Array.isArray(rawLineItems)) {
+        Object.assign(draft, {
+          lineItems: rawLineItems.flatMap((item) => {
+            if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+            const description = typeof item.description === "string" ? item.description : "";
+            const quantity = typeof item.quantity === "number" ? item.quantity : 1;
+            const price = typeof item.unitPrice === "number" || typeof item.unitPrice === "string"
+              ? String(item.unitPrice)
+              : "";
+            return description ? [{ id: crypto.randomUUID(), description, quantity, unitPrice: price }] : [];
+          }),
+          taxRate: typeof aiInvoicePayload.taxRate === "number" ? String(aiInvoicePayload.taxRate) : "",
+          status: payloadString(aiInvoicePayload, "status") || "Draft",
+        });
+      }
+    }
+
     writeStoredJson(storageKeys.invoiceDraft, draft);
     router.push("/invoices/new/build");
   }
 
   const inputClass =
-    "rounded-lg border border-gray-300 p-3 text-sm dark:border-gray-700 dark:bg-gray-800";
+    "rounded-lg border border-gray-300 bg-white p-3 text-sm text-gray-950 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100";
   const labelClass = "mb-2 block text-sm font-medium";
 
   return (

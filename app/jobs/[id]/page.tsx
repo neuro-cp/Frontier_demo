@@ -68,6 +68,7 @@ export default function JobPage() {
   const [editClientId, setEditClientId] = useState("");
   const [editStatus, setEditStatus] = useState<JobStatus>("Lead");
   const [editDate, setEditDate] = useState("");
+  const [editTime, setEditTime] = useState("");
   const [editValue, setEditValue] = useState("");
   const [editNotes, setEditNotes] = useState("");
 
@@ -145,6 +146,7 @@ export default function JobPage() {
     setEditClientId(matchedClient?.id ?? "");
     setEditStatus(job.status);
     setEditDate(job.date);
+    setEditTime(job.time ?? "");
     setEditValue(job.value.replace("$", "").replace(",", ""));
     setEditNotes(job.notes ?? "");
     setEditMaterials(job.materials ?? []);
@@ -197,6 +199,7 @@ export default function JobPage() {
       client: selectedClient.name,
       status: editStatus,
       date: editDate,
+      time: editTime,
       value: formattedValue,
       notes: editNotes,
       materials: editMaterials,
@@ -275,7 +278,7 @@ export default function JobPage() {
             <strong>Status:</strong>
             <span className={`rounded-full px-3 py-1 text-sm font-semibold ${getStatusClasses(job.status)}`}>{job.status}</span>
           </div>
-          <p><strong>Scheduled Date:</strong> {job.date || "-"}</p>
+          <p><strong>Scheduled:</strong> {job.date || "-"}{job.time ? ` at ${job.time}` : ""}</p>
           <p><strong>Estimated Value:</strong> {job.value}</p>
         </div>
       </div>
@@ -364,7 +367,10 @@ export default function JobPage() {
               <select value={editStatus} onChange={(event) => setEditStatus(event.target.value as JobStatus)} className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800">
                 {jobStatuses.map((statusItem) => <option key={statusItem}>{statusItem}</option>)}
               </select>
-              <input type="date" value={editDate} onChange={(event) => setEditDate(event.target.value)} className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800" />
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <input type="date" value={editDate} onChange={(event) => setEditDate(event.target.value)} className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800" />
+                <input type="time" value={editTime} onChange={(event) => setEditTime(event.target.value)} className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800" />
+              </div>
               <input type="number" value={editValue} onChange={(event) => setEditValue(event.target.value)} placeholder="Estimated Value" className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800" />
 
               <div className="rounded-xl border border-gray-200 p-4 dark:border-gray-800">

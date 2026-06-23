@@ -43,6 +43,19 @@ function formatDateString(date: Date) {
   return `${year}-${month}-${day}`;
 }
 
+function formatTime(value?: string) {
+  if (!value) return "Unscheduled time";
+  const [hourValue, minute = "00"] = value.split(":");
+  const hour = Number(hourValue);
+  const suffix = hour >= 12 ? "PM" : "AM";
+  const displayHour = hour % 12 || 12;
+  return `${displayHour}:${minute} ${suffix}`;
+}
+
+function scheduleKey(date: string, time?: string) {
+  return `${date}T${time || "23:59"}`;
+}
+
 export default function CalendarPage() {
   const { activeWorkspace } = useWorkspace();
   const { isSupabaseConfigured, user } = useAuthSession();
@@ -66,11 +79,13 @@ export default function CalendarPage() {
     const today = new Date();
     return new Date(today.getFullYear(), today.getMonth(), 1);
   });
+  const [selectedDay, setSelectedDay] = useState(() => formatDateString(new Date()));
 
   const [clientEventOpen, setClientEventOpen] = useState(false);
   const [clientEventClientId, setClientEventClientId] = useState("");
   const [clientEventTitle, setClientEventTitle] = useState("");
   const [clientEventDate, setClientEventDate] = useState("");
+  const [clientEventTime, setClientEventTime] = useState("");
   const clientEventClientRef = useRef<HTMLSelectElement | null>(null);
   const clientEventTitleRef = useRef<HTMLInputElement | null>(null);
   const clientEventDateRef = useRef<HTMLInputElement | null>(null);
@@ -133,16 +148,31 @@ export default function CalendarPage() {
   });
 
   function goToPreviousMonth() {
+    if (view === "day") {
+      const date = new Date(`${selectedDay}T00:00:00`);
+      date.setDate(date.getDate() - 1);
+      setSelectedDay(formatDateString(date));
+      setCurrentMonth(new Date(date.getFullYear(), date.getMonth(), 1));
+      return;
+    }
     setCurrentMonth(new Date(monthYear, monthIndex - 1, 1));
   }
 
   function goToNextMonth() {
+    if (view === "day") {
+      const date = new Date(`${selectedDay}T00:00:00`);
+      date.setDate(date.getDate() + 1);
+      setSelectedDay(formatDateString(date));
+      setCurrentMonth(new Date(date.getFullYear(), date.getMonth(), 1));
+      return;
+    }
     setCurrentMonth(new Date(monthYear, monthIndex + 1, 1));
   }
 
   function goToToday() {
     const today = new Date();
     setCurrentMonth(new Date(today.getFullYear(), today.getMonth(), 1));
+    setSelectedDay(formatDateString(today));
   }
 
   function saveClientEvents(updatedEvents: ClientCalendarEvent[]) {
@@ -155,6 +185,7 @@ export default function CalendarPage() {
     setClientEventClientId("");
     setClientEventTitle("");
     setClientEventDate("");
+    setClientEventTime("");
   }
 
   async function addClientEvent() {
@@ -174,6 +205,7 @@ export default function CalendarPage() {
       clientName: selectedClient.name,
       title: selectedTitle.trim() || "Client Follow-up",
       date: selectedDate,
+      time: clientEventTime,
     };
 
     try {
@@ -208,11 +240,17 @@ export default function CalendarPage() {
   });
 
   const agendaItems = [
-    ...workspaceJobs.map((job) => ({ type: "job" as const, date: job.date, job })),
-    ...workspaceClientEvents.map((event) => ({ type: "client" as const, date: event.date, event })),
-  ].sort((a, b) => a.date.localeCompare(b.date));
+    ...workspaceJobs.map((job) => ({ type: "job" as const, date: job.date, time: job.time, job })),
+    ...workspaceClientEvents.map((event) => ({ type: "client" as const, date: event.date, time: event.time, event })),
+  ].sort((a, b) => scheduleKey(a.date, a.time).localeCompare(scheduleKey(b.date, b.time)));
 
   const weekItems = agendaItems.slice(0, 7);
+  const dayItems = agendaItems.filter((item) => item.date === selectedDay);
+
+  function openDay(dayString: string) {
+    setSelectedDay(dayString);
+    setView("day");
+  }
 
   return (
     <div className="space-y-6">
@@ -223,6 +261,7 @@ export default function CalendarPage() {
           <button type="button" onClick={goToNextMonth} className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-800">Next</button>
           <select value={view} onChange={(event) => setView(event.target.value)} className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100">
             <option value="month">Month View</option>
+            <option value="day">Day View</option>
             <option value="week">Week View</option>
             <option value="agenda">Agenda View</option>
           </select>
@@ -263,13 +302,20 @@ export default function CalendarPage() {
 
                   return (
                     <div key={index} className="min-h-24 rounded-lg border border-gray-200 p-2 dark:border-gray-800 lg:min-h-28">
-                      <div className="font-semibold text-gray-950 dark:text-gray-100">{day ? day.getDate() : ""}</div>
-                      {dayJobs.map((job) => (
-                        <Link key={job.id} href={`/jobs/${job.id}`} className={`mt-1 block rounded px-2 py-1 text-xs font-medium text-white hover:opacity-90 ${getJobColor(job.status)}`}>{job.name}</Link>
-                      ))}
-                      {dayClientEvents.map((event) => (
-                        <Link key={event.id} href={`/clients/${event.clientId}`} className="mt-1 block rounded bg-teal-600 px-2 py-1 text-xs font-medium text-white hover:opacity-90">{event.title}: {getClientEventDisplayName(event)}</Link>
-                      ))}
+                      {day ? (
+                        <button type="button" onClick={() => openDay(dayString)} className="font-semibold text-gray-950 hover:text-blue-600 dark:text-gray-100 dark:hover:text-blue-400">{day.getDate()}</button>
+                      ) : null}
+                      {[...dayJobs.map((job) => ({ type: "job" as const, time: job.time, job })), ...dayClientEvents.map((event) => ({ type: "client" as const, time: event.time, event }))]
+                        .sort((a, b) => (a.time || "23:59").localeCompare(b.time || "23:59"))
+                        .slice(0, 2)
+                        .map((item) => item.type === "job" ? (
+                          <Link key={item.job.id} href={`/jobs/${item.job.id}`} className={`mt-1 block truncate rounded px-2 py-1 text-xs font-medium text-white hover:opacity-90 ${getJobColor(item.job.status)}`}>{item.job.time ? `${formatTime(item.job.time)} · ` : ""}{item.job.name}</Link>
+                        ) : (
+                          <Link key={item.event.id} href={`/clients/${item.event.clientId}`} className="mt-1 block truncate rounded bg-teal-600 px-2 py-1 text-xs font-medium text-white hover:opacity-90">{item.event.time ? `${formatTime(item.event.time)} · ` : ""}{item.event.title}</Link>
+                        ))}
+                      {dayJobs.length + dayClientEvents.length > 2 && (
+                        <button type="button" onClick={() => openDay(dayString)} className="mt-1 w-full rounded border border-gray-300 px-2 py-1 text-left text-xs font-semibold text-blue-600 hover:bg-blue-50 dark:border-gray-700 dark:text-blue-400 dark:hover:bg-gray-800">+{dayJobs.length + dayClientEvents.length - 2} more</button>
+                      )}
                     </div>
                   );
                 })}
@@ -278,21 +324,44 @@ export default function CalendarPage() {
           </>
         )}
 
-        {view !== "month" && (
+        {view === "day" && (
+          <div>
+            <div className="mb-5 flex flex-col gap-1 border-b border-gray-200 pb-4 dark:border-gray-800">
+              <h2 className="text-2xl font-bold">{new Date(`${selectedDay}T00:00:00`).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })}</h2>
+              <p className="text-sm text-gray-500 dark:text-gray-400">{dayItems.length} scheduled item(s)</p>
+            </div>
+            <div className="space-y-3">
+              {dayItems.length ? dayItems.map((item) => item.type === "job" ? (
+                <Link key={`day-job-${item.job.id}`} href={`/jobs/${item.job.id}`} className="flex flex-col gap-3 rounded-lg border border-gray-200 p-4 hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-800 sm:flex-row sm:items-center">
+                  <div className="w-28 shrink-0 font-bold text-blue-600 dark:text-blue-400">{formatTime(item.job.time)}</div>
+                  <div className="min-w-0 flex-1"><div className="font-semibold">{item.job.name}</div><div className="text-sm text-gray-500 dark:text-gray-400">{item.job.client}</div></div>
+                  <span className={`self-start rounded px-3 py-1 text-xs font-medium text-white sm:self-auto ${getJobColor(item.job.status)}`}>{item.job.status}</span>
+                </Link>
+              ) : (
+                <Link key={`day-client-${item.event.id}`} href={`/clients/${item.event.clientId}`} className="flex flex-col gap-3 rounded-lg border border-teal-200 p-4 hover:bg-teal-50 dark:border-teal-900 dark:hover:bg-teal-950/30 sm:flex-row sm:items-center">
+                  <div className="w-28 shrink-0 font-bold text-teal-700 dark:text-teal-300">{formatTime(item.event.time)}</div>
+                  <div><div className="font-semibold">{item.event.title}</div><div className="text-sm text-gray-500 dark:text-gray-400">{getClientEventDisplayName(item.event)}</div></div>
+                </Link>
+              )) : <div className="rounded-lg border border-dashed border-gray-300 p-8 text-center text-gray-500 dark:border-gray-700 dark:text-gray-400">Nothing scheduled for this day.</div>}
+            </div>
+          </div>
+        )}
+
+        {view !== "month" && view !== "day" && (
           <div className="space-y-3">
             {(view === "week" ? weekItems : agendaItems).length > 0 ? (
               (view === "week" ? weekItems : agendaItems).map((item) =>
                 item.type === "job" ? (
                   <Link key={`job-${item.job.id}`} href={`/jobs/${item.job.id}`} className="block rounded-xl border border-gray-200 p-4 hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-800">
                     <div className="flex items-center justify-between">
-                      <div><div className="font-semibold text-blue-600 hover:underline dark:text-blue-400">{item.job.name}</div><div className="text-sm text-gray-500 dark:text-gray-400">{item.job.date}</div></div>
+                      <div><div className="font-semibold text-blue-600 hover:underline dark:text-blue-400">{item.job.name}</div><div className="text-sm text-gray-500 dark:text-gray-400">{item.job.date} · {formatTime(item.job.time)}</div></div>
                       <span className={`rounded px-3 py-1 text-xs font-medium text-white ${getJobColor(item.job.status)}`}>{item.job.status}</span>
                     </div>
                   </Link>
                 ) : (
                   <Link key={`client-${item.event.id}`} href={`/clients/${item.event.clientId}`} className="block rounded-xl border border-teal-200 p-4 hover:bg-teal-50 dark:border-teal-900 dark:hover:bg-teal-950/30">
                     <div className="font-semibold text-teal-700 dark:text-teal-300">{item.event.title}</div>
-                    <div className="text-sm text-gray-500 dark:text-gray-400">{getClientEventDisplayName(item.event)} - {item.event.date}</div>
+                    <div className="text-sm text-gray-500 dark:text-gray-400">{getClientEventDisplayName(item.event)} - {item.event.date} · {formatTime(item.event.time)}</div>
                   </Link>
                 )
               )
@@ -317,6 +386,7 @@ export default function CalendarPage() {
               </select>
               <input ref={clientEventTitleRef} type="text" value={clientEventTitle} onChange={(event) => setClientEventTitle(event.target.value)} placeholder="Follow-up, estimate, walkthrough..." className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800" />
               <input ref={clientEventDateRef} type="date" value={clientEventDate} onChange={(event) => setClientEventDate(event.target.value)} className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800" />
+              <input type="time" value={clientEventTime} onChange={(event) => setClientEventTime(event.target.value)} className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800" />
               <button type="button" onClick={addClientEvent} className="w-full rounded-lg bg-blue-600 py-3 text-white hover:bg-blue-700">Add to Calendar</button>
             </div>
           </div>

@@ -3,11 +3,19 @@ import "server-only";
 import { NextResponse } from "next/server";
 
 import { createServiceRoleClient } from "@/lib/platformAdmin/server";
+import { resolveWorkspacePlan } from "@/lib/plans/server";
 import { RateLimitError } from "@/lib/rateLimit/policy";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 
 export function jsonError(message: string, status: number) {
   return NextResponse.json({ error: message }, { status });
+}
+
+export function planUpgradeError() {
+  return NextResponse.json(
+    { error: "Your workspace plan does not include this service.", code: "plan_upgrade_required" },
+    { status: 402 }
+  );
 }
 
 export function cleanRouteError(error: unknown, fallback: string) {
@@ -49,5 +57,11 @@ export async function requireWorkspaceAccess(workspaceId?: string) {
     };
   }
 
-  return { ok: true as const, serviceClient, userId: user.id, workspaceId };
+  return {
+    ok: true as const,
+    serviceClient,
+    userId: user.id,
+    workspaceId,
+    plan: resolveWorkspacePlan(),
+  };
 }

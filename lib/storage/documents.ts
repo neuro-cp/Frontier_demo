@@ -1,5 +1,3 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
-
 export const DOCUMENT_STORAGE_BUCKET = "workspace-documents";
 
 export type DocumentEntityType = "client" | "job" | "invoice" | "workspace";
@@ -53,49 +51,49 @@ export function getDocumentEntity({
 }
 
 export async function uploadDocumentFile({
-  supabase,
+  workspaceId,
   path,
   file,
 }: {
-  supabase: SupabaseClient;
+  workspaceId: string;
   path: string;
   file: File;
 }) {
-  const { error } = await supabase.storage
-    .from(DOCUMENT_STORAGE_BUCKET)
-    .upload(path, file, {
-      contentType: file.type || undefined,
-      upsert: false,
-    });
-
-  if (error) throw new Error(error.message || "Unable to upload document.");
+  const formData = new FormData();
+  formData.append("workspaceId", workspaceId);
+  formData.append("path", path);
+  formData.append("file", file);
+  const response = await fetch("/api/documents/storage", { method: "POST", body: formData });
+  const payload = (await response.json()) as { error?: string };
+  if (!response.ok) throw new Error(payload.error || "Unable to upload document.");
 }
 
 export async function createDocumentDownloadUrl({
-  supabase,
+  workspaceId,
   path,
 }: {
-  supabase: SupabaseClient;
+  workspaceId: string;
   path: string;
 }) {
-  const { data, error } = await supabase.storage
-    .from(DOCUMENT_STORAGE_BUCKET)
-    .createSignedUrl(path, 60);
-
-  if (error) throw new Error(error.message || "Unable to create download link.");
-  return data.signedUrl;
+  const query = new URLSearchParams({ workspaceId, path });
+  const response = await fetch(`/api/documents/storage?${query.toString()}`);
+  const payload = (await response.json()) as { url?: string; error?: string };
+  if (!response.ok || !payload.url) throw new Error(payload.error || "Unable to create download link.");
+  return payload.url;
 }
 
 export async function removeDocumentFile({
-  supabase,
+  workspaceId,
   path,
 }: {
-  supabase: SupabaseClient;
+  workspaceId: string;
   path: string;
 }) {
-  const { error } = await supabase.storage
-    .from(DOCUMENT_STORAGE_BUCKET)
-    .remove([path]);
-
-  if (error) throw new Error(error.message || "Unable to remove document file.");
+  const response = await fetch("/api/documents/storage", {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ workspaceId, path }),
+  });
+  const payload = (await response.json()) as { error?: string };
+  if (!response.ok) throw new Error(payload.error || "Unable to remove document file.");
 }

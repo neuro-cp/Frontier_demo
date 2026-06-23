@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { getOcrProviderMode, runOcrExtraction } from "@/lib/ocr/provider";
+import { canUseOcr } from "@/lib/plans/capabilities";
+import { resolveWorkspacePlan } from "@/lib/plans/server";
+import { checkUserAndWorkspaceDailyLimits } from "@/lib/rateLimit/dailyCounters";
+import { RateLimitError } from "@/lib/rateLimit/policy";
+import { planUpgradeError } from "@/lib/services/routeProtection";
+import { serviceLimits } from "@/lib/services/serviceLimits";
 import { DOCUMENT_STORAGE_BUCKET } from "@/lib/storage";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 
@@ -45,6 +51,18 @@ export async function POST(request: NextRequest) {
 
   if (membershipError || !membership) {
     return jsonError("You do not have access to this workspace.", 403);
+  }
+  if (!canUseOcr(resolveWorkspacePlan())) return planUpgradeError();
+  try {
+    checkUserAndWorkspaceDailyLimits({
+      service: "ocr",
+      userId: user.id,
+      workspaceId: body.workspaceId,
+      userLimit: serviceLimits.ocr.maxRequestsPerUserPerDay(),
+      workspaceLimit: serviceLimits.ocr.maxRequestsPerWorkspacePerDay(),
+    });
+  } catch (error) {
+    return jsonError(error instanceof Error ? error.message : "OCR quota exceeded.", error instanceof RateLimitError ? error.status : 429);
   }
 
   const { data: document, error: documentError } = await supabase

@@ -9,13 +9,17 @@ import {
   updateDocumentAction,
 } from "@/lib/actions/documents";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
+import type { ClientRow } from "@/lib/clientTypes";
+import { createClientsRepository } from "@/lib/db/clients";
 import {
   createDocumentsRepository,
   type DocumentProcessingStatus,
   type StoredDocument,
 } from "@/lib/db/documents";
 import { createInvoicesRepository } from "@/lib/db/invoices";
+import { createJobsRepository } from "@/lib/db/jobs";
 import type { InvoiceRow } from "@/lib/frontierInvoices";
+import type { Job } from "@/lib/jobTypes";
 import {
   DOCUMENT_STORAGE_BUCKET,
   buildDocumentStoragePath,
@@ -26,21 +30,6 @@ import {
 } from "@/lib/storage";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { getWorkspaceDisplayName } from "@/lib/workspaceDisplay";
-
-type ClientLike = {
-  id: string;
-  workspaceId: string;
-  name: string;
-};
-
-type JobLike = {
-  id: string;
-  workspaceId: string;
-  jobName?: string;
-  name?: string;
-  clientId?: string;
-  client?: string;
-};
 
 type ApiDocument = {
   id: string;
@@ -71,8 +60,8 @@ type ApiDocument = {
   document_type?: string | null;
 };
 
-function getJobDisplayName(job: JobLike) {
-  return job.jobName || job.name || "Untitled job";
+function getJobDisplayName(job: Job) {
+  return job.name || "Untitled job";
 }
 
 function apiDocumentToStoredDocument(document: ApiDocument): StoredDocument {
@@ -118,14 +107,16 @@ export default function DocumentsPage() {
     []
   );
   const [databaseDocuments, setDatabaseDocuments] = useState<StoredDocument[]>([]);
-  const [clients] = useStoredJsonState<ClientLike[]>(
+  const [localClients, setLocalClients] = useStoredJsonState<ClientRow[]>(
     storageKeys.clients,
     []
   );
-  const [jobs] = useStoredJsonState<JobLike[]>(
+  const [databaseClients, setDatabaseClients] = useState<ClientRow[]>([]);
+  const [localJobs, setLocalJobs] = useStoredJsonState<Job[]>(
     storageKeys.jobs,
     []
   );
+  const [databaseJobs, setDatabaseJobs] = useState<Job[]>([]);
   const [localInvoices, setLocalInvoices] = useStoredJsonState<InvoiceRow[]>(
     storageKeys.invoices,
     []
@@ -155,8 +146,12 @@ export default function DocumentsPage() {
   const supabase = useMemo(() => (isDatabaseMode ? createBrowserSupabaseClient() : null), [isDatabaseMode]);
   const documentsRepo = useMemo(() => createDocumentsRepository({ isSignedIn: isDatabaseMode, supabase, localDocuments, setLocalDocuments }), [isDatabaseMode, localDocuments, setLocalDocuments, supabase]);
   const invoicesRepo = useMemo(() => createInvoicesRepository({ isSignedIn: isDatabaseMode, supabase, localInvoices, setLocalInvoices }), [isDatabaseMode, localInvoices, setLocalInvoices, supabase]);
+  const clientsRepo = useMemo(() => createClientsRepository({ isSignedIn: isDatabaseMode, supabase, localClients, setLocalClients }), [isDatabaseMode, localClients, setLocalClients, supabase]);
+  const jobsRepo = useMemo(() => createJobsRepository({ isSignedIn: isDatabaseMode, supabase, localJobs, setLocalJobs }), [isDatabaseMode, localJobs, setLocalJobs, supabase]);
   const documents = isDatabaseMode ? databaseDocuments : localDocuments;
   const invoices = isDatabaseMode ? databaseInvoices : localInvoices;
+  const clients = isDatabaseMode ? databaseClients : localClients;
+  const jobs = isDatabaseMode ? databaseJobs : localJobs;
 
   useEffect(() => {
     if (!isDatabaseMode) return;
@@ -164,18 +159,22 @@ export default function DocumentsPage() {
     Promise.all([
       documentsRepo.getDocuments(activeWorkspace.id),
       invoicesRepo.getInvoices(activeWorkspace.id),
+      clientsRepo.getClients(activeWorkspace.id),
+      jobsRepo.getJobs(activeWorkspace.id),
     ])
-      .then(([items, invoiceItems]) => {
+      .then(([items, invoiceItems, clientItems, jobItems]) => {
         if (!cancelled) {
           setDatabaseDocuments(items);
           setDatabaseInvoices(invoiceItems);
+          setDatabaseClients(clientItems);
+          setDatabaseJobs(jobItems);
         }
       })
       .catch((error) => {
         if (!cancelled) setDocumentError(error instanceof Error ? error.message : "Unable to load documents.");
       });
     return () => { cancelled = true; };
-  }, [activeWorkspace.id, documentsRepo, invoicesRepo, isDatabaseMode]);
+  }, [activeWorkspace.id, clientsRepo, documentsRepo, invoicesRepo, isDatabaseMode, jobsRepo]);
 
   const workspaceDocuments = documents.filter(
     (document) => document.workspaceId === activeWorkspace.id
@@ -243,7 +242,7 @@ export default function DocumentsPage() {
     const documentId = crypto.randomUUID();
     const entity = getDocumentEntity({ clientId, jobId, invoiceId });
     const storageFileName = selectedFile ? `${documentId}-${selectedFile.name}` : fileName;
-    const storagePath = storageFileName
+    const storagePath = isDatabaseMode && storageFileName
       ? buildDocumentStoragePath({
           workspaceId: activeWorkspace.id,
           entityType: entity.entityType,
@@ -276,7 +275,7 @@ export default function DocumentsPage() {
 
     try {
       if (isDatabaseMode && supabase && selectedFile && storagePath) {
-        await uploadDocumentFile({ supabase, path: storagePath, file: selectedFile });
+        await uploadDocumentFile({ workspaceId: activeWorkspace.id, path: storagePath, file: selectedFile });
       }
 
       const result = await createDocumentAction(documentsRepo, newDocument);
@@ -289,7 +288,7 @@ export default function DocumentsPage() {
     } catch (error) {
       if (isDatabaseMode && supabase && storagePath) {
         try {
-          await removeDocumentFile({ supabase, path: storagePath });
+          await removeDocumentFile({ workspaceId: activeWorkspace.id, path: storagePath });
         } catch (cleanupError) {
           console.error("Unable to clean up failed document upload.", cleanupError);
         }
@@ -310,7 +309,7 @@ export default function DocumentsPage() {
 
     try {
       if (isDatabaseMode && supabase && document?.storagePath) {
-        await removeDocumentFile({ supabase, path: document.storagePath });
+        await removeDocumentFile({ workspaceId: document.workspaceId, path: document.storagePath });
       }
       const result = await deleteDocumentAction(
         documentsRepo,
@@ -336,7 +335,7 @@ export default function DocumentsPage() {
         return;
       }
 
-      const url = await createDocumentDownloadUrl({ supabase, path: document.storagePath });
+      const url = await createDocumentDownloadUrl({ workspaceId: document.workspaceId, path: document.storagePath });
       window.open(url, "_blank", "noopener,noreferrer");
     } catch (error) {
       setDocumentError(error instanceof Error ? error.message : "Unable to download document.");
@@ -533,7 +532,7 @@ export default function DocumentsPage() {
         clients, jobs, invoices, expenses, or calendar items automatically.
         {!isDatabaseMode && (
           <span className="mt-2 block font-semibold">
-            OCR requires a signed-in cloud workspace.
+            Sign in to use cloud OCR and AI drafts. Local document metadata remains available in demo mode.
           </span>
         )}
       </div>
@@ -579,6 +578,7 @@ export default function DocumentsPage() {
               workspaceDocuments.map((document) => (
                 <tr
                   key={document.id}
+                  id={`document-${document.id}`}
                   className="border-b border-gray-100 dark:border-gray-800"
                 >
                   <td className="px-6 py-4 font-semibold">{document.name}</td>

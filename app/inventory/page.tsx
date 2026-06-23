@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useAuthSession } from "@/components/AuthSessionProvider";
 import { useWorkspace } from "@/components/WorkspaceContext";
 import {
@@ -14,8 +16,18 @@ import { createJobsRepository } from "@/lib/db/jobs";
 import type { Job } from "@/lib/jobTypes";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { getWorkspaceDisplayName } from "@/lib/workspaceDisplay";
+import {
+  consumeAiFormHydration,
+  payloadNumber,
+  payloadString,
+  saveAiFormHydration,
+  type AiFormHydration,
+} from "@/lib/ai/formHydration";
+
+type AllocationMaterial = { name: string; quantity: number; notes?: string };
 
 export default function InventoryPage() {
+  const router = useRouter();
   const { activeWorkspace, canDeleteBusinessRecords } = useWorkspace();
   const { isSupabaseConfigured, user } = useAuthSession();
   const isDatabaseMode = Boolean(isSupabaseConfigured && user);
@@ -40,12 +52,98 @@ export default function InventoryPage() {
   const [itemName, setItemName] = useState("");
   const [currentQty, setCurrentQty] = useState("");
   const [targetQty, setTargetQty] = useState("");
+  const [allocationHydration, setAllocationHydration] = useState<AiFormHydration | null>(null);
+  const [allocationJobId, setAllocationJobId] = useState("");
+  const [allocationMode, setAllocationMode] = useState("Append");
+  const [allocationMaterials, setAllocationMaterials] = useState<AllocationMaterial[]>([]);
+  const [isSavingAllocation, setIsSavingAllocation] = useState(false);
 
   const supabase = useMemo(() => (isDatabaseMode ? createBrowserSupabaseClient() : null), [isDatabaseMode]);
   const inventoryRepo = useMemo(() => createInventoryRepository({ isSignedIn: isDatabaseMode, supabase, localItems: localInventoryItems, setLocalItems: setLocalInventoryItems }), [isDatabaseMode, localInventoryItems, setLocalInventoryItems, supabase]);
   const jobsRepo = useMemo(() => createJobsRepository({ isSignedIn: isDatabaseMode, supabase, localJobs: localJobItems, setLocalJobs: setLocalJobItems }), [isDatabaseMode, localJobItems, setLocalJobItems, supabase]);
   const inventoryItems = isDatabaseMode ? databaseInventoryItems : localInventoryItems;
   const jobItems = isDatabaseMode ? databaseJobItems : localJobItems;
+
+  useEffect(() => {
+    const hydration = consumeAiFormHydration("material", activeWorkspace.id);
+    if (!hydration) return;
+
+    queueMicrotask(() => {
+      if (hydration.actionType === "create_material_allocation") {
+        const rawMaterials = hydration.payload.materials;
+        const parsedMaterials = Array.isArray(rawMaterials)
+          ? rawMaterials.flatMap((item) => {
+              if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+              const name = typeof item.name === "string" ? item.name : "";
+              const quantity = typeof item.quantity === "number" ? item.quantity : 1;
+              const notes = typeof item.notes === "string" ? item.notes : "";
+              return name ? [{ name, quantity, notes }] : [];
+            })
+          : [];
+        setAllocationHydration(hydration);
+        setAllocationJobId(payloadString(hydration.payload, "jobId"));
+        const mode = payloadString(hydration.payload, "mode");
+        setAllocationMode(["Append", "Merge", "Replace"].includes(mode) ? mode : "Append");
+        setAllocationMaterials(parsedMaterials);
+        return;
+      }
+      setItemName(payloadString(hydration.payload, "name"));
+      const quantity = payloadNumber(hydration.payload, "quantity");
+      const target = payloadNumber(hydration.payload, "targetQuantity");
+      setCurrentQty(quantity === null ? "" : String(quantity));
+      setTargetQty(target === null ? "" : String(target));
+      setNewItemOpen(true);
+    });
+  }, [activeWorkspace.id]);
+
+  async function saveAllocationDraft() {
+    if (!allocationHydration || !allocationJobId || allocationMaterials.length === 0) return;
+    setIsSavingAllocation(true);
+    setDataError("");
+    try {
+      const response = await fetch("/api/material-allocations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          workspaceId: activeWorkspace.id,
+          jobId: allocationJobId,
+          mode: allocationMode,
+          materials: allocationMaterials,
+          sourceDocumentId: allocationHydration.sourceId,
+          reviewDraftId: allocationHydration.reviewDraftId,
+        }),
+      });
+      const result = (await response.json()) as { error?: string };
+      if (!response.ok) throw new Error(result.error || "Unable to save material allocation draft.");
+      setAllocationHydration(null);
+    } catch (error) {
+      setDataError(error instanceof Error ? error.message : "Unable to save material allocation draft.");
+    } finally {
+      setIsSavingAllocation(false);
+    }
+  }
+
+  function openNewJobFromAllocation() {
+    if (!allocationHydration) return;
+    saveAiFormHydration(
+      {
+        workspaceId: allocationHydration.workspaceId,
+        reviewDraftId: allocationHydration.reviewDraftId,
+        sourceId: allocationHydration.sourceId,
+        sourceType: allocationHydration.sourceType,
+      },
+      {
+        type: "create_job",
+        confidence: 1,
+        payload: {
+          title: payloadString(allocationHydration.payload, "jobName") || "Material work",
+          materials: allocationMaterials,
+          notes: "Created from an AI material allocation draft.",
+        },
+      }
+    );
+    router.push("/jobs?aiDraft=1");
+  }
 
   useEffect(() => {
     if (!isDatabaseMode) return;
@@ -335,7 +433,11 @@ export default function InventoryPage() {
                     <td className="px-6 py-5 font-medium text-gray-950 dark:text-gray-100">
                       <div className="flex items-center gap-3">
                         {warning && <span className="text-orange-500">-</span>}
-                        <span>{item.name}</span>
+                        {item.id ? (
+                          <Link href={`/inventory/${item.id}`} className="text-blue-600 hover:underline dark:text-blue-400">{item.name}</Link>
+                        ) : (
+                          <span>{item.name}</span>
+                        )}
                         {item.autoGenerated && <span className="rounded-full bg-blue-100 px-2 py-1 text-xs font-medium text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">Job material</span>}
                       </div>
                     </td>
@@ -391,6 +493,42 @@ export default function InventoryPage() {
               </button>
             </div>
           </div>
+        </div>
+      )}
+      {allocationHydration && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/70 p-4">
+          <section className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-xl bg-white p-6 shadow-xl dark:bg-gray-900">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-xl font-bold">Material Allocation Draft</h2>
+              <button type="button" onClick={() => setAllocationHydration(null)} className="text-2xl text-gray-500">x</button>
+            </div>
+            <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">Choose a job and how these reviewed materials should be handled. Saving creates a draft allocation only.</p>
+            <div className="mt-5 grid gap-4 sm:grid-cols-2">
+              <label className="text-sm font-semibold">Job
+                <select value={allocationJobId} onChange={(event) => setAllocationJobId(event.target.value)} className="mt-2 w-full rounded-lg border border-gray-300 bg-white p-3 dark:border-gray-700 dark:bg-gray-800">
+                  <option value="">Choose job</option>
+                  {jobItems.filter((job) => job.workspaceId === activeWorkspace.id).map((job) => <option key={job.id} value={job.id}>{job.name}</option>)}
+                </select>
+              </label>
+              <label className="text-sm font-semibold">Mode
+                <select value={allocationMode} onChange={(event) => setAllocationMode(event.target.value)} className="mt-2 w-full rounded-lg border border-gray-300 bg-white p-3 dark:border-gray-700 dark:bg-gray-800">
+                  <option>Append</option><option>Merge</option><option>Replace</option>
+                </select>
+              </label>
+            </div>
+            <div className="mt-5 space-y-3">
+              {allocationMaterials.map((material, index) => (
+                <div key={`${material.name}-${index}`} className="grid gap-3 rounded-lg border border-gray-200 p-3 sm:grid-cols-[1fr_8rem] dark:border-gray-800">
+                  <input value={material.name} onChange={(event) => setAllocationMaterials((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, name: event.target.value } : item))} className="rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800" />
+                  <input type="number" min="0.01" step="0.01" value={material.quantity} onChange={(event) => setAllocationMaterials((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, quantity: Number(event.target.value) } : item))} className="rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800" />
+                </div>
+              ))}
+            </div>
+            <div className="mt-6 flex flex-wrap justify-end gap-2">
+              <button type="button" onClick={openNewJobFromAllocation} className="rounded-lg border border-gray-300 px-4 py-2 dark:border-gray-700">Create New Job</button>
+              <button type="button" disabled={!allocationJobId || isSavingAllocation} onClick={saveAllocationDraft} className="rounded-lg bg-blue-600 px-4 py-2 font-bold text-white disabled:opacity-50">{isSavingAllocation ? "Saving..." : "Save Draft Allocation"}</button>
+            </div>
+          </section>
         </div>
       )}
     </div>

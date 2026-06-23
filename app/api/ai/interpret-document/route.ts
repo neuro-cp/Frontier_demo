@@ -3,6 +3,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { interpretDocumentWithAI } from "@/lib/ai/providers/providerFactory";
 import { createReviewDraft } from "@/lib/db/aiReviewDrafts";
 import { isUuid } from "@/lib/db/ids";
+import { canUseAiDrafts } from "@/lib/plans/capabilities";
+import { resolveWorkspacePlan } from "@/lib/plans/server";
+import { checkUserAndWorkspaceDailyLimits } from "@/lib/rateLimit/dailyCounters";
+import { RateLimitError } from "@/lib/rateLimit/policy";
+import { planUpgradeError } from "@/lib/services/routeProtection";
+import { serviceLimits } from "@/lib/services/serviceLimits";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 
 type InterpretDocumentRequest = {
@@ -49,6 +55,18 @@ export async function POST(request: NextRequest) {
 
   if (membershipError || !membership) {
     return jsonError("You do not have access to this workspace.", 403);
+  }
+  if (!canUseAiDrafts(resolveWorkspacePlan())) return planUpgradeError();
+  try {
+    checkUserAndWorkspaceDailyLimits({
+      service: "ai-draft",
+      userId: user.id,
+      workspaceId,
+      userLimit: serviceLimits.aiDrafts.maxRequestsPerUserPerDay(),
+      workspaceLimit: serviceLimits.aiDrafts.maxRequestsPerWorkspacePerDay(),
+    });
+  } catch (error) {
+    return jsonError(error instanceof Error ? error.message : "AI draft quota exceeded.", error instanceof RateLimitError ? error.status : 429);
   }
 
   const { data: document, error: documentError } = await supabase
