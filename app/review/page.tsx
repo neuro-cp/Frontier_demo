@@ -54,6 +54,15 @@ type ImageAnalysisResponse = {
   error?: string;
 };
 
+type EnhancedAnalysisMetadata = {
+  enhancedAnalysisUsed?: boolean;
+  originalDraftId?: string;
+  originalProvider?: string;
+  fallbackProvider?: string;
+  originalConfidence?: number | null;
+  finalConfidence?: number | null;
+};
+
 type VoiceTurn = {
   speaker: "Frontier" | "User";
   text: string;
@@ -109,6 +118,8 @@ export default function ReviewQueuePage() {
   const [isLoading, setIsLoading] = useState(false);
   const [updatingId, setUpdatingId] = useState("");
   const [executingId, setExecutingId] = useState("");
+  const [enhancingId, setEnhancingId] = useState("");
+  const [dismissedEnhancedIds, setDismissedEnhancedIds] = useState<string[]>([]);
   const [filter, setFilter] = useState<ReviewFilter>("All");
   const [transcriptText, setTranscriptText] = useState("");
   const [transcriptLabel, setTranscriptLabel] = useState("");
@@ -427,6 +438,71 @@ export default function ReviewQueuePage() {
       );
     } finally {
       setExecutingId("");
+    }
+  }
+
+  function parseEnhancedMetadata(rawInput: string | null): EnhancedAnalysisMetadata | null {
+    if (!rawInput?.trim().startsWith("{")) return null;
+    try {
+      const parsed = JSON.parse(rawInput) as EnhancedAnalysisMetadata;
+      return parsed.enhancedAnalysisUsed ? parsed : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function hasEnhancedRetryForDraft(draftId: string) {
+    return reviewDrafts.some(
+      (draft) => parseEnhancedMetadata(draft.rawInput)?.originalDraftId === draftId
+    );
+  }
+
+  function shouldOfferEnhancedAnalysis(draft: AiReviewDraft) {
+    if (draft.sourceType !== "image") return false;
+    if (dismissedEnhancedIds.includes(draft.id)) return false;
+    if (parseEnhancedMetadata(draft.rawInput)?.enhancedAnalysisUsed) return false;
+    if (hasEnhancedRetryForDraft(draft.id)) return false;
+    const onlyHumanReviewWarnings =
+      draft.warnings.length > 0 &&
+      draft.warnings.every((warning) => warning.code === "needs_human_review");
+    return (
+      (draft.confidence ?? 0) < 0.4 ||
+      draft.actions.length === 0 ||
+      draft.warnings.some((warning) =>
+        warning.message.includes("Image provider returned unstructured output")
+      ) ||
+      onlyHumanReviewWarnings
+    );
+  }
+
+  async function runEnhancedAnalysis(draft: AiReviewDraft) {
+    if (!workspaceReady || enhancingId) return;
+
+    setEnhancingId(draft.id);
+    setError("");
+    try {
+      const response = await fetch("/api/images/analyze/enhanced", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          workspaceId: activeWorkspace.id,
+          draftId: draft.id,
+        }),
+      });
+      const payload = (await response.json()) as ReviewDraftsResponse;
+      if (!response.ok || !payload.reviewDraft) {
+        throw new Error(payload.error || "Unable to run enhanced image analysis.");
+      }
+      setReviewDrafts((current) => [payload.reviewDraft as AiReviewDraft, ...current]);
+      setDismissedEnhancedIds((current) => [...current, draft.id]);
+    } catch (enhanceError) {
+      setError(
+        enhanceError instanceof Error
+          ? enhanceError.message
+          : "Unable to run enhanced image analysis."
+      );
+    } finally {
+      setEnhancingId("");
     }
   }
 
@@ -1213,7 +1289,10 @@ export default function ReviewQueuePage() {
         </div>
       ) : (
         <div className="space-y-4">
-          {filteredReviewDrafts.map((draft) => (
+          {filteredReviewDrafts.map((draft) => {
+            const enhancedMetadata = parseEnhancedMetadata(draft.rawInput);
+            const offerEnhancedAnalysis = shouldOfferEnhancedAnalysis(draft);
+            return (
             <article
               key={draft.id}
               className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-gray-900"
@@ -1237,6 +1316,11 @@ export default function ReviewQueuePage() {
                     >
                       {draft.executionStatus}
                     </span>
+                    {enhancedMetadata && (
+                      <span className="rounded-full border border-purple-300 bg-purple-50 px-3 py-1 text-xs font-bold text-purple-700 dark:border-purple-900 dark:bg-purple-950/40 dark:text-purple-300">
+                        Enhanced Analysis Used
+                      </span>
+                    )}
                   </div>
                   <h2 className="mt-3 text-xl font-bold">
                     {draft.sourceLabel || "AI Review Draft"}
@@ -1250,6 +1334,15 @@ export default function ReviewQueuePage() {
                   {draft.summary && <p className="mt-3 max-w-3xl text-sm text-gray-700 dark:text-gray-300">{draft.summary}</p>}
                   {draft.sourceType === "ocr" && draft.sourceId && (
                     <a href={`/documents#document-${draft.sourceId}`} className="mt-2 inline-block text-sm font-semibold text-blue-600 hover:underline dark:text-blue-400">View source document</a>
+                  )}
+                  {draft.sourceType === "image" && draft.sourceId && (
+                    <a href={`/documents#document-${draft.sourceId}`} className="mt-2 inline-block text-sm font-semibold text-blue-600 hover:underline dark:text-blue-400">View source image</a>
+                  )}
+                  {enhancedMetadata && (
+                    <div className="mt-3 grid gap-2 text-sm text-gray-600 dark:text-gray-300 sm:grid-cols-2">
+                      <div>Original Confidence: {formatConfidence(enhancedMetadata.originalConfidence ?? null)}</div>
+                      <div>Enhanced Confidence: {formatConfidence(enhancedMetadata.finalConfidence ?? null)}</div>
+                    </div>
                   )}
                 </div>
 
@@ -1319,6 +1412,37 @@ export default function ReviewQueuePage() {
                 </p>
               )}
 
+              {offerEnhancedAnalysis && (
+                <div className="mt-4 rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-100">
+                  <p className="font-bold">Image analysis confidence is low.</p>
+                  <p className="mt-2">
+                    Frontier can retry this image using an enhanced AI model that may improve extraction quality.
+                  </p>
+                  <p className="mt-2">
+                    This uses a higher-cost AI provider and may incur slightly higher processing charges.
+                  </p>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => runEnhancedAnalysis(draft)}
+                      disabled={!canDeleteBusinessRecords || enhancingId === draft.id}
+                      className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-bold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {enhancingId === draft.id ? "Running..." : "Use Enhanced Analysis"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setDismissedEnhancedIds((current) => [...current, draft.id])
+                      }
+                      className="rounded-lg border border-blue-300 px-4 py-2 text-sm font-bold hover:bg-blue-100 dark:border-blue-800 dark:hover:bg-blue-950"
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {draft.executionError && (
                 <p className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200">
                   {draft.executionError}
@@ -1382,7 +1506,8 @@ export default function ReviewQueuePage() {
                 </div>
               </div>
             </article>
-          ))}
+            );
+          })}
         </div>
       )}
       {editingDraftId && (

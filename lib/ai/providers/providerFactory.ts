@@ -26,6 +26,7 @@ import {
   AiProviderError,
   type AiProviderClient,
   type AiProviderName,
+  type ProviderImageInterpretationOptions,
   type ProviderImageInterpretationInput,
   type ProviderInterpretationInput,
   type ProviderInterpretationOutput,
@@ -66,6 +67,17 @@ function getVisionConfig() {
     throw new AiProviderError("missing_config", "Vision AI provider is not configured.");
   }
   return { provider, model };
+}
+
+function getOpenAiVisionConfig() {
+  const model =
+    process.env.OPENAI_MODEL_VISION?.trim() ||
+    process.env.AI_MODEL_VISION_OPENAI?.trim() ||
+    process.env.AI_MODEL_FALLBACK?.trim();
+  if (!model) {
+    throw new AiProviderError("missing_config", "OpenAI vision model is not configured.");
+  }
+  return { provider: "openai" as const, model };
 }
 
 function shouldLogImageDebug() {
@@ -450,7 +462,15 @@ export async function interpretTranscriptWithAI(
   return interpretWithConfiguredProvider("transcript", input);
 }
 
-export async function interpretImageWithAI(input: ProviderImageInterpretationInput) {
+export async function interpretImageWithAI(
+  input: ProviderImageInterpretationInput,
+  options: ProviderImageInterpretationOptions = {}
+) {
+  if (options.forceProvider === "openai") {
+    const openai = getOpenAiVisionConfig();
+    return runImageProvider(createProvider(openai.provider), openai.model, input, false);
+  }
+
   const primary = getVisionConfig();
   const fallback = getFallbackConfig();
 

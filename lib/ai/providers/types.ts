@@ -19,6 +19,10 @@ export type ProviderImageInterpretationInput = {
   sourceLabel?: string;
 };
 
+export type ProviderImageInterpretationOptions = {
+  forceProvider?: AiProviderName;
+};
+
 export type ProviderInterpretationOutput = {
   result: InterpretationResult;
   reviewDraft: ReviewDraft;
