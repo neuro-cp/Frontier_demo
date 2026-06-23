@@ -555,14 +555,23 @@ async function findClientByName(
   if (!name) return null;
   const { data, error } = await serviceClient
     .from("clients")
-    .select("id, name")
+    .select("id, name, email, phone, address, city, state, zip")
     .eq("workspace_id", workspaceId)
     .ilike("name", name)
     .limit(1)
     .maybeSingle();
 
   if (error) throw new Error(error.message || "Unable to match client.");
-  return data as { id: string; name: string } | null;
+  return data as {
+    id: string;
+    name: string;
+    email: string | null;
+    phone: string | null;
+    address: string | null;
+    city: string | null;
+    state: string | null;
+    zip: string | null;
+  } | null;
 }
 
 function materialsFromPayload(value: unknown): JobMaterial[] {
