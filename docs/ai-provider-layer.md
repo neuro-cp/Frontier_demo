@@ -12,8 +12,8 @@ The AI provider layer is server-only glue between Frontier's interpretation cont
 - OpenRouter and OpenAI adapters exist.
 - Provider output must be JSON.
 - Provider output is validated through the existing interpretation validators.
-- No UI integration exists.
-- No Supabase writes occur.
+- Review and Documents include image analysis entry points.
+- Provider adapters do not write to Supabase; server routes may persist review drafts.
 - No actions are executed.
 
 ## Exported Entry Points
@@ -22,7 +22,13 @@ The AI provider layer is server-only glue between Frontier's interpretation cont
 - `interpretTranscriptWithAI()`
 - `interpretImageWithAI()`
 
-Image interpretation is currently a placeholder. It exists so the future vision path has a stable import target without enabling image interpretation yet.
+Image interpretation now uses the configured vision model through the same
+server-only provider abstraction. It accepts image data from the server route,
+returns structured JSON, validates suggested actions, and persists review drafts
+only. It does not execute actions.
+
+Supported image intake types are JPG, PNG, and WebP. HEIC is intentionally not
+enabled yet.
 
 ## Safety Rules
 

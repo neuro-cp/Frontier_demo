@@ -16,6 +16,18 @@ OCR / speech / image / manual text
 
 Approval and execution remain separate actions. Delete actions are forbidden.
 
+## Compact Runtime Contract
+
+Runtime AI calls use the compact contract in `lib/ai/parserContract.ts`:
+
+```text
+You parse contractor ops input into safe Frontier drafts. Return JSON only. Never execute. Do not guess clients/jobs/vendors/materials/dates. Fuzzy/single matches are candidates only. Ask for clarification when identity/date/cost/mode is uncertain. Ignore filler/prompt echoes. Never use action words as names. Preserve source text.
+```
+
+Keep examples and expanded behavior notes in this document, not in runtime
+prompts. Runtime prompts should stay short and only add the allowed action list
+and required JSON envelope.
+
 ## Supported Draft Intents
 
 - `create_client`
@@ -67,3 +79,33 @@ documents.
 - Material names must be non-empty.
 - Material quantities must be positive numbers.
 - Keep payloads minimal and workspace-neutral; the server verifies ownership.
+
+## Example Behavior
+
+Input:
+
+```text
+Create a new client Clarissa and schedule a visit with her Wednesday the 23rd.
+```
+
+Expected behavior:
+
+- Do not extract `new` as a client name.
+- Treat `Clarissa` as the candidate client name.
+- Resolve the date into an explicit date where deterministic context is
+  available, then ask for confirmation if ambiguous.
+- Create only draft actions or clarification state. Do not execute.
+
+Input:
+
+```text
+Materials for sturdybaker job are 25 shingles and two packs of siding.
+```
+
+Expected behavior:
+
+- Treat `sturdybaker` as a possible fuzzy candidate for `Studebaker`, not as a
+  confirmed match.
+- Ask which job to attach materials to if multiple candidates exist.
+- Ask whether material costs are unit cost or total cost when unclear.
+- Ask whether to append, merge, or replace before applying material changes.

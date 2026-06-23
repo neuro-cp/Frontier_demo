@@ -1,4 +1,4 @@
-import type { AiActionType, DraftPayload, SuggestedAction } from "@/lib/ai/types";
+import type { AiActionType, AiSourceType, DraftPayload, SuggestedAction } from "@/lib/ai/types";
 
 export type AiFormTarget = "client" | "job" | "invoice" | "expense" | "material";
 
@@ -6,7 +6,7 @@ export type AiFormHydration = {
   workspaceId: string;
   reviewDraftId: string;
   sourceId?: string;
-  sourceType: "ocr" | "transcript";
+  sourceType: AiSourceType;
   target: AiFormTarget;
   actionType: AiActionType;
   payload: DraftPayload;

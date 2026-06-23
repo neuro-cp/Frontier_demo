@@ -1,4 +1,4 @@
-export type AiSourceType = "ocr" | "transcript";
+export type AiSourceType = "ocr" | "transcript" | "image";
 
 export type InterpretationConfidence = number;
 

@@ -2,12 +2,21 @@ import type { ReviewDraft } from "@/lib/ai/reviewTypes";
 import type { AiSourceType, InterpretationResult } from "@/lib/ai/types";
 
 export type AiProviderName = "openrouter" | "openai";
+export type TextAiSourceType = Exclude<AiSourceType, "image">;
 
 export type ProviderInterpretationInput = {
   workspaceId: string;
   sourceId?: string;
-  sourceType: AiSourceType;
+  sourceType: TextAiSourceType;
   text: string;
+};
+
+export type ProviderImageInterpretationInput = {
+  workspaceId: string;
+  sourceId?: string;
+  imageDataUrl: string;
+  mimeType: string;
+  sourceLabel?: string;
 };
 
 export type ProviderInterpretationOutput = {
@@ -22,6 +31,7 @@ export type AiProviderRequest = {
   systemPrompt: string;
   userPrompt: string;
   model: string;
+  imageDataUrl?: string;
   timeoutMs?: number;
 };
 

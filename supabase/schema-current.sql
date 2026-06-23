@@ -921,7 +921,7 @@ CREATE TABLE IF NOT EXISTS "public"."ai_review_drafts" (
     CONSTRAINT "ai_review_drafts_actions_array_check" CHECK (("jsonb_typeof"("actions") = 'array'::"text")),
     CONSTRAINT "ai_review_drafts_execution_status_check" CHECK (("execution_status" = ANY (ARRAY['Not Executed'::"text", 'Executed'::"text", 'Failed'::"text"]))),
     CONSTRAINT "ai_review_drafts_no_delete_actions_check" CHECK ((NOT "jsonb_path_exists"("actions", '$[*]?(@."type" like_regex "^delete_")'::"jsonpath"))),
-    CONSTRAINT "ai_review_drafts_source_type_check" CHECK (("source_type" = ANY (ARRAY['ocr'::"text", 'transcript'::"text"]))),
+    CONSTRAINT "ai_review_drafts_source_type_check" CHECK (("source_type" = ANY (ARRAY['ocr'::"text", 'transcript'::"text", 'image'::"text"]))),
     CONSTRAINT "ai_review_drafts_status_check" CHECK (("status" = ANY (ARRAY['Pending'::"text", 'Approved'::"text", 'Rejected'::"text", 'Needs Changes'::"text"]))),
     CONSTRAINT "ai_review_drafts_warnings_array_check" CHECK (("jsonb_typeof"("warnings") = 'array'::"text"))
 );

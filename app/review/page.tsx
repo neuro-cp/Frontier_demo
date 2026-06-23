@@ -37,6 +37,19 @@ type TranscriptionResponse = {
   error?: string;
 };
 
+type ImageAnalysisResponse = {
+  reviewDraft?: AiReviewDraft;
+  analysis?: {
+    provider: string;
+    model: string;
+    usedFallback: boolean;
+    confidence: number;
+    warnings: unknown[];
+    actions: SuggestedAction[];
+  };
+  error?: string;
+};
+
 type VoiceTurn = {
   speaker: "Frontier" | "User";
   text: string;
@@ -106,6 +119,7 @@ export default function ReviewQueuePage() {
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const recordingChunksRef = useRef<Blob[]>([]);
   const recordingTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const autoListenTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const recordedAudioUrlRef = useRef("");
   const voiceAutoProcessRef = useRef(false);
   const [transcription, setTranscription] = useState<
@@ -114,6 +128,11 @@ export default function ReviewQueuePage() {
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [isGeneratingTranscriptDraft, setIsGeneratingTranscriptDraft] =
     useState(false);
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imagePreviewUrl, setImagePreviewUrl] = useState("");
+  const [imageAnalysis, setImageAnalysis] =
+    useState<ImageAnalysisResponse["analysis"] | null>(null);
+  const [isAnalyzingImage, setIsAnalyzingImage] = useState(false);
   const [voiceTurns, setVoiceTurns] = useState<VoiceTurn[]>([]);
   const [isVoiceSessionActive, setIsVoiceSessionActive] = useState(false);
   const [voiceStatus, setVoiceStatus] = useState("");
@@ -280,26 +299,32 @@ export default function ReviewQueuePage() {
 
     return () => {
       if (recordingTimer.current) clearInterval(recordingTimer.current);
+      if (autoListenTimer.current) clearTimeout(autoListenTimer.current);
       const recorder = mediaRecorderRef.current;
       if (recorder?.state === "recording") recorder.stop();
       mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
       if (recordedAudioUrlRef.current) URL.revokeObjectURL(recordedAudioUrlRef.current);
+      if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
     };
-  }, []);
+  }, [imagePreviewUrl]);
 
   function addVoiceTurn(speaker: VoiceTurn["speaker"], text: string) {
     setVoiceTurns((current) => [...current.slice(-5), { speaker, text }]);
   }
 
-  function speakAssistant(text: string) {
+  function speakAssistant(text: string, listenAfter = false) {
     addVoiceTurn("Frontier", text);
     setVoiceStatus(text);
     if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
+    if (isRecording) stopRecording();
+    if (autoListenTimer.current) clearTimeout(autoListenTimer.current);
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.onend = () => {
-      if (autoListen && voiceSession.mode === "waiting_for_answer") {
-        void startRecording();
+      if (listenAfter || autoListen) {
+        autoListenTimer.current = setTimeout(() => {
+          void startRecording();
+        }, 450);
       }
     };
     window.speechSynthesis.speak(utterance);
@@ -308,7 +333,7 @@ export default function ReviewQueuePage() {
   function applyClarificationResponse(result: VoiceClarificationResponse) {
     setVoiceSession(result.session);
     setVoiceDraftAction(result.action ?? null);
-    speakAssistant(result.assistantMessage);
+    speakAssistant(result.assistantMessage, result.needsFollowup && autoListen);
   }
 
   function advanceClarificationWithText(text: string) {
@@ -484,6 +509,46 @@ export default function ReviewQueuePage() {
     await transcribeAudioSource(audioFile, audioFile.name);
   }
 
+  function selectImageFile(file: File | null) {
+    if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
+    setImageFile(file);
+    setImageAnalysis(null);
+    setImagePreviewUrl(file ? URL.createObjectURL(file) : "");
+  }
+
+  async function analyzeImage() {
+    if (!workspaceReady || !imageFile || isAnalyzingImage) return;
+
+    setIsAnalyzingImage(true);
+    setError("");
+    setImageAnalysis(null);
+    try {
+      const formData = new FormData();
+      formData.append("workspaceId", activeWorkspace.id);
+      formData.append("sourceLabel", imageFile.name);
+      formData.append("file", imageFile);
+
+      const response = await fetch("/api/images/analyze", {
+        method: "POST",
+        body: formData,
+      });
+      const payload = (await response.json()) as ImageAnalysisResponse;
+      if (!response.ok || !payload.reviewDraft) {
+        throw new Error(payload.error || "Unable to analyze image.");
+      }
+      setImageAnalysis(payload.analysis ?? null);
+      setReviewDrafts((current) => [payload.reviewDraft as AiReviewDraft, ...current]);
+    } catch (analysisError) {
+      setError(
+        analysisError instanceof Error
+          ? analysisError.message
+          : "Unable to analyze image."
+      );
+    } finally {
+      setIsAnalyzingImage(false);
+    }
+  }
+
   function stopRecordingTimer() {
     if (!recordingTimer.current) return;
     clearInterval(recordingTimer.current);
@@ -600,8 +665,7 @@ export default function ReviewQueuePage() {
     setVoiceDraftAction(null);
     setIsVoiceSessionActive(true);
     setVoiceTurns([]);
-    speakAssistant("Tell me what you want Frontier to create or update.");
-    await startRecording();
+    speakAssistant("Tell me what you want Frontier to create or update.", true);
   }
 
   function stopVoiceAssistantRecording() {
@@ -1023,6 +1087,54 @@ export default function ReviewQueuePage() {
             >
               {isGeneratingTranscriptDraft ? "Generating..." : "Generate Draft"}
             </button>
+          </div>
+          <div id="image-intake" className="scroll-mt-24 border-t border-gray-200 pt-5 dark:border-gray-800">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
+              <div className="flex-1">
+                <label className="mb-2 block text-sm font-semibold">
+                  Image Intake
+                </label>
+                <input
+                  type="file"
+                  accept="image/jpeg,image/jpg,image/png,image/webp"
+                  capture="environment"
+                  onChange={(event) => selectImageFile(event.target.files?.[0] ?? null)}
+                  className="block w-full text-sm file:mr-4 file:rounded-lg file:border-0 file:bg-gray-100 file:px-4 file:py-2 file:font-semibold dark:file:bg-gray-800"
+                />
+                <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                  Supports JPG, PNG, and WebP. HEIC is not supported yet.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={analyzeImage}
+                disabled={!canDeleteBusinessRecords || !imageFile || isAnalyzingImage}
+                className="rounded-lg bg-emerald-600 px-5 py-3 text-sm font-bold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isAnalyzingImage ? "Analyzing..." : "Analyze Image"}
+              </button>
+            </div>
+            {imagePreviewUrl && (
+              <div className="mt-4 grid gap-4 lg:grid-cols-[280px_1fr]">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={imagePreviewUrl}
+                  alt="Selected image preview"
+                  className="max-h-72 w-full rounded-lg border border-gray-200 object-contain dark:border-gray-800"
+                />
+                <div className="rounded-lg bg-gray-50 p-3 text-sm dark:bg-gray-950">
+                  <div className="font-semibold">{imageFile?.name}</div>
+                  <div className="mt-1 text-gray-600 dark:text-gray-400">
+                    {imageFile?.type || "Unknown type"} {imageFile?.size ? `- ${imageFile.size} bytes` : ""}
+                  </div>
+                  {imageAnalysis && (
+                    <pre className="mt-3 max-h-48 overflow-auto rounded-lg bg-gray-950 p-3 text-xs text-gray-100">
+                      {JSON.stringify(imageAnalysis, null, 2)}
+                    </pre>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         </section>
       )}

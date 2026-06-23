@@ -24,6 +24,13 @@ export function createOpenRouterProvider(): AiProviderClient {
         request.timeoutMs ?? 20000
       );
 
+      const userContent = request.imageDataUrl
+        ? [
+            { type: "text", text: request.userPrompt },
+            { type: "image_url", image_url: { url: request.imageDataUrl } },
+          ]
+        : request.userPrompt;
+
       try {
         const response = await fetch(OPENROUTER_URL, {
           method: "POST",
@@ -38,7 +45,7 @@ export function createOpenRouterProvider(): AiProviderClient {
             model: request.model,
             messages: [
               { role: "system", content: request.systemPrompt },
-              { role: "user", content: request.userPrompt },
+              { role: "user", content: userContent },
             ],
             response_format: { type: "json_object" },
             temperature: 0,

@@ -138,6 +138,7 @@ export default function DocumentsPage() {
   const [isSavingDocument, setIsSavingDocument] = useState(false);
   const [processingDocumentIds, setProcessingDocumentIds] = useState<string[]>([]);
   const [draftingDocumentIds, setDraftingDocumentIds] = useState<string[]>([]);
+  const [analyzingImageDocumentIds, setAnalyzingImageDocumentIds] = useState<string[]>([]);
   const [reviewDocumentId, setReviewDocumentId] = useState("");
   const [reviewDocumentType, setReviewDocumentType] = useState("unknown");
   const [reviewText, setReviewText] = useState("");
@@ -446,6 +447,54 @@ export default function DocumentsPage() {
     }
   }
 
+  function isImageDocument(document: StoredDocument) {
+    return ["image/jpeg", "image/jpg", "image/png", "image/webp"].includes(
+      (document.mimeType || "").toLowerCase()
+    );
+  }
+
+  async function analyzeImageDocument(document: StoredDocument) {
+    setDocumentError("");
+    setDocumentNotice("");
+
+    if (!isDatabaseMode) {
+      setDocumentError("Image analysis requires a signed-in cloud workspace.");
+      return;
+    }
+    if (!isImageDocument(document)) {
+      setDocumentError("Only JPG, PNG, and WebP image documents can be analyzed.");
+      return;
+    }
+
+    setAnalyzingImageDocumentIds((current) => [...current, document.id]);
+
+    try {
+      const formData = new FormData();
+      formData.append("workspaceId", document.workspaceId);
+      formData.append("documentId", document.id);
+      formData.append("sourceLabel", document.fileName || document.name);
+
+      const response = await fetch("/api/images/analyze", {
+        method: "POST",
+        body: formData,
+      });
+      const payload = (await response.json()) as {
+        reviewDraft?: { id: string };
+        error?: string;
+      };
+      if (!response.ok || !payload.reviewDraft) {
+        throw new Error(payload.error || "Unable to analyze image.");
+      }
+      setDocumentNotice("Image analysis draft created. Open Review Queue to approve it.");
+    } catch (error) {
+      setDocumentError(error instanceof Error ? error.message : "Unable to analyze image.");
+    } finally {
+      setAnalyzingImageDocumentIds((current) =>
+        current.filter((documentId) => documentId !== document.id)
+      );
+    }
+  }
+
   function openReview(document: StoredDocument) {
     setReviewDocumentId(document.id);
     setReviewDocumentType(document.documentType || "unknown");
@@ -658,6 +707,20 @@ export default function DocumentsPage() {
                         {draftingDocumentIds.includes(document.id)
                           ? "Generating..."
                           : "Generate Draft"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => analyzeImageDocument(document)}
+                        disabled={
+                          !isDatabaseMode ||
+                          !isImageDocument(document) ||
+                          analyzingImageDocumentIds.includes(document.id)
+                        }
+                        className="rounded-lg bg-purple-600 px-4 py-2 text-sm font-semibold text-white hover:bg-purple-700 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {analyzingImageDocumentIds.includes(document.id)
+                          ? "Analyzing..."
+                          : "Analyze Image"}
                       </button>
                       <button
                         type="button"
