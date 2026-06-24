@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 
 type EstimateLineItem = {
   id: string;
@@ -25,6 +26,7 @@ type ClientEstimate = {
   approval_notes: string | null;
   rejected_at: string | null;
   rejection_notes: string | null;
+  converted_invoice_id: string | null;
   estimate_line_items?: EstimateLineItem[];
 };
 
@@ -48,7 +50,9 @@ function estimateTotal(estimate: ClientEstimate) {
 }
 
 function statusClass(status: string | null) {
-  if (status === "Accepted") return "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-200";
+  if (status === "Accepted" || status === "Converted") {
+    return "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-200";
+  }
   if (status === "Declined") return "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-200";
   return "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-200";
 }
@@ -162,7 +166,7 @@ export default function ClientPortalEstimatesList() {
       )}
 
       {sortedItems.map((estimate) => {
-        const canAct = estimate.status !== "Accepted" && estimate.status !== "Declined";
+        const canAct = estimate.status !== "Accepted" && estimate.status !== "Declined" && estimate.status !== "Converted";
         return (
           <article
             key={estimate.id}
@@ -177,11 +181,11 @@ export default function ClientPortalEstimatesList() {
                   </span>
                 </div>
                 <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                  Date: {formatDate(estimate.estimate_date)} · Total: {formatMoney(estimateTotal(estimate))}
+                  Date: {formatDate(estimate.estimate_date)} - Total: {formatMoney(estimateTotal(estimate))}
                 </p>
                 <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">
                   {estimate.bill_to_name ?? "Client"}
-                  {estimate.bill_to_email ? ` · ${estimate.bill_to_email}` : ""}
+                  {estimate.bill_to_email ? ` - ${estimate.bill_to_email}` : ""}
                 </p>
                 {(estimate.bill_to_address || estimate.bill_to_city) && (
                   <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
@@ -246,13 +250,21 @@ export default function ClientPortalEstimatesList() {
             {estimate.approved_at && (
               <p className="mt-3 text-sm font-semibold text-green-700 dark:text-green-300">
                 Approved {formatDate(estimate.approved_at)}
-                {estimate.approval_notes ? ` · ${estimate.approval_notes}` : ""}
+                {estimate.approval_notes ? ` - ${estimate.approval_notes}` : ""}
               </p>
             )}
             {estimate.rejected_at && (
               <p className="mt-3 text-sm font-semibold text-red-700 dark:text-red-300">
                 Rejected {formatDate(estimate.rejected_at)}
-                {estimate.rejection_notes ? ` · ${estimate.rejection_notes}` : ""}
+                {estimate.rejection_notes ? ` - ${estimate.rejection_notes}` : ""}
+              </p>
+            )}
+            {estimate.converted_invoice_id && (
+              <p className="mt-3 text-sm font-semibold text-green-700 dark:text-green-300">
+                Converted to invoice.{" "}
+                <Link href={`/invoices/${estimate.converted_invoice_id}`} className="text-blue-600 hover:underline">
+                  Open invoice
+                </Link>
               </p>
             )}
           </article>
