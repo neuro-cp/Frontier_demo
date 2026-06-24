@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { createServiceRoleClient } from "@/lib/platformAdmin/server";
-import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { getSignedInClientPortalContext } from "@/lib/clientPortal/server";
 
 type DataType = "jobs" | "invoices" | "estimates" | "documents";
 
@@ -11,37 +10,15 @@ function jsonError(message: string, status: number) {
   return NextResponse.json({ error: message }, { status });
 }
 
-async function getActiveClientAccess(userId: string) {
-  const serviceClient = createServiceRoleClient();
-  const { data, error } = await serviceClient
-    .from("client_portal_access")
-    .select("id, workspace_id, client_id, email, status, clients(id, name)")
-    .eq("user_id", userId)
-    .eq("status", "Active")
-    .order("accepted_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (error) throw error;
-  return data;
-}
-
 export async function GET(request: NextRequest) {
   const type = request.nextUrl.searchParams.get("type") as DataType | null;
   if (!type || !validTypes.has(type)) return jsonError("Unsupported client portal data type.", 400);
 
-  const userClient = await createServerSupabaseClient();
-  const {
-    data: { user },
-    error: userError,
-  } = await userClient.auth.getUser();
+  const portal = await getSignedInClientPortalContext();
+  if (!portal.ok) return jsonError(portal.error, portal.status);
 
-  if (userError || !user) return jsonError("Sign in required.", 401);
-
-  const serviceClient = createServiceRoleClient();
-  const access = await getActiveClientAccess(user.id);
-  if (!access) return jsonError("Active client portal access required.", 403);
-
+  const serviceClient = portal.serviceClient;
+  const access = portal.access;
   const workspaceId = access.workspace_id;
   const clientId = access.client_id;
 
@@ -72,7 +49,7 @@ export async function GET(request: NextRequest) {
   if (type === "estimates") {
     const { data, error } = await serviceClient
       .from("estimates")
-      .select("id, estimate_number, estimate_date, status, bill_to_name, bill_to_email, converted_invoice_id, created_at")
+      .select("id, estimate_number, estimate_date, status, bill_to_name, bill_to_email, bill_to_address, bill_to_city, bill_to_state, bill_to_zip, converted_invoice_id, approved_at, approval_notes, rejected_at, rejection_notes, created_at, estimate_line_items(id, description, quantity, unit_price_cents, sort_order)")
       .eq("workspace_id", workspaceId)
       .eq("client_id", clientId)
       .order("estimate_date", { ascending: false })
