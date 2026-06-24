@@ -6,6 +6,7 @@ import { deleteWorkspaceAction } from "@/lib/actions/workspaces";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
 import { getWorkspaceDisplayName } from "@/lib/workspaceDisplay";
 import { defaultBusinessTypes } from "@/lib/workspaceOptions";
+import BillingSettings from "./BillingSettings";
 import DataMigrationSettings from "./DataMigrationSettings";
 import PermissionsSettings from "./PermissionsSettings";
 import StorageSettings from "./StorageSettings";
@@ -17,7 +18,8 @@ type SettingsTab =
   | "workspace"
   | "permissions"
   | "migration"
-  | "storage";
+  | "storage"
+  | "billing";
 
 type WorkspaceSettings = {
   workspaceId: string;
@@ -288,6 +290,9 @@ function SettingsWorkspacePanel({
         </button>
         <button onClick={() => setTab("storage")} className={tabClass("storage")}>
           Storage
+        </button>
+        <button onClick={() => setTab("billing")} className={tabClass("billing")}>
+          Billing
         </button>
       </div>
 
@@ -659,6 +664,8 @@ function SettingsWorkspacePanel({
       {tab === "migration" && <DataMigrationSettings />}
 
       {tab === "storage" && <StorageSettings workspaceId={activeWorkspaceId} />}
+
+      {tab === "billing" && <BillingSettings workspaceId={activeWorkspaceId} />}
     </div>
   );
 }
