@@ -7,6 +7,7 @@ import { useParams } from "next/navigation";
 import { useAuthSession } from "@/components/AuthSessionProvider";
 import { useWorkspace } from "@/components/WorkspaceContext";
 import DocumentAttachments from "@/app/documents/DocumentAttachments";
+import ClientPortalAccessPanel from "@/app/clients/[id]/ClientPortalAccessPanel";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
 import type { Job } from "@/lib/jobTypes";
 import type { ClientRow } from "@/lib/clientTypes";
@@ -205,6 +206,8 @@ export default function ClientPage() {
           {client.notes && <p className="sm:col-span-2"><strong>Notes:</strong> {client.notes}</p>}
         </div>
       </div>
+
+      <ClientPortalAccessPanel client={client} isDatabaseMode={isDatabaseMode} />
 
       <div className="rounded-lg bg-white p-6 shadow dark:bg-gray-900">
         <h2 className="mb-4 text-xl font-semibold">Jobs</h2>

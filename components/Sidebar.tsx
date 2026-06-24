@@ -15,6 +15,8 @@ const navItems = [
   { label: "Document Extraction", href: "/documents", icon: "📁" },
   { label: "Logistics", href: "/logistics", icon: "🛣️" },
   { label: "Settings", href: "/settings", icon: "⚙️" },
+  { label: "Client Portal", href: "/client-portal", icon: "CP" },
+  { label: "Employee Portal", href: "/employee-portal", icon: "EP" },
 ];
 
 export default function Sidebar() {
