@@ -9,9 +9,12 @@ import { createRoutePlanAction } from "@/lib/actions/routes";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
 import type { ClientRow } from "@/lib/clientTypes";
 import { createClientsRepository } from "@/lib/db/clients";
+import { createJobsRepository } from "@/lib/db/jobs";
 import { createRoutesRepository, type RoutePlan } from "@/lib/db/routes";
+import type { Job } from "@/lib/jobTypes";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import {
+  buildJobLogisticsLocations,
   buildLogisticsLocations,
   getClientFullAddress,
   getMissingCoordinateClients,
@@ -25,6 +28,33 @@ const LogisticsMap = dynamic(() => import("./LogisticsMap"), {
 const clientStatuses = ["All", "Lead", "Active", "Inactive"];
 const maxGoogleMapsUrlLength = 2048;
 
+type RouteApiResponse = {
+  data?: {
+    orderedStopIds: string[];
+    googleMapsUrl?: string;
+    routeProvider?: "openrouteservice" | "fallback";
+    routePath?: Array<[number, number]>;
+    totalDistanceMeters?: number;
+    totalDurationSeconds?: number;
+  };
+  error?: string;
+};
+
+function formatDistance(meters?: number | null) {
+  if (typeof meters !== "number") return "Not calculated";
+  const miles = meters / 1609.344;
+  return `${miles.toFixed(miles >= 10 ? 0 : 1)} mi`;
+}
+
+function formatDuration(seconds?: number | null) {
+  if (typeof seconds !== "number") return "Not calculated";
+  const minutes = Math.max(1, Math.round(seconds / 60));
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return remainingMinutes ? `${hours} hr ${remainingMinutes} min` : `${hours} hr`;
+}
+
 export default function LogisticsPage() {
   const { activeWorkspace } = useWorkspace();
   const { isSupabaseConfigured, user } = useAuthSession();
@@ -36,25 +66,42 @@ export default function LogisticsPage() {
     storageKeys.clients,
     []
   );
+  const [localJobs, setLocalJobs] = useStoredJsonState<Job[]>(
+    storageKeys.jobs,
+    []
+  );
   const [databaseClients, setDatabaseClients] = useState<ClientRow[]>([]);
+  const [databaseJobs, setDatabaseJobs] = useState<Job[]>([]);
   const [routes, setRoutes] = useState<RoutePlan[]>([]);
+  const [routePath, setRoutePath] = useState<Array<[number, number]>>([]);
+  const [routeSummary, setRouteSummary] = useState<{
+    totalDistanceMeters?: number;
+    totalDurationSeconds?: number;
+    provider?: "openrouteservice" | "fallback";
+  } | null>(null);
   const [routeError, setRouteError] = useState("");
   const [geocodingClientId, setGeocodingClientId] = useState("");
   const [isOptimizingRoute, setIsOptimizingRoute] = useState(false);
 
   const supabase = useMemo(() => (isDatabaseMode ? createBrowserSupabaseClient() : null), [isDatabaseMode]);
   const clientsRepo = useMemo(() => createClientsRepository({ isSignedIn: isDatabaseMode, supabase, localClients, setLocalClients }), [isDatabaseMode, localClients, setLocalClients, supabase]);
+  const jobsRepo = useMemo(() => createJobsRepository({ isSignedIn: isDatabaseMode, supabase, localJobs, setLocalJobs }), [isDatabaseMode, localJobs, setLocalJobs, supabase]);
   const routesRepo = useMemo(() => createRoutesRepository({ isSignedIn: isDatabaseMode, supabase }), [isDatabaseMode, supabase]);
   const clients = isDatabaseMode ? databaseClients : localClients;
+  const jobs = isDatabaseMode ? databaseJobs : localJobs;
 
   useEffect(() => {
     if (!isDatabaseMode) return;
     let cancelled = false;
-    Promise.all([clientsRepo.getClients(activeWorkspace.id), routesRepo.getRoutes(activeWorkspace.id)]).then(([loadedClients, loadedRoutes]) => {
-      if (!cancelled) { setDatabaseClients(loadedClients); setRoutes(loadedRoutes); }
+    Promise.all([
+      clientsRepo.getClients(activeWorkspace.id),
+      jobsRepo.getJobs(activeWorkspace.id),
+      routesRepo.getRoutes(activeWorkspace.id),
+    ]).then(([loadedClients, loadedJobs, loadedRoutes]) => {
+      if (!cancelled) { setDatabaseClients(loadedClients); setDatabaseJobs(loadedJobs); setRoutes(loadedRoutes); }
     });
     return () => { cancelled = true; };
-  }, [activeWorkspace.id, clientsRepo, isDatabaseMode, routesRepo]);
+  }, [activeWorkspace.id, clientsRepo, isDatabaseMode, jobsRepo, routesRepo]);
 
   const workspaceClients = useMemo(() => {
     return clients.filter(
@@ -70,11 +117,18 @@ export default function LogisticsPage() {
     );
   }, [workspaceClients, selectedStatus]);
 
+  const workspaceJobs = useMemo(() => {
+    return jobs.filter((job) => job.workspaceId === activeWorkspace.id);
+  }, [jobs, activeWorkspace.id]);
+
   const visibleLocations = useMemo(() => {
-    return buildLogisticsLocations(filteredClients).sort((a, b) =>
+    return [
+      ...buildLogisticsLocations(filteredClients),
+      ...buildJobLogisticsLocations(workspaceJobs, filteredClients),
+    ].sort((a, b) =>
       a.name.localeCompare(b.name)
     );
-  }, [filteredClients]);
+  }, [filteredClients, workspaceJobs]);
 
   const missingCoordinateClients = useMemo(() => {
     return getMissingCoordinateClients(filteredClients);
@@ -90,6 +144,8 @@ export default function LogisticsPage() {
   }, [visibleLocations, selectedLocationIds]);
 
   function toggleLocation(locationId: string) {
+    setRoutePath([]);
+    setRouteSummary(null);
     setSelectedLocationIds((current) =>
       current.includes(locationId)
         ? current.filter((id) => id !== locationId)
@@ -98,10 +154,14 @@ export default function LogisticsPage() {
   }
 
   function selectAllVisibleLocations() {
+    setRoutePath([]);
+    setRouteSummary(null);
     setSelectedLocationIds(visibleLocations.map((location) => location.id));
   }
 
   function clearRoute() {
+    setRoutePath([]);
+    setRouteSummary(null);
     setSelectedLocationIds([]);
   }
 
@@ -139,6 +199,9 @@ export default function LogisticsPage() {
 
   const googleMapsUrl = buildGoogleMapsUrl(selectedLocations);
   const canOpenGoogleMaps = selectedLocations.length >= 2 && Boolean(googleMapsUrl);
+  const activeRoutePath = routePath.length >= 2
+    ? routePath
+    : selectedLocations.map((location) => [location.latitude, location.longitude] as [number, number]);
 
   async function geocodeClient(clientId: string) {
     if (!isDatabaseMode) {
@@ -214,16 +277,19 @@ export default function LogisticsPage() {
           })),
         }),
       });
-      const payload = (await response.json()) as {
-        data?: { orderedStopIds: string[] };
-        error?: string;
-      };
+      const payload = (await response.json()) as RouteApiResponse;
 
       if (!response.ok || !payload.data) {
         throw new Error(payload.error || "Unable to optimize route.");
       }
 
       setSelectedLocationIds(payload.data.orderedStopIds);
+      setRoutePath(payload.data.routePath ?? []);
+      setRouteSummary({
+        totalDistanceMeters: payload.data.totalDistanceMeters,
+        totalDurationSeconds: payload.data.totalDurationSeconds,
+        provider: payload.data.routeProvider,
+      });
     } catch (error) {
       setRouteError(error instanceof Error ? error.message : "Unable to optimize route.");
     } finally {
@@ -243,8 +309,13 @@ export default function LogisticsPage() {
       workspaceId: activeWorkspace.id,
       name: `Route ${new Date().toLocaleDateString()}`,
       googleMapsUrl,
+      totalDistanceMeters: routeSummary?.totalDistanceMeters ?? null,
+      totalDurationSeconds: routeSummary?.totalDurationSeconds ?? null,
+      notes: routeSummary?.provider
+        ? `Route provider: ${routeSummary.provider}`
+        : undefined,
       stops: selectedLocations.map((location, index) => ({
-        clientId: location.id,
+        clientId: location.clientId,
         stopOrder: index + 1,
         latitude: location.latitude,
         longitude: location.longitude,
@@ -267,6 +338,8 @@ export default function LogisticsPage() {
           value={selectedStatus}
           onChange={(event) => {
             setSelectedStatus(event.target.value);
+            setRoutePath([]);
+            setRouteSummary(null);
             setSelectedLocationIds([]);
           }}
           className="w-full rounded-lg border border-gray-200 bg-white px-4 py-3 text-gray-900 shadow-sm lg:w-auto dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
@@ -305,6 +378,7 @@ export default function LogisticsPage() {
             <LogisticsMap
               locations={visibleLocations}
               selectedLocationIds={selectedLocationIds}
+              routePath={activeRoutePath}
               onToggleLocation={toggleLocation}
             />
           </div>
@@ -431,7 +505,7 @@ export default function LogisticsPage() {
                           </h3>
 
                           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                            {location.status}
+                            {location.sourceType === "job" ? "Job" : "Client"} - {location.status}
                           </p>
 
                           <p className="mt-1 line-clamp-2 text-sm text-gray-500 dark:text-gray-400">
@@ -476,6 +550,44 @@ export default function LogisticsPage() {
             </p>
 
             <div className="mt-6 space-y-4">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <div className="rounded-xl border border-gray-200 p-3 dark:border-gray-800">
+                  <div className="text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">
+                    Stops
+                  </div>
+                  <div className="mt-1 text-lg font-bold text-gray-950 dark:text-gray-100">
+                    {selectedLocations.length}
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-gray-200 p-3 dark:border-gray-800">
+                  <div className="text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">
+                    Distance
+                  </div>
+                  <div className="mt-1 text-lg font-bold text-gray-950 dark:text-gray-100">
+                    {formatDistance(routeSummary?.totalDistanceMeters)}
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-gray-200 p-3 dark:border-gray-800">
+                  <div className="text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">
+                    Duration
+                  </div>
+                  <div className="mt-1 text-lg font-bold text-gray-950 dark:text-gray-100">
+                    {formatDuration(routeSummary?.totalDurationSeconds)}
+                  </div>
+                </div>
+              </div>
+
+              {routeSummary?.provider && (
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  Route line:{" "}
+                  {routeSummary.provider === "openrouteservice"
+                    ? "OpenRouteService geometry"
+                    : "straight-line fallback"}
+                </p>
+              )}
+
               {selectedLocations.length > 0 ? (
                 selectedLocations.map((location, index) => (
                   <div
@@ -493,6 +605,7 @@ export default function LogisticsPage() {
                         </h3>
 
                         <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                          {location.sourceType === "job" ? "Job stop - " : "Client stop - "}
                           {getClientFullAddress(location)}
                         </p>
                       </div>
@@ -524,6 +637,29 @@ export default function LogisticsPage() {
                 Too many route stops for Google Maps export. Reduce stop count.
               </p>
             )}
+          </div>
+
+          <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+            <h2 className="text-xl font-bold text-gray-950 dark:text-gray-100">
+              Fleet Planning Foundation
+            </h2>
+
+            <div className="mt-4 grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
+              {[
+                "Vehicle assignment",
+                "Driver assignment",
+                "Route territory",
+                "Route capacity",
+                "Fleet route groups",
+              ].map((item) => (
+                <div
+                  key={item}
+                  className="rounded-xl border border-dashed border-gray-300 p-3 text-gray-500 dark:border-gray-700 dark:text-gray-400"
+                >
+                  {item}
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       </div>

@@ -1,9 +1,12 @@
 import type { ClientRow } from "@/lib/clientTypes";
+import type { Job } from "@/lib/jobTypes";
 
 export type LogisticsLocation = {
   id: string;
   workspaceId: string;
   clientId: string;
+  jobId?: string;
+  sourceType: "client" | "job";
   name: string;
   status: string;
   address: string;
@@ -74,6 +77,7 @@ export function buildLogisticsLocations(
         id: client.id,
         workspaceId: client.workspaceId,
         clientId: client.id,
+        sourceType: "client",
         name: client.name,
         status: client.status,
         address: client.address ?? "",
@@ -86,6 +90,44 @@ export function buildLogisticsLocations(
       };
     })
     .filter((location): location is LogisticsLocation => Boolean(location));
+}
+
+export function buildJobLogisticsLocations(
+  jobs: Job[],
+  clients: ClientRow[]
+): LogisticsLocation[] {
+  const clientsById = new Map(clients.map((client) => [client.id, client]));
+
+  return jobs.flatMap((job) => {
+      if (!job.clientId) return [];
+      const client = clientsById.get(job.clientId);
+      if (!client) return [];
+
+      const latitude = client.latitude;
+      const longitude = client.longitude;
+      if (typeof latitude !== "number" || typeof longitude !== "number") {
+        return [];
+      }
+
+      return [{
+        id: `job:${job.id}`,
+        workspaceId: job.workspaceId,
+        clientId: client.id,
+        jobId: job.id,
+        sourceType: "job" as const,
+        name: `${job.name} - ${client.name}`,
+        status: `${job.status}${job.date ? ` - ${job.date}` : ""}${
+          job.time ? ` ${job.time}` : ""
+        }`,
+        address: client.address ?? "",
+        city: client.city ?? "",
+        state: client.state ?? "",
+        zip: client.zip ?? "",
+        latitude,
+        longitude,
+        coordinateSource: "saved" as const,
+      }];
+    });
 }
 
 export function getMissingCoordinateClients(

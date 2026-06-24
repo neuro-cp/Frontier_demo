@@ -15,6 +15,7 @@ Route Generation
 -> OpenRouteService Matrix
 -> Nearest Neighbor
 -> Optimized Stop Order
+-> Route Line Rendering
 -> Google Maps Export
 
 ## Implementation Notes
@@ -25,6 +26,8 @@ Route Generation
 - Keep route plans workspace-scoped and RLS protected.
 - Use cached coordinates for map rendering and route generation.
 - Use a simple nearest-neighbor pass first, then preserve room for stronger optimization later.
+- Render OpenRouteService route geometry when available.
+- Fall back to a straight polyline through ordered stops when provider geometry is unavailable.
 - Export to Google Maps as ordered stops, not as a stored Google route.
 - Use public Nominatim only for low-volume development geocoding.
 - Do not call Nominatim from browser components.
@@ -48,3 +51,5 @@ GEOCODE_RATE_LIMIT_MS=1100
 - Whether coordinates belong directly on `clients` or in a separate `addresses` table.
 - Whether route plans should snapshot addresses at creation time for historical accuracy.
 - Whether traffic-aware routing is needed for MVP or should remain post-MVP.
+- Whether job-level addresses should be added separately from client addresses.
+- Whether fleet assignments should become first-class records or route metadata.

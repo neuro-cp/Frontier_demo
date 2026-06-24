@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { getOpenRouteServiceDirections } from "@/lib/logistics/openRouteService";
 import { orderStopsNearestNeighbor } from "@/lib/logistics/nearestNeighbor";
 import { buildGoogleMapsDirectionsUrl, type LogisticsCoordinate } from "@/lib/logistics/providers";
 import { checkUserAndWorkspaceDailyLimits } from "@/lib/rateLimit/dailyCounters";
@@ -16,6 +17,32 @@ type RouteRequest = {
   workspaceId?: string;
   stops?: RouteStopInput[];
 };
+
+function distanceMeters(a: LogisticsCoordinate, b: LogisticsCoordinate) {
+  const earthRadiusMeters = 6371000;
+  const toRadians = (value: number) => (value * Math.PI) / 180;
+  const dLat = toRadians(b.latitude - a.latitude);
+  const dLon = toRadians(b.longitude - a.longitude);
+  const lat1 = toRadians(a.latitude);
+  const lat2 = toRadians(b.latitude);
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+  return 2 * earthRadiusMeters * Math.asin(Math.sqrt(h));
+}
+
+function buildFallbackRouteSummary(stops: RouteStopInput[]) {
+  const totalDistanceMeters = stops.slice(1).reduce((total, stop, index) => {
+    return total + distanceMeters(stops[index], stop);
+  }, 0);
+
+  return {
+    path: stops.map((stop) => [stop.latitude, stop.longitude] as [number, number]),
+    totalDistanceMeters,
+    // Conservative local-driving estimate for fallback only.
+    totalDurationSeconds: Math.round(totalDistanceMeters / 13.4),
+  };
+}
 
 function hasValidStops(stops: unknown): stops is RouteStopInput[] {
   return (
@@ -67,10 +94,34 @@ export async function POST(request: NextRequest) {
     return jsonError("Too many route stops for Google Maps export. Reduce stop count.", 400);
   }
 
+  const fallbackSummary = buildFallbackRouteSummary(orderedStops);
+  let routeSummary = fallbackSummary;
+  let routeProvider: "openrouteservice" | "fallback" = "fallback";
+
+  try {
+    const directions = await getOpenRouteServiceDirections(orderedStops);
+    if (directions.path.length >= 2) {
+      routeSummary = {
+        path: directions.path,
+        totalDistanceMeters:
+          directions.distanceMeters ?? fallbackSummary.totalDistanceMeters,
+        totalDurationSeconds:
+          directions.durationSeconds ?? fallbackSummary.totalDurationSeconds,
+      };
+      routeProvider = "openrouteservice";
+    }
+  } catch {
+    routeSummary = fallbackSummary;
+  }
+
   return NextResponse.json({
     data: {
       orderedStopIds: orderedStops.map((stop) => stop.id),
       googleMapsUrl,
+      routeProvider,
+      routePath: routeSummary.path,
+      totalDistanceMeters: routeSummary.totalDistanceMeters,
+      totalDurationSeconds: routeSummary.totalDurationSeconds,
     },
   });
 }

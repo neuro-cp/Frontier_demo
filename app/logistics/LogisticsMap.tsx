@@ -1,7 +1,7 @@
 "use client";
 
 import L from "leaflet";
-import { MapContainer, Marker, Popup, TileLayer } from "react-leaflet";
+import { MapContainer, Marker, Polyline, Popup, TileLayer } from "react-leaflet";
 
 import { osmTileAttribution } from "@/lib/services/attribution";
 import { LogisticsLocation } from "./logisticsData";
@@ -9,6 +9,7 @@ import { LogisticsLocation } from "./logisticsData";
 type LogisticsMapProps = {
   locations: LogisticsLocation[];
   selectedLocationIds: string[];
+  routePath?: Array<[number, number]>;
   onToggleLocation: (locationId: string) => void;
 };
 
@@ -40,6 +41,7 @@ const selectedMarkerIcon = new L.Icon({
 export default function LogisticsMap({
   locations,
   selectedLocationIds,
+  routePath = [],
   onToggleLocation,
 }: LogisticsMapProps) {
   const center: [number, number] =
@@ -61,6 +63,17 @@ export default function LogisticsMap({
           "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
         }
       />
+
+      {routePath.length >= 2 && (
+        <Polyline
+          positions={routePath}
+          pathOptions={{
+            color: "#2563eb",
+            weight: 5,
+            opacity: 0.85,
+          }}
+        />
+      )}
 
       {locations.map((location) => {
         const isSelected = selectedLocationIds.includes(location.id);
