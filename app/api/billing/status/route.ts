@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { getStripeServerConfig } from "@/lib/billing/stripe";
+import { billingPlanOptions, getStripeServerConfig } from "@/lib/billing/stripe";
 import { getWorkspaceBillingStatus } from "@/lib/billing/workspaceBilling";
 import { requireWorkspaceAccess } from "@/lib/services/routeProtection";
 
@@ -23,6 +23,7 @@ export async function GET(request: NextRequest) {
         hasWebhookSecret: stripe.hasWebhookSecret,
         priceIds: stripe.priceIds,
       },
+      plans: billingPlanOptions,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to load billing status.";

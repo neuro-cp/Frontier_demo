@@ -22,3 +22,11 @@ export type WorkspaceBillingStatus = {
   currentPeriodEnd: string | null;
   cancelAtPeriodEnd: boolean;
 };
+
+export type BillingPlanOption = {
+  plan: Extract<PlanTier, "basic" | "professional" | "business">;
+  label: string;
+  description: string;
+  amountCents: number;
+  lookupKey: string;
+};

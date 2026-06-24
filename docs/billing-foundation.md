@@ -7,7 +7,7 @@ Frontier now has a minimal billing substrate without changing current feature ac
 - Existing plan gates still use `FRONTIER_DEFAULT_PLAN`.
 - Existing OCR, speech, AI, logistics, and storage checks are unchanged.
 - The app continues to work when Stripe variables are missing.
-- Billing writes are reserved for server-side routes and future Stripe webhooks.
+- Billing writes run through server-side routes and Stripe webhooks.
 
 ## Database
 
@@ -32,10 +32,22 @@ Required later:
 - `STRIPE_PRICE_PROFESSIONAL`
 - `STRIPE_PRICE_BUSINESS`
 
+Price IDs are optional in local test mode. If they are absent, the checkout route creates or reuses flat monthly test prices by stable Stripe lookup key:
+
+- Starter: `frontier_starter_monthly`
+- Pro: `frontier_pro_monthly`
+- Business: `frontier_business_monthly`
+
+The browser sends only the plan key. It never sends Stripe price IDs.
+
+## Routes
+
+- `GET /api/billing/status`: returns workspace billing state and Stripe readiness.
+- `POST /api/billing/checkout`: Owner/Manager only; creates a Stripe Checkout subscription session.
+- `POST /api/billing/portal`: Owner/Manager only; creates a Stripe billing portal session for an existing customer.
+- `POST /api/billing/webhook`: syncs checkout/subscription events into `workspace_billing` when `STRIPE_WEBHOOK_SECRET` is configured.
+
 ## Deferred
 
-- Checkout session creation
-- Customer portal session creation
-- Stripe webhooks
 - Durable quota accounting
 - Enforcing billing status against feature access
