@@ -18,6 +18,12 @@ Route Generation
 -> Route Line Rendering
 -> Google Maps Export
 
+## Routing Providers
+
+- `nearest_neighbor`: default no-cost deterministic ordering and fallback polyline.
+- `openroute_service`: optional route geometry, distance, and duration enrichment.
+- `google_traffic`: optional premium traffic-aware route, never called unless explicitly clicked and enabled.
+
 ## Implementation Notes
 
 - Store coordinates on the client or address record after a successful geocode.
@@ -28,6 +34,7 @@ Route Generation
 - Use a simple nearest-neighbor pass first, then preserve room for stronger optimization later.
 - Render OpenRouteService route geometry when available.
 - Fall back to a straight polyline through ordered stops when provider geometry is unavailable.
+- Keep Google traffic-aware routing disabled by default and controlled by `ENABLE_GOOGLE_TRAFFIC_ROUTING`.
 - Export to Google Maps as ordered stops, not as a stored Google route.
 - Use public Nominatim only for low-volume development geocoding.
 - Do not call Nominatim from browser components.
@@ -39,6 +46,8 @@ Route Generation
 
 ```env
 OPENROUTE_SERVICE_API_KEY=
+GOOGLE_ROUTES_API_KEY=
+ENABLE_GOOGLE_TRAFFIC_ROUTING=false
 GEOCODER_PROVIDER=nominatim
 NOMINATIM_BASE_URL=https://nominatim.openstreetmap.org
 NOMINATIM_USER_AGENT=Frontier/0.1 (contact: your-email@example.com)

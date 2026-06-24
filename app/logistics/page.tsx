@@ -32,12 +32,24 @@ type RouteApiResponse = {
   data?: {
     orderedStopIds: string[];
     googleMapsUrl?: string;
-    routeProvider?: "openrouteservice" | "fallback";
+    routeProvider?: "nearest_neighbor" | "openroute_service" | "google_traffic";
     routePath?: Array<[number, number]>;
     totalDistanceMeters?: number;
     totalDurationSeconds?: number;
+    warning?: string;
   };
   error?: string;
+};
+
+type RouteProviderStatus = {
+  providers?: {
+    google_traffic?: {
+      available: boolean;
+      enabled: boolean;
+      configured: boolean;
+      message: string;
+    };
+  };
 };
 
 function formatDistance(meters?: number | null) {
@@ -77,11 +89,17 @@ export default function LogisticsPage() {
   const [routeSummary, setRouteSummary] = useState<{
     totalDistanceMeters?: number;
     totalDurationSeconds?: number;
-    provider?: "openrouteservice" | "fallback";
+    provider?: "nearest_neighbor" | "openroute_service" | "google_traffic";
+    warning?: string;
   } | null>(null);
+  const [trafficStatus, setTrafficStatus] = useState<{
+    available: boolean;
+    message: string;
+  }>({ available: false, message: "Traffic-aware routing is disabled for this workspace/environment." });
   const [routeError, setRouteError] = useState("");
   const [geocodingClientId, setGeocodingClientId] = useState("");
   const [isOptimizingRoute, setIsOptimizingRoute] = useState(false);
+  const [isTrafficRouting, setIsTrafficRouting] = useState(false);
 
   const supabase = useMemo(() => (isDatabaseMode ? createBrowserSupabaseClient() : null), [isDatabaseMode]);
   const clientsRepo = useMemo(() => createClientsRepository({ isSignedIn: isDatabaseMode, supabase, localClients, setLocalClients }), [isDatabaseMode, localClients, setLocalClients, supabase]);
@@ -102,6 +120,34 @@ export default function LogisticsPage() {
     });
     return () => { cancelled = true; };
   }, [activeWorkspace.id, clientsRepo, isDatabaseMode, jobsRepo, routesRepo]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/logistics/route")
+      .then((response) => response.json())
+      .then((payload: { data?: RouteProviderStatus }) => {
+        if (cancelled) return;
+        const googleTraffic = payload.data?.providers?.google_traffic;
+        if (!googleTraffic) return;
+        setTrafficStatus({
+          available: googleTraffic.available,
+          message:
+            googleTraffic.message ||
+            "Traffic-aware routing is available as a premium routing provider.",
+        });
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setTrafficStatus({
+            available: false,
+            message: "Traffic-aware routing status could not be loaded.",
+          });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const workspaceClients = useMemo(() => {
     return clients.filter(
@@ -257,10 +303,14 @@ export default function LogisticsPage() {
     }
   }
 
-  async function optimizeRoute() {
+  async function optimizeRoute(provider: "nearest_neighbor" | "google_traffic" = "nearest_neighbor") {
     if (!isDatabaseMode || selectedLocations.length < 2) return;
 
-    setIsOptimizingRoute(true);
+    if (provider === "google_traffic") {
+      setIsTrafficRouting(true);
+    } else {
+      setIsOptimizingRoute(true);
+    }
     setRouteError("");
 
     try {
@@ -269,6 +319,7 @@ export default function LogisticsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           workspaceId: activeWorkspace.id,
+          provider,
           stops: selectedLocations.map((location) => ({
             id: location.id,
             latitude: location.latitude,
@@ -289,11 +340,13 @@ export default function LogisticsPage() {
         totalDistanceMeters: payload.data.totalDistanceMeters,
         totalDurationSeconds: payload.data.totalDurationSeconds,
         provider: payload.data.routeProvider,
+        warning: payload.data.warning,
       });
     } catch (error) {
       setRouteError(error instanceof Error ? error.message : "Unable to optimize route.");
     } finally {
       setIsOptimizingRoute(false);
+      setIsTrafficRouting(false);
     }
   }
 
@@ -456,12 +509,27 @@ export default function LogisticsPage() {
                 <>
                   <button
                     type="button"
-                    onClick={optimizeRoute}
+                    onClick={() => optimizeRoute()}
                     disabled={selectedLocations.length < 2 || isOptimizingRoute}
                     className="w-full rounded-lg border border-blue-600 px-4 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-blue-300 dark:hover:bg-blue-950/30 sm:w-auto"
                   >
                     {isOptimizingRoute ? "Optimizing..." : "Optimize Route"}
                   </button>
+
+                  {trafficStatus.available ? (
+                    <button
+                      type="button"
+                      onClick={() => optimizeRoute("google_traffic")}
+                      disabled={selectedLocations.length < 2 || isTrafficRouting}
+                      className="w-full rounded-lg border border-purple-600 px-4 py-2 text-sm font-semibold text-purple-700 hover:bg-purple-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-purple-300 dark:hover:bg-purple-950/30 sm:w-auto"
+                    >
+                      {isTrafficRouting ? "Checking Traffic..." : "Use Traffic-Aware Route"}
+                    </button>
+                  ) : (
+                    <div className="rounded-lg border border-gray-200 px-4 py-2 text-xs text-gray-500 dark:border-gray-700 dark:text-gray-400 sm:max-w-64">
+                      {trafficStatus.message}
+                    </div>
+                  )}
 
                   <button
                     type="button"
@@ -479,6 +547,12 @@ export default function LogisticsPage() {
               <div className="mt-4 rounded-lg bg-gray-50 p-3 text-sm text-gray-600 dark:bg-gray-800 dark:text-gray-300">
                 {routes.length} saved route{routes.length === 1 ? "" : "s"}
               </div>
+            )}
+
+            {trafficStatus.available && (
+              <p className="mt-4 text-xs text-purple-700 dark:text-purple-300">
+                Traffic-aware routing uses a higher-cost premium provider and only runs when clicked.
+              </p>
             )}
 
             <div className="mt-6 space-y-3">
@@ -582,10 +656,18 @@ export default function LogisticsPage() {
               {routeSummary?.provider && (
                 <p className="text-xs text-gray-500 dark:text-gray-400">
                   Route line:{" "}
-                  {routeSummary.provider === "openrouteservice"
-                    ? "OpenRouteService geometry"
-                    : "straight-line fallback"}
+                  {routeSummary.provider === "google_traffic"
+                    ? "Google traffic-aware route"
+                    : routeSummary.provider === "openroute_service"
+                      ? "OpenRouteService geometry"
+                      : "nearest-neighbor fallback"}
                 </p>
+              )}
+
+              {routeSummary?.warning && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+                  {routeSummary.warning}
+                </div>
               )}
 
               {selectedLocations.length > 0 ? (
