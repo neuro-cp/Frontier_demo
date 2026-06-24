@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useAuthSession } from "@/components/AuthSessionProvider";
 import { useWorkspace } from "@/components/WorkspaceContext";
 import { useClientPortalAccess } from "@/lib/portals/useClientPortalAccess";
+import { useEmployeePortalAccess } from "@/lib/portals/useEmployeePortalAccess";
 
 type PortalSubpageShellProps = {
   portalName: "Client Portal" | "Employee Portal";
@@ -24,6 +25,7 @@ export default function PortalSubpageShell({
   const { user } = useAuthSession();
   const { activeWorkspace } = useWorkspace();
   const clientPortalAccess = useClientPortalAccess();
+  const employeePortalAccess = useEmployeePortalAccess();
 
   if (!user) {
     return (
@@ -56,6 +58,24 @@ export default function PortalSubpageShell({
         {clientPortalAccess.error && (
           <p className="mt-3 text-sm text-red-600 dark:text-red-400">
             {clientPortalAccess.error}
+          </p>
+        )}
+      </div>
+    );
+  }
+
+  if (portalName === "Employee Portal" && !employeePortalAccess.hasActiveAccess) {
+    return (
+      <div className="mx-auto max-w-2xl rounded-xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+        <h1 className="text-2xl font-bold text-gray-950 dark:text-gray-100">
+          Employee Portal
+        </h1>
+        <p className="mt-3 text-gray-600 dark:text-gray-300">
+          You do not have active employee portal access yet. Ask a workspace Owner or Manager to add you as an Employee.
+        </p>
+        {employeePortalAccess.error && (
+          <p className="mt-3 text-sm text-red-600 dark:text-red-400">
+            {employeePortalAccess.error}
           </p>
         )}
       </div>

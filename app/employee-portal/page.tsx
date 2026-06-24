@@ -2,7 +2,10 @@
 
 import Link from "next/link";
 
-import { usePortalMetrics } from "@/lib/portals/usePortalMetrics";
+import { useAuthSession } from "@/components/AuthSessionProvider";
+import { useWorkspace } from "@/components/WorkspaceContext";
+import { useEmployeePortalAccess } from "@/lib/portals/useEmployeePortalAccess";
+import { useEmployeePortalData } from "@/lib/portals/useEmployeePortalData";
 
 const portalNav = [
   { label: "Dashboard", href: "/employee-portal" },
@@ -42,9 +45,15 @@ function PortalCard({
 }
 
 export default function EmployeePortalPage() {
-  const { activeWorkspace, error, isAuthenticated, metrics } = usePortalMetrics();
+  const { user } = useAuthSession();
+  const { activeWorkspace } = useWorkspace();
+  const employeePortalAccess = useEmployeePortalAccess();
+  const jobs = useEmployeePortalData("jobs");
+  const materials = useEmployeePortalData("materials");
+  const photos = useEmployeePortalData("photos");
+  const error = employeePortalAccess.error || jobs.error || materials.error || photos.error;
 
-  if (!isAuthenticated) {
+  if (!user) {
     return (
       <div className="mx-auto max-w-2xl rounded-xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
         <h1 className="text-2xl font-bold text-gray-950 dark:text-gray-100">
@@ -59,6 +68,24 @@ export default function EmployeePortalPage() {
         >
           Log in
         </Link>
+      </div>
+    );
+  }
+
+  if (!employeePortalAccess.hasActiveAccess) {
+    return (
+      <div className="mx-auto max-w-2xl rounded-xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+        <h1 className="text-2xl font-bold text-gray-950 dark:text-gray-100">
+          Employee Portal
+        </h1>
+        <p className="mt-3 text-gray-600 dark:text-gray-300">
+          You do not have active employee portal access yet. Ask a workspace Owner or Manager to add you as an Employee.
+        </p>
+        {employeePortalAccess.error && (
+          <p className="mt-3 text-sm text-red-600 dark:text-red-400">
+            {employeePortalAccess.error}
+          </p>
+        )}
       </div>
     );
   }
@@ -100,8 +127,8 @@ export default function EmployeePortalPage() {
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
         <PortalCard
           title="Assigned Jobs"
-          value={String(metrics.scheduledJobs)}
-          note="Uses scheduled workspace jobs until employee assignment is modeled."
+          value={String(jobs.items.length)}
+          note="Only jobs explicitly assigned to this employee."
           href="/employee-portal/jobs"
         />
         <PortalCard
@@ -118,14 +145,14 @@ export default function EmployeePortalPage() {
         />
         <PortalCard
           title="Materials"
-          value={String(metrics.materialLines)}
-          note="Counts material lines on workspace jobs."
+          value={String(materials.items.length)}
+          note="Material lines from assigned jobs only."
           href="/employee-portal/materials"
         />
         <PortalCard
           title="Photos"
-          value={String(metrics.photos)}
-          note="Counts image documents in the active workspace."
+          value={String(photos.items.length)}
+          note="Image documents attached to assigned jobs."
           href="/employee-portal/photos"
         />
         <PortalCard
