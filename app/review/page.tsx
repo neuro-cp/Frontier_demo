@@ -40,6 +40,23 @@ type ReviewDraftsResponse = {
 
 type TranscriptionResponse = {
   transcription?: SpeechWorkerSuccess["data"];
+  speechTranscript?: {
+    id: string;
+    status: string;
+    sourceLabel: string | null;
+    provider: string | null;
+    language: string | null;
+    durationSeconds: number | null;
+    retryCount: number | null;
+    queuedAt: string | null;
+    startedAt: string | null;
+    completedAt: string | null;
+    failedAt: string | null;
+    errorText: string | null;
+    reviewDraftId: string | null;
+  } | null;
+  reviewDraftId?: string | null;
+  draftError?: string | null;
   error?: string;
 };
 
@@ -149,6 +166,9 @@ export default function ReviewQueuePage() {
   const voiceAutoProcessRef = useRef(false);
   const [transcription, setTranscription] = useState<
     SpeechWorkerSuccess["data"] | null
+  >(null);
+  const [speechTranscript, setSpeechTranscript] = useState<
+    NonNullable<TranscriptionResponse["speechTranscript"]> | null
   >(null);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [isGeneratingTranscriptDraft, setIsGeneratingTranscriptDraft] =
@@ -690,16 +710,23 @@ export default function ReviewQueuePage() {
     }
   }
 
-  async function transcribeAudioSource(file: File, sourceLabel: string) {
+  async function transcribeAudioSource(
+    file: File,
+    sourceLabel: string,
+    createReviewDraft = true
+  ) {
     if (!workspaceReady || isTranscribing) return null;
 
     setIsTranscribing(true);
     setError("");
     setTranscription(null);
+    setSpeechTranscript(null);
     try {
       const formData = new FormData();
       formData.append("workspaceId", activeWorkspace.id);
       formData.append("file", file);
+      formData.append("sourceLabel", sourceLabel);
+      formData.append("createReviewDraft", createReviewDraft ? "true" : "false");
 
       const response = await fetch("/api/speech/transcribe", {
         method: "POST",
@@ -711,8 +738,13 @@ export default function ReviewQueuePage() {
       }
 
       setTranscription(payload.transcription);
+      setSpeechTranscript(payload.speechTranscript ?? null);
       setTranscriptText(payload.transcription.text);
       if (!transcriptLabel.trim()) setTranscriptLabel(sourceLabel);
+      if (payload.reviewDraftId) {
+        await loadReviewDrafts();
+      }
+      if (payload.draftError) setError(payload.draftError);
       return payload.transcription;
     } catch (transcriptionError) {
       setError(
@@ -728,7 +760,7 @@ export default function ReviewQueuePage() {
 
   async function transcribeAudio() {
     if (!audioFile) return;
-    await transcribeAudioSource(audioFile, audioFile.name);
+    await transcribeAudioSource(audioFile, audioFile.name, true);
   }
 
   async function selectImageFile(file: File | null) {
@@ -906,7 +938,7 @@ export default function ReviewQueuePage() {
     const file = new File([recordedBlob], `frontier-recording.${extension}`, {
       type: recordedBlob.type || "audio/webm",
     });
-    await transcribeAudioSource(file, file.name);
+    await transcribeAudioSource(file, file.name, true);
   }
 
   async function startVoiceAssistant() {
@@ -931,7 +963,7 @@ export default function ReviewQueuePage() {
     const file = new File([blob], `frontier-voice-command.${extension}`, {
       type: blob.type || "audio/webm",
     });
-    const result = await transcribeAudioSource(file, "Voice command");
+    const result = await transcribeAudioSource(file, "Voice command", false);
     if (!result?.text) {
       speakAssistant("I could not hear enough to create a draft. Please try again.");
       return;
@@ -1356,6 +1388,45 @@ export default function ReviewQueuePage() {
                 <p className="mt-1 line-clamp-3 text-gray-600 dark:text-gray-400">
                   {transcription.text}
                 </p>
+                {speechTranscript && (
+                  <dl className="mt-3 grid gap-2 border-t border-gray-200 pt-3 text-xs dark:border-gray-800 sm:grid-cols-2">
+                    <div>
+                      <dt className="font-semibold">Transcript Status</dt>
+                      <dd>{speechTranscript.status}</dd>
+                    </div>
+                    <div>
+                      <dt className="font-semibold">Retry Count</dt>
+                      <dd>{speechTranscript.retryCount ?? 0}</dd>
+                    </div>
+                    <div>
+                      <dt className="font-semibold">Started</dt>
+                      <dd>{formatDate(speechTranscript.startedAt)}</dd>
+                    </div>
+                    <div>
+                      <dt className="font-semibold">Completed</dt>
+                      <dd>{formatDate(speechTranscript.completedAt)}</dd>
+                    </div>
+                    {speechTranscript.errorText && (
+                      <div className="sm:col-span-2">
+                        <dt className="font-semibold text-red-600 dark:text-red-300">Error</dt>
+                        <dd>{speechTranscript.errorText}</dd>
+                      </div>
+                    )}
+                    {speechTranscript.reviewDraftId && (
+                      <div className="sm:col-span-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            window.location.assign(`/review?draftId=${encodeURIComponent(speechTranscript.reviewDraftId ?? "")}`);
+                          }}
+                          className="rounded-lg border border-blue-600 px-3 py-2 text-xs font-bold text-blue-600 hover:bg-blue-50 dark:text-blue-300 dark:hover:bg-blue-950/40"
+                        >
+                          Open Linked Review Draft
+                        </button>
+                      </div>
+                    )}
+                  </dl>
+                )}
               </div>
             )}
           </div>

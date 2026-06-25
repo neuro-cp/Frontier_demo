@@ -1,6 +1,6 @@
 # Frontier Business Platform Checkpoint
 
-Current checkpoint after the OCR activation sprint. Latest prior pushed commit before this sprint was `42e8b04`; current database migration work adds `0029_document_ocr_lifecycle.sql`.
+Current checkpoint after the Speech activation sprint. Latest prior pushed commit before this sprint was `1031d4d`; current database migration work adds `0030_speech_transcript_lifecycle.sql`.
 
 ## Completed Platform Areas
 
@@ -75,12 +75,17 @@ Current checkpoint after the OCR activation sprint. Latest prior pushed commit b
   - successful OCR creates a linked review draft when document interpretation succeeds
   - source document stores the linked review draft ID
   - Review Queue hydrates OCR source text and source OCR metadata from the document record
+- Speech activation:
+  - speech transcriptions persist to `speech_transcripts`
+  - transcription lifecycle records queued, processing, completed, failed, retry count, timestamps, and error text
+  - uploaded audio and microphone recordings can create linked transcript review drafts
+  - voice assistant transcription persists source text without creating duplicate automatic review drafts
+  - Review Queue hydrates transcript source text and source speech metadata
 
 ## Frozen Systems
 
 The following systems are intentionally not part of this business-platform sprint:
 
-- Speech worker
 - Image analysis
 - Logistics optimization and routing engine
 - Upload expansion
@@ -104,12 +109,13 @@ The following systems are intentionally not part of this business-platform sprin
 - AI review audit events are workspace-scoped through RLS.
 - OCR draft creation does not execute actions.
 - OCR source previews are workspace-scoped through the review draft and document workspace relationship.
+- Speech draft creation does not execute actions.
+- Speech source previews are workspace-scoped through the review draft and transcript workspace relationship.
 
 ## Recommended Next Phase
 
-1. Runtime validate OCR with one small PDF in a signed-in workspace.
-2. Speech activation against the completed Review Queue.
-3. Image activation after OCR and speech are stable.
+1. Runtime validate speech with one short audio sample in a signed-in workspace.
+2. Image activation against the completed Review Queue.
 5. Add richer per-record activity timelines on client/job/invoice/estimate detail pages.
 6. Add time tracking foundation for employee portal.
 7. Portal document/photo upload expansion.

@@ -75,7 +75,7 @@ async function requireUserAndWorkspace(workspaceId: string) {
   };
 }
 
-async function attachOcrSourcePreviews(
+async function attachSourcePreviews(
   supabase: Awaited<ReturnType<typeof createServerSupabaseClient>>,
   workspaceId: string,
   drafts: AiReviewDraft[]
@@ -87,29 +87,65 @@ async function attachOcrSourcePreviews(
         .map((draft) => draft.sourceId as string)
     )
   );
-  if (documentIds.length === 0) return drafts;
+  const transcriptIds = Array.from(
+    new Set(
+      drafts
+        .filter((draft) => draft.sourceType === "transcript" && isUuid(draft.sourceId ?? ""))
+        .map((draft) => draft.sourceId as string)
+    )
+  );
 
-  const { data, error } = await supabase
-    .from("documents")
-    .select("id, name, file_name, extracted_text, extracted_json, processing_status, ocr_provider, confidence, ocr_completed_at")
-    .eq("workspace_id", workspaceId)
-    .in("id", documentIds);
-  if (error) throw new Error(error.message || "Unable to load OCR source previews.");
+  if (documentIds.length === 0 && transcriptIds.length === 0) return drafts;
 
-  const documentsById = new Map((data ?? []).map((document) => [document.id, document]));
+  const [documentsResult, transcriptsResult] = await Promise.all([
+    documentIds.length
+      ? supabase
+          .from("documents")
+          .select("id, name, file_name, extracted_text, extracted_json, processing_status, ocr_provider, confidence, ocr_completed_at")
+          .eq("workspace_id", workspaceId)
+          .in("id", documentIds)
+      : Promise.resolve({ data: [], error: null }),
+    transcriptIds.length
+      ? supabase
+          .from("speech_transcripts")
+          .select("id, source_label, transcript_text, status, provider, confidence, completed_at")
+          .eq("workspace_id", workspaceId)
+          .in("id", transcriptIds)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+  if (documentsResult.error) throw new Error(documentsResult.error.message || "Unable to load OCR source previews.");
+  if (transcriptsResult.error) throw new Error(transcriptsResult.error.message || "Unable to load transcript source previews.");
+
+  const documentsById = new Map((documentsResult.data ?? []).map((document) => [document.id, document]));
+  const transcriptsById = new Map((transcriptsResult.data ?? []).map((transcript) => [transcript.id, transcript]));
   return drafts.map((draft) => {
     const document = draft.sourceId ? documentsById.get(draft.sourceId) : undefined;
-    if (!document) return draft;
+    if (document) {
+      return {
+        ...draft,
+        sourcePreview: {
+          label: document.file_name ?? document.name ?? null,
+          text: document.extracted_text ?? null,
+          extractedJson: (document.extracted_json ?? null) as Record<string, unknown> | null,
+          processingStatus: document.processing_status ?? null,
+          provider: document.ocr_provider ?? null,
+          confidence: document.confidence ?? null,
+          completedAt: document.ocr_completed_at ?? null,
+        },
+      };
+    }
+    const transcript = draft.sourceId ? transcriptsById.get(draft.sourceId) : undefined;
+    if (!transcript) return draft;
     return {
       ...draft,
       sourcePreview: {
-        label: document.file_name ?? document.name ?? null,
-        text: document.extracted_text ?? null,
-        extractedJson: (document.extracted_json ?? null) as Record<string, unknown> | null,
-        processingStatus: document.processing_status ?? null,
-        provider: document.ocr_provider ?? null,
-        confidence: document.confidence ?? null,
-        completedAt: document.ocr_completed_at ?? null,
+        label: transcript.source_label ?? null,
+        text: transcript.transcript_text ?? null,
+        extractedJson: null,
+        processingStatus: transcript.status ?? null,
+        provider: transcript.provider ?? null,
+        confidence: transcript.confidence ?? null,
+        completedAt: transcript.completed_at ?? null,
       },
     };
   });
@@ -134,14 +170,14 @@ export async function GET(request: NextRequest) {
         getReviewDraftAuditEvents(auth.supabase, workspaceId, draftId),
       ]);
       if (!reviewDraft) return jsonError("Review draft not found.", 404);
-      const [reviewDraftWithPreview] = await attachOcrSourcePreviews(
+      const [reviewDraftWithPreview] = await attachSourcePreviews(
         auth.supabase,
         workspaceId,
         [reviewDraft]
       );
       return NextResponse.json({ reviewDraft: reviewDraftWithPreview, revisions, auditEvents });
     }
-    const reviewDrafts = await attachOcrSourcePreviews(
+    const reviewDrafts = await attachSourcePreviews(
       auth.supabase,
       workspaceId,
       await getReviewDrafts(auth.supabase, workspaceId)
