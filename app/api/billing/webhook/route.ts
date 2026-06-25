@@ -38,6 +38,72 @@ async function syncSubscription(subscription: Stripe.Subscription) {
   });
 }
 
+async function syncInvoicePaymentSession(
+  session: Stripe.Checkout.Session,
+  status: "Succeeded" | "Failed"
+) {
+  if (session.metadata?.frontier_type !== "invoice_payment") return;
+
+  const workspaceId = session.metadata.workspace_id;
+  const invoiceId = session.metadata.invoice_id;
+  if (!workspaceId || !invoiceId) return;
+
+  const serviceClient = createServiceRoleClient();
+  const paymentIntent =
+    typeof session.payment_intent === "string"
+      ? session.payment_intent
+      : session.payment_intent?.id ?? null;
+
+  const amountCents = session.amount_total ?? 0;
+  const paymentPayload = {
+      workspace_id: workspaceId,
+      invoice_id: invoiceId,
+      amount_cents: amountCents,
+      payment_date: new Date().toISOString().slice(0, 10),
+      method: "Stripe",
+      reference: session.id,
+      notes: status === "Succeeded" ? "Stripe Checkout payment completed." : "Stripe Checkout payment failed.",
+      status,
+      stripe_checkout_session_id: session.id,
+      stripe_payment_intent_id: paymentIntent,
+      stripe_customer_id:
+        typeof session.customer === "string"
+          ? session.customer
+          : session.customer?.id ?? null,
+      paid_by_user_id: session.metadata.paid_by_user_id || null,
+  };
+
+  const { data: existingPayment, error: existingPaymentError } = await serviceClient
+    .from("invoice_payments")
+    .select("id")
+    .eq("stripe_checkout_session_id", session.id)
+    .maybeSingle();
+
+  if (existingPaymentError) throw existingPaymentError;
+
+  const paymentWrite = existingPayment
+    ? await serviceClient
+        .from("invoice_payments")
+        .update(paymentPayload)
+        .eq("id", existingPayment.id)
+    : await serviceClient.from("invoice_payments").insert(paymentPayload);
+
+  if (paymentWrite.error) throw paymentWrite.error;
+
+  if (status === "Succeeded" && session.payment_status === "paid") {
+    const { error: invoiceUpdateError } = await serviceClient
+      .from("invoices")
+      .update({
+        status: "Paid",
+        paid_at: new Date().toISOString(),
+      })
+      .eq("id", invoiceId)
+      .eq("workspace_id", workspaceId);
+
+    if (invoiceUpdateError) throw invoiceUpdateError;
+  }
+}
+
 export async function POST(request: NextRequest) {
   const stripe = getStripeClient();
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
@@ -62,10 +128,19 @@ export async function POST(request: NextRequest) {
   try {
     if (event.type === "checkout.session.completed") {
       const session = event.data.object as Stripe.Checkout.Session;
+      if (session.metadata?.frontier_type === "invoice_payment") {
+        await syncInvoicePaymentSession(session, "Succeeded");
+        return NextResponse.json({ received: true });
+      }
+
       if (typeof session.subscription === "string") {
         const subscription = await stripe.subscriptions.retrieve(session.subscription);
         await syncSubscription(subscription);
       }
+    }
+
+    if (event.type === "checkout.session.async_payment_failed") {
+      await syncInvoicePaymentSession(event.data.object as Stripe.Checkout.Session, "Failed");
     }
 
     if (
