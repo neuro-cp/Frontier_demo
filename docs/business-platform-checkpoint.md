@@ -1,6 +1,6 @@
 # Frontier Business Platform Checkpoint
 
-Current checkpoint after the AI review substrate completion sprint. Latest prior pushed commit before this sprint was `ce89166`; current database migration work adds `0028_ai_review_archive_audit.sql`.
+Current checkpoint after the OCR activation sprint. Latest prior pushed commit before this sprint was `42e8b04`; current database migration work adds `0029_document_ocr_lifecycle.sql`.
 
 ## Completed Platform Areas
 
@@ -69,12 +69,17 @@ Current checkpoint after the AI review substrate completion sprint. Latest prior
   - audit-event table and lifecycle trigger
   - edit modal audit trail
   - OCR Activation Checklist handoff document
+- OCR activation:
+  - document OCR route records queued, processing, needs review, reviewed, failed, retry count, timestamps, and error text
+  - OCR worker output persists extracted text and structured metadata on the source document
+  - successful OCR creates a linked review draft when document interpretation succeeds
+  - source document stores the linked review draft ID
+  - Review Queue hydrates OCR source text and source OCR metadata from the document record
 
 ## Frozen Systems
 
 The following systems are intentionally not part of this business-platform sprint:
 
-- OCR
 - Speech worker
 - Image analysis
 - Logistics optimization and routing engine
@@ -97,13 +102,14 @@ The following systems are intentionally not part of this business-platform sprin
 - Review draft execution remains explicit and server-authoritative.
 - Archived, rejected, pending, needs-changes, and already-executed AI drafts cannot execute through the normal execution route.
 - AI review audit events are workspace-scoped through RLS.
+- OCR draft creation does not execute actions.
+- OCR source previews are workspace-scoped through the review draft and document workspace relationship.
 
 ## Recommended Next Phase
 
-1. Apply and validate migration `0028_ai_review_archive_audit.sql`.
-2. First frozen-system return sprint: OCR activation against the completed Review Queue.
-3. Speech activation after OCR source hydration is proven.
-4. Image activation after OCR and speech are stable.
+1. Runtime validate OCR with one small PDF in a signed-in workspace.
+2. Speech activation against the completed Review Queue.
+3. Image activation after OCR and speech are stable.
 5. Add richer per-record activity timelines on client/job/invoice/estimate detail pages.
 6. Add time tracking foundation for employee portal.
 7. Portal document/photo upload expansion.

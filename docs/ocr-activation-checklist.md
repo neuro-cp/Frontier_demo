@@ -2,7 +2,7 @@
 
 Use this checklist when Frontier is ready to reconnect OCR, speech, and image intake to the completed review substrate.
 
-## Current Ready Components
+## Current Completed Components
 
 - Review Queue dashboard, filters, search, sorting, status badges, source badges, confidence display, and draft summaries.
 - Draft detail cards with source attribution placeholders, action previews, affected-record form links, confidence indicators, and validation warnings.
@@ -10,19 +10,24 @@ Use this checklist when Frontier is ready to reconnect OCR, speech, and image in
 - Audit trail for created, edited, approved, rejected, needs changes, archived, duplicated, executed, and failed execution events.
 - Revision history for edited draft payloads.
 - Server-authoritative execution through the shared action layer.
+- PDF document upload stores file metadata and workspace ownership.
+- OCR worker integration runs through `POST /api/documents/ocr`.
+- OCR lifecycle is persisted on documents: queued, processing, needs review, reviewed, failed, retry count, timestamps, and error text.
+- OCR extracted text and structured metadata are persisted on the source document.
+- Successful OCR creates a linked AI review draft when interpretation succeeds.
+- Review Queue hydrates OCR source text previews for linked document drafts.
 
 ## OCR Activation Steps
 
-1. Confirm document upload still stores file metadata and workspace ownership.
-2. Confirm OCR worker health and configured worker URL without exposing secrets.
-3. Run OCR on one small PDF.
-4. Persist extracted text on the document record.
-5. Generate an AI review draft from the extracted text.
-6. Confirm source attribution links the review draft back to the document.
-7. Confirm extracted text preview is hydrated in the Review Queue.
-8. Confirm no draft executes until explicit approval and execute.
-9. Confirm rejected, archived, needs-changes, and already-executed drafts cannot execute.
-10. Confirm workspace isolation blocks cross-workspace source access.
+1. Confirm OCR worker health and configured worker URL without exposing secrets.
+2. Run OCR on one small PDF.
+3. Confirm the document moves through queued, processing, and needs review.
+4. Confirm extracted text and OCR metadata persist on the document.
+5. Confirm the linked review draft appears in the Review Queue.
+6. Confirm extracted text preview is hydrated in the Review Queue.
+7. Confirm no draft executes until explicit approval and execute.
+8. Confirm rejected, archived, needs-changes, and already-executed drafts cannot execute.
+9. Confirm workspace isolation blocks cross-workspace source access.
 
 ## Speech Activation Steps
 
@@ -50,6 +55,6 @@ Use this checklist when Frontier is ready to reconnect OCR, speech, and image in
 - Client or employee portal access to raw AI source data.
 - External email, SMS, or push notifications for AI review events.
 
-## Recommended First Activation Sprint
+## Recommended Next Activation Sprint
 
-Start with PDF OCR because the file flow, OCR worker, document metadata, AI draft persistence, review queue, and action execution boundaries already exist. Speech and image should follow after OCR source hydration is proven.
+Speech should activate next after one browser/API pass confirms OCR source hydration and review draft execution boundaries in production-like use.

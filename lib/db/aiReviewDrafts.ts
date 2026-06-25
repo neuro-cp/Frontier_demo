@@ -44,6 +44,15 @@ export type AiReviewDraft = {
   executionError: string | null;
   createdAt: string;
   updatedAt: string;
+  sourcePreview?: {
+    label: string | null;
+    text: string | null;
+    extractedJson: Record<string, unknown> | null;
+    processingStatus: string | null;
+    provider: string | null;
+    confidence: number | null;
+    completedAt: string | null;
+  };
 };
 
 type DbAiReviewDraft = {

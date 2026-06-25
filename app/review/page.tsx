@@ -301,6 +301,9 @@ export default function ReviewQueuePage() {
   }
 
   function sourcePlaceholder(draft: AiReviewDraft) {
+    if (draft.sourcePreview?.text) {
+      return draft.sourcePreview.text.slice(0, 1200);
+    }
     if (draft.sourceType === "ocr") {
       return "Extracted text preview will appear here when OCR source hydration is connected.";
     }
@@ -1729,10 +1732,26 @@ export default function ReviewQueuePage() {
                       <dt className="text-gray-500 dark:text-gray-400">Updated</dt>
                       <dd>{formatDate(draft.updatedAt)}</dd>
                     </div>
+                    {draft.sourcePreview && (
+                      <>
+                        <div className="flex justify-between gap-3">
+                          <dt className="text-gray-500 dark:text-gray-400">Source Status</dt>
+                          <dd>{draft.sourcePreview.processingStatus || "unknown"}</dd>
+                        </div>
+                        <div className="flex justify-between gap-3">
+                          <dt className="text-gray-500 dark:text-gray-400">Source Completed</dt>
+                          <dd>{formatDate(draft.sourcePreview.completedAt)}</dd>
+                        </div>
+                        <div className="flex justify-between gap-3">
+                          <dt className="text-gray-500 dark:text-gray-400">Source Provider</dt>
+                          <dd>{draft.sourcePreview.provider || "unknown"}</dd>
+                        </div>
+                      </>
+                    )}
                   </dl>
-                  <p className="mt-3 rounded-lg border border-dashed border-gray-300 p-3 text-gray-600 dark:border-gray-700 dark:text-gray-400">
+                  <pre className="mt-3 max-h-64 overflow-auto whitespace-pre-wrap rounded-lg border border-dashed border-gray-300 p-3 text-gray-600 dark:border-gray-700 dark:text-gray-400">
                     {sourcePlaceholder(draft)}
-                  </p>
+                  </pre>
                 </section>
 
                 <section className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm dark:border-gray-800 dark:bg-gray-950">

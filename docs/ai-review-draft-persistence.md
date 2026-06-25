@@ -9,6 +9,7 @@ OCR extracted text
   -> interpretDocumentWithAI()
   -> ReviewDraft
   -> ai_review_drafts
+  -> source document link
 
 Transcript text
   -> interpretTranscriptWithAI()
@@ -24,18 +25,21 @@ Transcript text
 - Review drafts are scoped to a workspace.
 - Workspace members can read and create drafts for their workspace.
 - Owners and Managers can update draft status for future approval/rejection flows.
+- OCR review drafts preserve the originating document ID.
+- OCR text preview is hydrated from the source document instead of duplicated into the review draft row.
 
 ## Server Routes
 
 - `POST /api/ai/interpret-document`
 - `POST /api/ai/interpret-transcript`
+- `POST /api/documents/ocr`
 
-Both routes require a signed-in user and active workspace membership.
+All routes require a signed-in user and active workspace membership.
 
-## Future UI
+## Current UI
 
-The Review Queue UI should show pending drafts, warnings, confidence, source text, and proposed actions. Approval should remain explicit.
+The Review Queue shows pending drafts, warnings, confidence, source OCR text, and proposed actions. Approval and execution remain explicit.
 
-## Future Approval Mapping
+## Approval Mapping
 
-Approved drafts should be mapped into the shared Frontier action layer only after user confirmation. This sprint intentionally does not implement that execution path.
+Approved drafts map into the shared Frontier action layer only after user confirmation. No OCR draft executes automatically.

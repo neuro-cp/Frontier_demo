@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { interpretDocumentWithAI } from "@/lib/ai/providers/providerFactory";
+import { createReviewDraft } from "@/lib/db/aiReviewDrafts";
 import { getOcrProviderMode, runOcrExtraction } from "@/lib/ocr/provider";
 import { canUseOcr } from "@/lib/plans/capabilities";
 import { resolveWorkspacePlan } from "@/lib/plans/server";
@@ -67,7 +69,7 @@ export async function POST(request: NextRequest) {
 
   const { data: document, error: documentError } = await supabase
     .from("documents")
-    .select("id, workspace_id, name, file_name, mime_type, storage_bucket, storage_path, notes, document_type, detected_type")
+    .select("id, workspace_id, name, file_name, mime_type, storage_bucket, storage_path, notes, document_type, detected_type, ocr_retry_count")
     .eq("id", body.documentId)
     .eq("workspace_id", body.workspaceId)
     .maybeSingle();
@@ -108,14 +110,30 @@ export async function POST(request: NextRequest) {
     return jsonError(jobError?.message || "Unable to create OCR job.", 500);
   }
 
+  const queuedAt = new Date().toISOString();
+
+  await supabase
+    .from("documents")
+    .update({
+      processing_status: "queued",
+      extraction_status: "Queued for OCR",
+      ai_job_id: aiJob.id,
+      ocr_queued_at: queuedAt,
+      ocr_error: null,
+      ocr_retry_count: Number(document.ocr_retry_count ?? 0) + 1,
+    })
+    .eq("id", body.documentId)
+    .eq("workspace_id", body.workspaceId);
+
   const failJob = async (message: string) => {
+    const failedAt = new Date().toISOString();
     await Promise.all([
       supabase
         .from("ai_jobs")
         .update({
           status: "Failed",
           error_message: message,
-          completed_at: new Date().toISOString(),
+          completed_at: failedAt,
         })
         .eq("id", aiJob.id),
       supabase
@@ -124,6 +142,8 @@ export async function POST(request: NextRequest) {
           processing_status: "failed",
           extraction_status: "OCR failed",
           ai_job_id: aiJob.id,
+          ocr_failed_at: failedAt,
+          ocr_error: message,
         })
         .eq("id", body.documentId)
         .eq("workspace_id", body.workspaceId),
@@ -131,12 +151,15 @@ export async function POST(request: NextRequest) {
   };
 
   try {
+    const startedAt = new Date().toISOString();
     await supabase
       .from("documents")
       .update({
         processing_status: "processing",
         extraction_status: "Processing OCR",
         ai_job_id: aiJob.id,
+        ocr_started_at: startedAt,
+        ocr_error: null,
       })
       .eq("id", body.documentId)
       .eq("workspace_id", body.workspaceId);
@@ -145,7 +168,7 @@ export async function POST(request: NextRequest) {
       .from("ai_jobs")
       .update({
         status: "Processing",
-        started_at: new Date().toISOString(),
+        started_at: startedAt,
       })
       .eq("id", aiJob.id);
 
@@ -181,7 +204,8 @@ export async function POST(request: NextRequest) {
       safety: "Review extracted information before using it.",
     };
 
-    const { data: updatedDocument, error: updateError } = await supabase
+    const completedAt = new Date().toISOString();
+    const { data: extractedDocument, error: updateError } = await supabase
       .from("documents")
       .update({
         processing_status: "needs_review",
@@ -192,6 +216,9 @@ export async function POST(request: NextRequest) {
         confidence: extraction.confidence,
         document_type: extraction.structuredData.documentType,
         ai_job_id: aiJob.id,
+        ocr_completed_at: completedAt,
+        ocr_failed_at: null,
+        ocr_error: null,
       })
       .eq("id", body.documentId)
       .eq("workspace_id", body.workspaceId)
@@ -200,18 +227,70 @@ export async function POST(request: NextRequest) {
 
     if (updateError) throw updateError;
 
+    let reviewDraftId: string | null = null;
+    let draftError: string | null = null;
+    try {
+      const interpretation = await interpretDocumentWithAI({
+        workspaceId: body.workspaceId,
+        sourceId: body.documentId,
+        text: extraction.text,
+      });
+      const reviewDraft = await createReviewDraft(supabase, {
+        reviewDraft: interpretation.reviewDraft,
+        sourceLabel: document.file_name ?? document.name ?? "Document",
+        rawInput: JSON.stringify({
+          text: extraction.text,
+          ocr: {
+            provider: extraction.provider,
+            confidence: extraction.confidence,
+            aiJobId: aiJob.id,
+            completedAt,
+          },
+        }),
+        modelProvider: interpretation.provider,
+        modelName: interpretation.model,
+        createdBy: user.id,
+      });
+      reviewDraftId = reviewDraft.id;
+    } catch (error) {
+      draftError =
+        error instanceof Error
+          ? error.message
+          : "OCR completed, but review draft creation failed.";
+    }
+
+    let updatedDocument = extractedDocument;
+    if (reviewDraftId) {
+      const { data: documentWithDraft } = await supabase
+        .from("documents")
+        .update({ ocr_review_draft_id: reviewDraftId })
+        .eq("id", body.documentId)
+        .eq("workspace_id", body.workspaceId)
+        .select("*")
+        .single();
+      updatedDocument = documentWithDraft ?? extractedDocument;
+    }
+
     await supabase
       .from("ai_jobs")
       .update({
         status: "Needs Review",
-        result_json: extractedJson,
-        output_json: extractedJson,
+        result_json: {
+          ...extractedJson,
+          reviewDraftId,
+          draftError,
+        },
+        output_json: {
+          ...extractedJson,
+          reviewDraftId,
+          draftError,
+        },
         confidence: extraction.confidence,
-        completed_at: new Date().toISOString(),
+        completed_at: completedAt,
       })
       .eq("id", aiJob.id);
 
-    return NextResponse.json({ document: updatedDocument });
+    return NextResponse.json({ document: updatedDocument, reviewDraftId, draftError });
   } catch (error) {
     const message = error instanceof Error ? error.message : "OCR failed.";
     await failJob(message);

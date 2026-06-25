@@ -69,6 +69,13 @@ type ApiDocument = {
   normalized_mime_type?: string | null;
   normalized_size_bytes?: number | null;
   normalization_status?: string | null;
+  ocr_queued_at?: string | null;
+  ocr_started_at?: string | null;
+  ocr_completed_at?: string | null;
+  ocr_failed_at?: string | null;
+  ocr_error?: string | null;
+  ocr_retry_count?: number | null;
+  ocr_review_draft_id?: string | null;
 };
 
 type ApiReviewDraft = {
@@ -118,6 +125,13 @@ function apiDocumentToStoredDocument(document: ApiDocument): StoredDocument {
     normalizedMimeType: document.normalized_mime_type ?? "",
     normalizedSizeBytes: document.normalized_size_bytes ?? undefined,
     normalizationStatus: document.normalization_status ?? "",
+    ocrQueuedAt: document.ocr_queued_at ?? "",
+    ocrStartedAt: document.ocr_started_at ?? "",
+    ocrCompletedAt: document.ocr_completed_at ?? "",
+    ocrFailedAt: document.ocr_failed_at ?? "",
+    ocrError: document.ocr_error ?? "",
+    ocrRetryCount: document.ocr_retry_count ?? 0,
+    ocrReviewDraftId: document.ocr_review_draft_id ?? "",
   };
 }
 
@@ -224,8 +238,8 @@ export default function DocumentsPage() {
         const nextStatus: Record<string, string> = {};
         for (const draft of payload.reviewDrafts ?? []) {
           if (draft.sourceId && (draft.sourceType === "ocr" || draft.sourceType === "image")) {
-            next[draft.sourceId] = draft.id;
-            nextStatus[draft.sourceId] = draft.status ?? "Pending";
+            next[draft.sourceId] ??= draft.id;
+            nextStatus[draft.sourceId] ??= draft.status ?? "Pending";
           }
         }
         setReviewDraftByDocumentId(next);
@@ -457,6 +471,8 @@ export default function DocumentsPage() {
       });
       const payload = (await response.json()) as {
         document?: ApiDocument;
+        reviewDraftId?: string | null;
+        draftError?: string | null;
         error?: string;
       };
 
@@ -466,6 +482,21 @@ export default function DocumentsPage() {
 
       const updatedDocument = apiDocumentToStoredDocument(payload.document);
       replaceDocument(updatedDocument);
+      if (payload.reviewDraftId) {
+        setReviewDraftByDocumentId((current) => ({
+          ...current,
+          [document.id]: payload.reviewDraftId ?? "",
+        }));
+        setReviewDraftStatusByDocumentId((current) => ({
+          ...current,
+          [document.id]: "Pending",
+        }));
+        setDocumentNotice("OCR completed and review draft created. Open Review Queue to approve it.");
+      } else if (payload.draftError) {
+        setDocumentNotice(`OCR completed. Draft creation needs attention: ${payload.draftError}`);
+      } else {
+        setDocumentNotice("OCR completed. Review the extraction before generating a draft.");
+      }
       openReview(updatedDocument);
     } catch (error) {
       setDocumentError(error instanceof Error ? error.message : "Unable to run OCR.");
@@ -583,19 +614,29 @@ export default function DocumentsPage() {
 
     const reviewed = document.extractionStatus.toLowerCase() === "reviewed";
     const processing = document.processingStatus === "processing";
+    const queued = document.processingStatus === "queued";
+    const failed = document.processingStatus === "failed";
     const hasExtraction = Boolean(document.extractedText || document.extractedJson);
     return {
-      label: reviewed
+      label: failed
+        ? "failed"
+        : reviewed
         ? "reviewed"
         : processing
           ? "processing"
+          : queued
+            ? "queued"
           : hasExtraction
             ? "needs review"
             : "uploaded",
-      detail: `OCR: ${document.processingStatus || "uploaded"}`,
-      className: reviewed
+      detail: failed
+        ? document.ocrError || "OCR failed"
+        : `OCR: ${document.processingStatus || "uploaded"}`,
+      className: failed
+        ? "bg-red-100 text-red-800 dark:bg-red-950/50 dark:text-red-300"
+        : reviewed
         ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300"
-        : processing || hasExtraction
+        : processing || queued || hasExtraction
           ? "bg-yellow-100 text-yellow-800 dark:bg-yellow-950/50 dark:text-yellow-300"
           : "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200",
     };
@@ -884,6 +925,21 @@ export default function DocumentsPage() {
                     {isPdf && document.ocrProvider && (
                       <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                         Provider: {document.ocrProvider}
+                      </div>
+                    )}
+                    {isPdf && document.ocrCompletedAt && (
+                      <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        OCR completed: {new Date(document.ocrCompletedAt).toLocaleString()}
+                      </div>
+                    )}
+                    {isPdf && document.ocrFailedAt && (
+                      <div className="mt-1 text-xs text-red-600 dark:text-red-300">
+                        OCR failed: {new Date(document.ocrFailedAt).toLocaleString()}
+                      </div>
+                    )}
+                    {isPdf && Boolean(document.ocrRetryCount) && (
+                      <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        OCR attempts: {document.ocrRetryCount}
                       </div>
                     )}
                   </td>

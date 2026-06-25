@@ -41,10 +41,14 @@ Rejected, pending, needs-changes, archived, already-executed, and unsupported dr
 
 Revision rows preserve prior title, summary, warnings, and action payloads when draft content changes.
 
-## Frozen Intake Boundary
+## Intake Boundary
 
-OCR, speech, image analysis, and logistics remain frozen. The Review Queue displays source placeholders for future extracted text, transcript, image, upload timestamp, uploader, and attachment preview hydration, but it does not process files or call workers.
+- OCR is activated for PDF documents through the document workflow.
+- OCR source text is hydrated into the Review Queue when a draft is linked to a document.
+- Speech, image analysis, and logistics remain frozen.
+- The Review Queue still does not process files or call workers directly.
+- Transcript, image, upload timestamp, uploader, and attachment preview hydration remain placeholders.
 
 ## Next Step
 
-Activate one intake path at a time after completing the OCR Activation Checklist. OCR should connect first because document upload, OCR worker extraction, and review draft persistence already exist.
+Validate OCR with one small PDF, then activate speech against the same review and execution boundary.
