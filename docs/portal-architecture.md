@@ -6,7 +6,7 @@ Portal foundations are implemented. This document records the current boundary a
 
 Employees should authenticate normally, then route into a workforce view based on workspace membership and role.
 
-Current employee capabilities include assigned jobs, assigned job materials, assigned job photos, profile/assignment history, field updates, completion notes, completion percentage, and material usage logging. Assignment management is handled by Owners/Managers from Settings > Employees.
+Current employee capabilities include assigned jobs, assigned job materials, assigned job photos, profile/assignment history, field updates, completion notes, completion percentage, material usage logging, activity view, and message-center access. Assignment management is handled by Owners/Managers from Settings > Employees.
 
 Future employee capabilities include schedule editing, route plan assignment, document/photo upload, richer job notes, update review workflows, and time tracking.
 
@@ -14,7 +14,7 @@ Future employee capabilities include schedule editing, route plan assignment, do
 
 Customers should authenticate separately from employees and connect to a business workspace by invite or verified customer relationship.
 
-Current customer capabilities include invite-based access, scoped jobs, scoped estimates, scoped invoices, scoped documents, estimate approval/rejection, invoice payment, receipts, payment history, and client portal message submission.
+Current customer capabilities include invite-based access, scoped jobs, scoped estimates, scoped invoices, scoped documents, estimate approval/rejection, invoice payment, receipts, payment history, client portal activity, and client portal message submission.
 
 Future customer capabilities include profile editing, workspace-side message replies, document upload, estimate revision workflows, and payment method expansion.
 
@@ -24,6 +24,8 @@ The messaging substrate is stored in `workspace_conversations` and `workspace_me
 
 - Client portal users can create and read non-internal messages scoped to their active `client_portal_access`.
 - Workspace Owners and Managers can preview portal message data from their active workspace.
+- Workspace Owners and Managers can reply from `/messages`.
+- Conversations can be searched, archived, reopened, and marked read.
 - Internal-only employee notes are supported at the schema level through `is_internal`.
 - External delivery providers are intentionally not connected yet.
 
@@ -35,6 +37,15 @@ Current event producers:
 
 - client portal message submitted
 - employee job update submitted
+
+Current notification UI:
+
+- header notification bell
+- notification inbox at `/notifications`
+- mark read
+- mark all read
+- archive
+- entity links for conversations, jobs, invoices, estimates, and documents
 
 Future event producers:
 

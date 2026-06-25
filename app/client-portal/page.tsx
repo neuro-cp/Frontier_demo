@@ -12,6 +12,7 @@ const portalNav = [
   { label: "Estimates", href: "/client-portal/estimates" },
   { label: "Documents", href: "/client-portal/documents" },
   { label: "Messages", href: "/client-portal/messages" },
+  { label: "Activity", href: "/client-portal/activity" },
   { label: "Profile", href: "/client-portal/profile" },
 ];
 
@@ -142,7 +143,8 @@ export default function ClientPortalPage() {
           note="Uploads and document review are handled in Documents."
           href="/client-portal/documents"
         />
-        <PortalCard title="Messages" value="Coming Soon" note="Messaging is not built yet." href="/client-portal/messages" />
+        <PortalCard title="Messages" value="Open" note="Send messages through the client portal." href="/client-portal/messages" />
+        <PortalCard title="Activity" value="Open" note="Review estimate and invoice history." href="/client-portal/activity" />
         <PortalCard title="Profile" value="Active" note="Portal profile and contact settings placeholder." href="/client-portal/profile" />
       </div>
     </div>

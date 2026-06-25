@@ -53,19 +53,32 @@ export async function GET(request: NextRequest) {
 }
 
 export async function PATCH(request: NextRequest) {
-  let body: { workspaceId?: string; notificationId?: string; action?: "read" | "archive" };
+  let body: { workspaceId?: string; notificationId?: string; action?: "read" | "archive" | "all_read" };
   try {
-    body = (await request.json()) as { workspaceId?: string; notificationId?: string; action?: "read" | "archive" };
+    body = (await request.json()) as { workspaceId?: string; notificationId?: string; action?: "read" | "archive" | "all_read" };
   } catch {
     return jsonError("Invalid notification request.", 400);
   }
 
-  if (!body.workspaceId || !body.notificationId || !body.action) {
-    return jsonError("Workspace, notification, and action are required.", 400);
+  if (!body.workspaceId || !body.action) {
+    return jsonError("Workspace and action are required.", 400);
   }
 
   const access = await requireWorkspaceMember(body.workspaceId);
   if (!access.ok) return jsonError(access.error, access.status);
+
+  if (body.action === "all_read") {
+    const { error } = await access.serviceClient
+      .from("workspace_notifications")
+      .update({ read_at: new Date().toISOString() })
+      .eq("workspace_id", body.workspaceId)
+      .is("read_at", null)
+      .is("archived_at", null);
+    if (error) return jsonError(error.message || "Unable to update notifications.", 500);
+    return NextResponse.json({ ok: true });
+  }
+
+  if (!body.notificationId) return jsonError("Notification is required.", 400);
 
   const patch =
     body.action === "archive"

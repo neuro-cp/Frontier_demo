@@ -15,6 +15,8 @@ const portalNav = [
   { label: "Materials", href: "/employee-portal/materials" },
   { label: "Photos", href: "/employee-portal/photos" },
   { label: "Updates", href: "/employee-portal/updates" },
+  { label: "Messages", href: "/employee-portal/messages" },
+  { label: "Activity", href: "/employee-portal/activity" },
   { label: "Profile", href: "/employee-portal/profile" },
 ];
 
@@ -158,9 +160,27 @@ export default function EmployeePortalPage() {
         />
         <PortalCard
           title="Updates"
-          value="Coming Soon"
-          note="Employee job updates are not built yet."
+          value="Open"
+          note="Submit job notes, completion updates, and material usage."
           href="/employee-portal/updates"
+        />
+        <PortalCard
+          title="Messages"
+          value="Open"
+          note="Open workspace conversation access."
+          href="/employee-portal/messages"
+        />
+        <PortalCard
+          title="Activity"
+          value="Open"
+          note="Review assigned job and field update activity."
+          href="/employee-portal/activity"
+        />
+        <PortalCard
+          title="Notifications"
+          value="Open"
+          note="Review workspace notifications."
+          href="/notifications"
         />
       </div>
     </div>

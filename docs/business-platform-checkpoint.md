@@ -46,6 +46,17 @@ Current checkpoint after the operations platform sprint. Latest prior pushed com
   - estimate pipeline summary
   - invoice aging summary
 - Owner/Manager preview access added for client and employee portal pages without changing external client scoping.
+- Collaboration completion additions:
+  - workspace-side message center at `/messages`
+  - workspace replies to client portal conversations
+  - conversation search
+  - archive/reopen conversations
+  - unread conversation indicators
+  - notification bell and inbox at `/notifications`
+  - mark read, mark all read, and archive notifications
+  - workspace activity page at `/activity`
+  - client portal activity page
+  - employee portal messages and activity pages
 
 ## Frozen Systems
 
@@ -68,15 +79,17 @@ The following systems are intentionally not part of this business-platform sprin
 - Owner/Manager employee portal preview is workspace-scoped for operations review.
 - Employee job visibility is restricted to `employee_job_assignments`.
 - Employee update writes verify active Employee role and assigned job before accepting a field update.
+- Workspace message replies require Owner or Manager role.
+- Notification inbox requires active workspace membership.
 - Payment state remains server-authoritative through Stripe webhook processing.
 - Browser actions do not mark invoices paid.
 
 ## Recommended Next Phase
 
-1. Apply migration `0027_operations_messaging_notifications.sql`.
-2. Runtime QA for client messages, notifications, employee updates, and dashboard activity.
-3. Add workspace-side conversation reply UI.
-4. Add time tracking foundation for employee portal.
-5. Portal document/photo upload expansion.
-6. Final OCR/speech/image/logistics validation pass.
+1. Runtime QA for client messages, workspace replies, notifications, employee updates, and dashboard/activity pages.
+2. Add richer per-record activity timelines on client/job/invoice/estimate detail pages.
+3. Add time tracking foundation for employee portal.
+4. Portal document/photo upload expansion.
+5. First frozen-system return sprint: OCR/AI intake hardening and review draft quality pass.
+6. Final logistics validation pass.
 7. Production launch hardening: secret rotation, Stripe live-mode checklist, billing enforcement, support playbooks.

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import Sidebar from "./Sidebar";
+import NotificationBell from "./NotificationBell";
 import { useAuthSession } from "@/components/AuthSessionProvider";
 import { useWorkspace } from "@/components/WorkspaceContext";
 import { createWorkspaceAction } from "@/lib/actions/workspaces";
@@ -366,6 +367,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         </div>
 
         <div className="flex flex-shrink-0 items-center gap-2 sm:gap-4">
+          <NotificationBell />
+
           <button
             onClick={toggleDarkMode}
             className="flex h-12 w-12 items-center justify-center rounded-xl text-3xl hover:bg-gray-100 dark:hover:bg-gray-800"
