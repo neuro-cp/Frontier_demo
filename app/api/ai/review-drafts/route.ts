@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import {
+  duplicateReviewDraft,
+  getReviewDraftAuditEvents,
   getReviewDraftById,
   getReviewDraftRevisions,
   getReviewDrafts,
@@ -18,13 +20,14 @@ const allowedStatuses: AiReviewDraftStatus[] = [
   "Approved",
   "Rejected",
   "Needs Changes",
+  "Archived",
 ];
 
 type UpdateReviewDraftRequest = {
   id?: string;
   workspaceId?: string;
   status?: AiReviewDraftStatus;
-  mode?: "status" | "content";
+  mode?: "status" | "content" | "duplicate";
   sourceLabel?: string;
   summary?: string;
   actions?: SuggestedAction[];
@@ -84,12 +87,13 @@ export async function GET(request: NextRequest) {
     const draftId = request.nextUrl.searchParams.get("draftId");
     if (draftId) {
       if (!isUuid(draftId)) return jsonError("Review draft is invalid.", 400);
-      const [reviewDraft, revisions] = await Promise.all([
+      const [reviewDraft, revisions, auditEvents] = await Promise.all([
         getReviewDraftById(auth.supabase, workspaceId, draftId),
         getReviewDraftRevisions(auth.supabase, workspaceId, draftId),
+        getReviewDraftAuditEvents(auth.supabase, workspaceId, draftId),
       ]);
       if (!reviewDraft) return jsonError("Review draft not found.", 404);
-      return NextResponse.json({ reviewDraft, revisions });
+      return NextResponse.json({ reviewDraft, revisions, auditEvents });
     }
     const reviewDrafts = await getReviewDrafts(auth.supabase, workspaceId);
     return NextResponse.json({ reviewDrafts });
@@ -124,6 +128,15 @@ export async function PATCH(request: NextRequest) {
   }
 
   try {
+    if (body.mode === "duplicate") {
+      const reviewDraft = await duplicateReviewDraft(auth.supabase, {
+        id: draftId,
+        workspaceId,
+        createdBy: auth.user.id,
+      });
+      return NextResponse.json({ reviewDraft });
+    }
+
     if (body.mode === "content") {
       if (!Array.isArray(body.actions) || body.actions.length === 0) {
         return jsonError("At least one action draft is required.", 400);

@@ -1,6 +1,6 @@
 # Frontier Business Platform Checkpoint
 
-Current checkpoint after the operations platform sprint. Latest prior pushed commit before this sprint was `4549a93`; current database migration work adds `0027_operations_messaging_notifications.sql`.
+Current checkpoint after the AI review substrate completion sprint. Latest prior pushed commit before this sprint was `ce89166`; current database migration work adds `0028_ai_review_archive_audit.sql`.
 
 ## Completed Platform Areas
 
@@ -57,13 +57,24 @@ Current checkpoint after the operations platform sprint. Latest prior pushed com
   - workspace activity page at `/activity`
   - client portal activity page
   - employee portal messages and activity pages
+- AI Review substrate completion:
+  - Review Queue dashboard metrics
+  - review draft filters, search, and sorting
+  - status, source, confidence, and execution badges
+  - source attribution placeholders for OCR, transcript, and image sources
+  - validation warning summaries
+  - review history timestamps
+  - duplicate draft action
+  - archive draft status
+  - audit-event table and lifecycle trigger
+  - edit modal audit trail
+  - OCR Activation Checklist handoff document
 
 ## Frozen Systems
 
 The following systems are intentionally not part of this business-platform sprint:
 
 - OCR
-- AI interpretation
 - Speech worker
 - Image analysis
 - Logistics optimization and routing engine
@@ -83,13 +94,18 @@ The following systems are intentionally not part of this business-platform sprin
 - Notification inbox requires active workspace membership.
 - Payment state remains server-authoritative through Stripe webhook processing.
 - Browser actions do not mark invoices paid.
+- Review draft execution remains explicit and server-authoritative.
+- Archived, rejected, pending, needs-changes, and already-executed AI drafts cannot execute through the normal execution route.
+- AI review audit events are workspace-scoped through RLS.
 
 ## Recommended Next Phase
 
-1. Runtime QA for client messages, workspace replies, notifications, employee updates, and dashboard/activity pages.
-2. Add richer per-record activity timelines on client/job/invoice/estimate detail pages.
-3. Add time tracking foundation for employee portal.
-4. Portal document/photo upload expansion.
-5. First frozen-system return sprint: OCR/AI intake hardening and review draft quality pass.
-6. Final logistics validation pass.
-7. Production launch hardening: secret rotation, Stripe live-mode checklist, billing enforcement, support playbooks.
+1. Apply and validate migration `0028_ai_review_archive_audit.sql`.
+2. First frozen-system return sprint: OCR activation against the completed Review Queue.
+3. Speech activation after OCR source hydration is proven.
+4. Image activation after OCR and speech are stable.
+5. Add richer per-record activity timelines on client/job/invoice/estimate detail pages.
+6. Add time tracking foundation for employee portal.
+7. Portal document/photo upload expansion.
+8. Final logistics validation pass.
+9. Production launch hardening: secret rotation, Stripe live-mode checklist, billing enforcement, support playbooks.

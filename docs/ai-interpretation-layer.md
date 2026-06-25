@@ -6,10 +6,10 @@ Frontier's AI interpretation layer is a contract boundary between extraction wor
 
 - OCR worker is frozen and can produce text.
 - Speech worker is frozen and can produce transcripts.
-- This layer converts text into structured review drafts.
-- This layer does not call AI providers yet.
-- This layer does not write to Supabase.
-- This layer does not execute Frontier actions.
+- Image analysis is frozen and can create image review drafts.
+- Provider integration exists behind server-only abstractions.
+- Persisted review drafts exist in Supabase.
+- Review drafts can be edited, duplicated, archived, approved, rejected, marked needs changes, and explicitly executed.
 - This layer does not create autonomous actions.
 
 ## Flow
@@ -19,12 +19,21 @@ OCR Worker
   -> AI Interpretation Layer
   -> Review Draft
   -> User Approval
+  -> Explicit Execute
   -> Shared Frontier Action Layer
 
 Speech Worker
   -> AI Interpretation Layer
   -> Review Draft
   -> User Approval
+  -> Explicit Execute
+  -> Shared Frontier Action Layer
+
+Image Analysis
+  -> AI Interpretation Layer
+  -> Review Draft
+  -> User Approval
+  -> Explicit Execute
   -> Shared Frontier Action Layer
 ```
 
@@ -61,9 +70,8 @@ Provider implementation must remain behind this boundary. Do not hardcode OpenAI
 
 ## Next Phases
 
-1. Finalize review draft persistence schema.
-2. Add a server-only provider adapter.
-3. Add OCR result -> interpretation route.
-4. Add transcript -> interpretation route.
-5. Build review UI.
-6. On approval, map accepted drafts into the shared Frontier action layer.
+1. Connect secure source preview hydration for OCR text, transcripts, and images.
+2. Run OCR activation against the completed review queue.
+3. Run speech activation against the completed review queue.
+4. Run image activation against the completed review queue.
+5. Expand duplicate/conflict detection from passive warnings into stronger pre-approval checks.

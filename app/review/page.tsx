@@ -7,6 +7,7 @@ import { useAuthSession } from "@/components/AuthSessionProvider";
 import { useWorkspace } from "@/components/WorkspaceContext";
 import type {
   AiReviewDraft,
+  AiReviewDraftAuditEvent,
   AiReviewDraftRevision,
   AiReviewDraftStatus,
 } from "@/lib/db/aiReviewDrafts";
@@ -33,6 +34,7 @@ type ReviewDraftsResponse = {
   reviewDraft?: AiReviewDraft;
   executionResult?: unknown;
   revisions?: AiReviewDraftRevision[];
+  auditEvents?: AiReviewDraftAuditEvent[];
   error?: string;
 };
 
@@ -74,7 +76,10 @@ type ReviewFilter =
   | "Approved"
   | "Needs Changes"
   | "Rejected"
-  | "Executed";
+  | "Executed"
+  | "Archived";
+
+type ReviewSort = "Newest" | "Oldest" | "Confidence High" | "Confidence Low";
 
 function formatConfidence(confidence: number | null) {
   if (typeof confidence !== "number") return "Unscored";
@@ -95,6 +100,9 @@ function statusClass(status: AiReviewDraftStatus) {
   }
   if (status === "Needs Changes") {
     return "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300";
+  }
+  if (status === "Archived") {
+    return "border-gray-200 bg-gray-50 text-gray-700 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-300";
   }
   return "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-300";
 }
@@ -121,6 +129,8 @@ export default function ReviewQueuePage() {
   const [enhancingId, setEnhancingId] = useState("");
   const [dismissedEnhancedIds, setDismissedEnhancedIds] = useState<string[]>([]);
   const [filter, setFilter] = useState<ReviewFilter>("All");
+  const [searchTerm, setSearchTerm] = useState("");
+  const [sortMode, setSortMode] = useState<ReviewSort>("Newest");
   const [transcriptText, setTranscriptText] = useState("");
   const [transcriptLabel, setTranscriptLabel] = useState("");
   const [audioFile, setAudioFile] = useState<File | null>(null);
@@ -171,6 +181,7 @@ export default function ReviewQueuePage() {
   const [editSummary, setEditSummary] = useState("");
   const [editActions, setEditActions] = useState("");
   const [editRevisions, setEditRevisions] = useState<AiReviewDraftRevision[]>([]);
+  const [editAuditEvents, setEditAuditEvents] = useState<AiReviewDraftAuditEvent[]>([]);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
 
   function openActionInForm(draft: AiReviewDraft, action: SuggestedAction) {
@@ -200,13 +211,107 @@ export default function ReviewQueuePage() {
     () => reviewDrafts.filter((draft) => draft.status === "Pending").length,
     [reviewDrafts]
   );
+  const reviewStats = useMemo(() => {
+    const confidenceValues = reviewDrafts
+      .map((draft) => draft.confidence)
+      .filter((confidence): confidence is number => typeof confidence === "number");
+    const sourceCounts = reviewDrafts.reduce<Record<string, number>>((counts, draft) => {
+      counts[draft.sourceType] = (counts[draft.sourceType] ?? 0) + 1;
+      return counts;
+    }, {});
+    return {
+      awaiting: pendingCount,
+      approved: reviewDrafts.filter((draft) => draft.status === "Approved").length,
+      rejected: reviewDrafts.filter((draft) => draft.status === "Rejected").length,
+      archived: reviewDrafts.filter((draft) => draft.status === "Archived").length,
+      executed: reviewDrafts.filter((draft) => draft.executionStatus === "Executed").length,
+      averageConfidence:
+        confidenceValues.length > 0
+          ? confidenceValues.reduce((total, value) => total + value, 0) /
+            confidenceValues.length
+          : null,
+      sourceCounts,
+    };
+  }, [pendingCount, reviewDrafts]);
   const filteredReviewDrafts = useMemo(() => {
-    if (filter === "All") return reviewDrafts;
-    if (filter === "Executed") {
-      return reviewDrafts.filter((draft) => draft.executionStatus === "Executed");
+    const needle = searchTerm.trim().toLowerCase();
+    const filtered = reviewDrafts.filter((draft) => {
+      const matchesFilter =
+        filter === "All"
+          ? true
+          : filter === "Executed"
+            ? draft.executionStatus === "Executed"
+            : draft.status === filter;
+      if (!matchesFilter) return false;
+      if (!needle) return true;
+      const searchable = [
+        draft.sourceLabel,
+        draft.summary,
+        draft.sourceType,
+        draft.status,
+        draft.executionStatus,
+        draft.sourceId,
+        ...draft.actions.map((action) => action.type),
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return searchable.includes(needle);
+    });
+
+    return filtered.sort((a, b) => {
+      if (sortMode === "Oldest") {
+        return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+      }
+      if (sortMode === "Confidence High") {
+        return (b.confidence ?? -1) - (a.confidence ?? -1);
+      }
+      if (sortMode === "Confidence Low") {
+        return (a.confidence ?? 2) - (b.confidence ?? 2);
+      }
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    });
+  }, [filter, reviewDrafts, searchTerm, sortMode]);
+
+  const recentReviewActivity = useMemo(() => {
+    return reviewDrafts
+      .flatMap((draft) => [
+        { label: `${draft.status}: ${draft.sourceLabel || "AI Review Draft"}`, at: draft.reviewedAt },
+        { label: `Executed: ${draft.sourceLabel || "AI Review Draft"}`, at: draft.executedAt },
+      ])
+      .filter((item): item is { label: string; at: string } => Boolean(item.at))
+      .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
+      .slice(0, 4);
+  }, [reviewDrafts]);
+
+  function validationWarnings(draft: AiReviewDraft) {
+    const missing = draft.warnings.filter((warning) =>
+      warning.code.toLowerCase().includes("missing")
+    );
+    const conflicts = draft.warnings.filter((warning) =>
+      ["duplicate", "conflict", "invalid", "unsupported"].some((term) =>
+        warning.code.toLowerCase().includes(term)
+      )
+    );
+    return {
+      missing,
+      conflicts,
+      unsupportedActions: draft.actions.filter((action) => !getAiFormTarget(action)),
+    };
+  }
+
+  function sourcePlaceholder(draft: AiReviewDraft) {
+    if (draft.sourceType === "ocr") {
+      return "Extracted text preview will appear here when OCR source hydration is connected.";
     }
-    return reviewDrafts.filter((draft) => draft.status === filter);
-  }, [filter, reviewDrafts]);
+    if (draft.sourceType === "transcript") {
+      return "Transcript preview will appear here when speech source hydration is connected.";
+    }
+    if (draft.sourceType === "image") {
+      return "Image preview will appear here when secure attachment preview is connected.";
+    }
+    return "Source preview is not available yet.";
+  }
 
   const loadReviewDrafts = useCallback(async () => {
     if (!user || !workspaceReady) {
@@ -395,6 +500,37 @@ export default function ReviewQueuePage() {
         updateError instanceof Error
           ? updateError.message
           : "Unable to update review draft."
+      );
+    } finally {
+      setUpdatingId("");
+    }
+  }
+
+  async function duplicateDraft(id: string) {
+    if (!workspaceReady || updatingId || executingId) return;
+
+    setUpdatingId(id);
+    setError("");
+    try {
+      const response = await fetch("/api/ai/review-drafts", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode: "duplicate",
+          id,
+          workspaceId: activeWorkspace.id,
+        }),
+      });
+      const payload = (await response.json()) as ReviewDraftsResponse;
+      if (!response.ok || !payload.reviewDraft) {
+        throw new Error(payload.error || "Unable to duplicate review draft.");
+      }
+      setReviewDrafts((current) => [payload.reviewDraft as AiReviewDraft, ...current]);
+    } catch (duplicateError) {
+      setError(
+        duplicateError instanceof Error
+          ? duplicateError.message
+          : "Unable to duplicate review draft."
       );
     } finally {
       setUpdatingId("");
@@ -850,12 +986,17 @@ export default function ReviewQueuePage() {
     setEditSummary(draft.summary ?? "");
     setEditActions(JSON.stringify(draft.actions, null, 2));
     setEditRevisions([]);
+    setEditAuditEvents([]);
     try {
       const response = await fetch(`/api/ai/review-drafts?workspaceId=${encodeURIComponent(activeWorkspace.id)}&draftId=${encodeURIComponent(draft.id)}`);
       const payload = (await response.json()) as ReviewDraftsResponse;
-      if (response.ok) setEditRevisions(payload.revisions ?? []);
+      if (response.ok) {
+        setEditRevisions(payload.revisions ?? []);
+        setEditAuditEvents(payload.auditEvents ?? []);
+      }
     } catch {
       setEditRevisions([]);
+      setEditAuditEvents([]);
     }
   }
 
@@ -898,6 +1039,60 @@ export default function ReviewQueuePage() {
           <div className="rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm dark:border-gray-800 dark:bg-gray-900">
             <div className="text-gray-500 dark:text-gray-400">Pending</div>
             <div className="text-2xl font-bold">{pendingCount}</div>
+          </div>
+        </div>
+      </section>
+
+      <section className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
+        {[
+          ["Awaiting Review", reviewStats.awaiting],
+          ["Approved", reviewStats.approved],
+          ["Rejected", reviewStats.rejected],
+          ["Archived", reviewStats.archived],
+          ["Executed", reviewStats.executed],
+          ["Avg Confidence", formatConfidence(reviewStats.averageConfidence)],
+        ].map(([label, value]) => (
+          <div
+            key={label}
+            className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900"
+          >
+            <div className="text-sm text-gray-500 dark:text-gray-400">{label}</div>
+            <div className="mt-1 text-xl font-bold">{value}</div>
+          </div>
+        ))}
+      </section>
+
+      <section className="grid gap-4 lg:grid-cols-2">
+        <div className="rounded-lg border border-gray-200 bg-white p-4 text-sm dark:border-gray-800 dark:bg-gray-900">
+          <h2 className="font-bold">Source Counts</h2>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {Object.entries(reviewStats.sourceCounts).length === 0 ? (
+              <span className="text-gray-500 dark:text-gray-400">No draft sources yet.</span>
+            ) : (
+              Object.entries(reviewStats.sourceCounts).map(([source, count]) => (
+                <span
+                  key={source}
+                  className="rounded-full border border-gray-200 px-3 py-1 text-xs font-semibold uppercase text-gray-600 dark:border-gray-700 dark:text-gray-300"
+                >
+                  {source}: {count}
+                </span>
+              ))
+            )}
+          </div>
+        </div>
+        <div className="rounded-lg border border-gray-200 bg-white p-4 text-sm dark:border-gray-800 dark:bg-gray-900">
+          <h2 className="font-bold">Recent Review Activity</h2>
+          <div className="mt-3 space-y-2">
+            {recentReviewActivity.length === 0 ? (
+              <span className="text-gray-500 dark:text-gray-400">No review activity yet.</span>
+            ) : (
+              recentReviewActivity.map((item) => (
+                <div key={`${item.label}-${item.at}`} className="flex justify-between gap-3">
+                  <span>{item.label}</span>
+                  <span className="text-gray-500 dark:text-gray-400">{formatDate(item.at)}</span>
+                </div>
+              ))
+            )}
           </div>
         </div>
       </section>
@@ -1260,24 +1455,50 @@ export default function ReviewQueuePage() {
         </section>
       )}
 
-      <div className="flex flex-wrap gap-2">
-        {(["All", "Pending", "Approved", "Needs Changes", "Rejected", "Executed"] as const).map(
-          (item) => (
-            <button
-              key={item}
-              type="button"
-              onClick={() => setFilter(item)}
-              className={`rounded-lg border px-4 py-2 text-sm font-bold ${
-                filter === item
-                  ? "border-blue-600 bg-blue-600 text-white"
-                  : "border-gray-300 hover:bg-gray-100 dark:border-gray-700 dark:hover:bg-gray-800"
-              }`}
+      <section className="space-y-3 rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900">
+        <div className="flex flex-wrap gap-2">
+          {(["All", "Pending", "Approved", "Needs Changes", "Rejected", "Archived", "Executed"] as const).map(
+            (item) => (
+              <button
+                key={item}
+                type="button"
+                onClick={() => setFilter(item)}
+                className={`rounded-lg border px-4 py-2 text-sm font-bold ${
+                  filter === item
+                    ? "border-blue-600 bg-blue-600 text-white"
+                    : "border-gray-300 hover:bg-gray-100 dark:border-gray-700 dark:hover:bg-gray-800"
+                }`}
+              >
+                {item}
+              </button>
+            )
+          )}
+        </div>
+        <div className="grid gap-3 md:grid-cols-[1fr_220px]">
+          <label className="block">
+            <span className="sr-only">Search drafts</span>
+            <input
+              value={searchTerm}
+              onChange={(event) => setSearchTerm(event.target.value)}
+              placeholder="Search title, summary, action type, source, or status"
+              className="w-full rounded-lg border border-gray-300 bg-white px-4 py-3 dark:border-gray-700 dark:bg-gray-950"
+            />
+          </label>
+          <label className="block">
+            <span className="sr-only">Sort drafts</span>
+            <select
+              value={sortMode}
+              onChange={(event) => setSortMode(event.target.value as ReviewSort)}
+              className="w-full rounded-lg border border-gray-300 bg-white px-4 py-3 dark:border-gray-700 dark:bg-gray-950"
             >
-              {item}
-            </button>
-          )
-        )}
-      </div>
+              <option>Newest</option>
+              <option>Oldest</option>
+              <option>Confidence High</option>
+              <option>Confidence Low</option>
+            </select>
+          </label>
+        </div>
+      </section>
 
       {isLoading ? (
         <div className="rounded-lg border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-gray-900">
@@ -1292,6 +1513,7 @@ export default function ReviewQueuePage() {
           {filteredReviewDrafts.map((draft) => {
             const enhancedMetadata = parseEnhancedMetadata(draft.rawInput);
             const offerEnhancedAnalysis = shouldOfferEnhancedAnalysis(draft);
+            const validation = validationWarnings(draft);
             return (
             <article
               key={draft.id}
@@ -1357,6 +1579,19 @@ export default function ReviewQueuePage() {
                       Boolean(updatingId) ||
                       Boolean(executingId)
                     }
+                    onClick={() => duplicateDraft(draft.id)}
+                    className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-bold hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:hover:bg-gray-800"
+                  >
+                    Duplicate
+                  </button>
+                  <button
+                    type="button"
+                    disabled={
+                      !canDeleteBusinessRecords ||
+                      draft.status === "Archived" ||
+                      Boolean(updatingId) ||
+                      Boolean(executingId)
+                    }
                     onClick={() => updateStatus(draft.id, "Approved")}
                     className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
                   >
@@ -1366,6 +1601,7 @@ export default function ReviewQueuePage() {
                     type="button"
                     disabled={
                       !canDeleteBusinessRecords ||
+                      draft.status === "Archived" ||
                       Boolean(updatingId) ||
                       Boolean(executingId)
                     }
@@ -1378,6 +1614,7 @@ export default function ReviewQueuePage() {
                     type="button"
                     disabled={
                       !canDeleteBusinessRecords ||
+                      draft.status === "Archived" ||
                       Boolean(updatingId) ||
                       Boolean(executingId)
                     }
@@ -1386,6 +1623,20 @@ export default function ReviewQueuePage() {
                   >
                     Mark Needs Changes
                   </button>
+                  {draft.status !== "Archived" && (
+                    <button
+                      type="button"
+                      disabled={
+                        !canDeleteBusinessRecords ||
+                        Boolean(updatingId) ||
+                        Boolean(executingId)
+                      }
+                      onClick={() => updateStatus(draft.id, "Archived")}
+                      className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-bold hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:hover:bg-gray-800"
+                    >
+                      Archive
+                    </button>
+                  )}
                   {draft.status === "Approved" &&
                     draft.executionStatus !== "Executed" && (
                       <button
@@ -1458,6 +1709,95 @@ export default function ReviewQueuePage() {
                 </div>
               )}
 
+              <div className="mt-5 grid gap-4 lg:grid-cols-2">
+                <section className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm dark:border-gray-800 dark:bg-gray-950">
+                  <h3 className="font-bold">Source Attribution</h3>
+                  <dl className="mt-3 grid gap-2">
+                    <div className="flex justify-between gap-3">
+                      <dt className="text-gray-500 dark:text-gray-400">Source Type</dt>
+                      <dd className="font-semibold uppercase">{draft.sourceType}</dd>
+                    </div>
+                    <div className="flex justify-between gap-3">
+                      <dt className="text-gray-500 dark:text-gray-400">Source ID</dt>
+                      <dd className="max-w-[240px] truncate font-mono text-xs">{draft.sourceId || "inline"}</dd>
+                    </div>
+                    <div className="flex justify-between gap-3">
+                      <dt className="text-gray-500 dark:text-gray-400">Model</dt>
+                      <dd>{draft.modelProvider || "unknown"} / {draft.modelName || "unknown"}</dd>
+                    </div>
+                    <div className="flex justify-between gap-3">
+                      <dt className="text-gray-500 dark:text-gray-400">Updated</dt>
+                      <dd>{formatDate(draft.updatedAt)}</dd>
+                    </div>
+                  </dl>
+                  <p className="mt-3 rounded-lg border border-dashed border-gray-300 p-3 text-gray-600 dark:border-gray-700 dark:text-gray-400">
+                    {sourcePlaceholder(draft)}
+                  </p>
+                </section>
+
+                <section className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm dark:border-gray-800 dark:bg-gray-950">
+                  <h3 className="font-bold">Review History</h3>
+                  <dl className="mt-3 grid gap-2">
+                    <div className="flex justify-between gap-3">
+                      <dt className="text-gray-500 dark:text-gray-400">Created</dt>
+                      <dd>{formatDate(draft.createdAt)}</dd>
+                    </div>
+                    <div className="flex justify-between gap-3">
+                      <dt className="text-gray-500 dark:text-gray-400">Reviewed</dt>
+                      <dd>{formatDate(draft.reviewedAt)}</dd>
+                    </div>
+                    <div className="flex justify-between gap-3">
+                      <dt className="text-gray-500 dark:text-gray-400">Approved</dt>
+                      <dd>{formatDate(draft.approvedAt)}</dd>
+                    </div>
+                    <div className="flex justify-between gap-3">
+                      <dt className="text-gray-500 dark:text-gray-400">Rejected</dt>
+                      <dd>{formatDate(draft.rejectedAt)}</dd>
+                    </div>
+                    <div className="flex justify-between gap-3">
+                      <dt className="text-gray-500 dark:text-gray-400">Archived</dt>
+                      <dd>{formatDate(draft.archivedAt)}</dd>
+                    </div>
+                    <div className="flex justify-between gap-3">
+                      <dt className="text-gray-500 dark:text-gray-400">Executed</dt>
+                      <dd>{formatDate(draft.executedAt)}</dd>
+                    </div>
+                  </dl>
+                </section>
+              </div>
+
+              <div className="mt-5 rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm dark:border-gray-800 dark:bg-gray-950">
+                <h3 className="font-bold">Validation Checks</h3>
+                {validation.missing.length === 0 &&
+                validation.conflicts.length === 0 &&
+                validation.unsupportedActions.length === 0 ? (
+                  <p className="mt-2 text-gray-600 dark:text-gray-400">
+                    No missing fields, duplicate conflicts, invalid references, or unsupported actions are currently flagged.
+                  </p>
+                ) : (
+                  <div className="mt-3 grid gap-3 md:grid-cols-3">
+                    <div>
+                      <div className="font-semibold">Missing Fields</div>
+                      <div className="mt-1 text-gray-600 dark:text-gray-400">
+                        {validation.missing.length || "None flagged"}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="font-semibold">Conflicts / Invalid</div>
+                      <div className="mt-1 text-gray-600 dark:text-gray-400">
+                        {validation.conflicts.length || "None flagged"}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="font-semibold">Unsupported Actions</div>
+                      <div className="mt-1 text-gray-600 dark:text-gray-400">
+                        {validation.unsupportedActions.length || "None flagged"}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {draft.warnings.length > 0 && (
                 <div className="mt-5">
                   <h3 className="font-bold">Warnings</h3>
@@ -1519,6 +1859,19 @@ export default function ReviewQueuePage() {
               <label className="block"><span className="mb-2 block text-sm font-semibold">Summary</span><textarea rows={3} value={editSummary} onChange={(event) => setEditSummary(event.target.value)} className="w-full rounded-lg border border-gray-300 bg-white px-4 py-3 dark:border-gray-700 dark:bg-gray-950" /></label>
               <label className="block"><span className="mb-2 block text-sm font-semibold">Action Fields (JSON)</span><textarea rows={14} value={editActions} onChange={(event) => setEditActions(event.target.value)} className="w-full rounded-lg border border-gray-300 bg-gray-950 px-4 py-3 font-mono text-xs text-gray-100 dark:border-gray-700" /></label>
               {editRevisions.length > 0 && <div><h3 className="text-sm font-bold">Revision History</h3><div className="mt-2 space-y-2">{editRevisions.map((revision) => <div key={revision.id} className="rounded-lg border border-gray-200 p-3 text-xs dark:border-gray-800"><div className="font-semibold">{formatDate(revision.createdAt)}</div><div className="text-gray-500 dark:text-gray-400">Previous title: {revision.sourceLabel || "Untitled"}</div></div>)}</div></div>}
+              {editAuditEvents.length > 0 && (
+                <div>
+                  <h3 className="text-sm font-bold">Audit Trail</h3>
+                  <div className="mt-2 space-y-2">
+                    {editAuditEvents.map((event) => (
+                      <div key={event.id} className="rounded-lg border border-gray-200 p-3 text-xs dark:border-gray-800">
+                        <div className="font-semibold">{event.eventType.replace("_", " ")}</div>
+                        <div className="text-gray-500 dark:text-gray-400">{formatDate(event.createdAt)}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
             <div className="mt-6 flex justify-end gap-2"><button type="button" onClick={() => setEditingDraftId("")} className="rounded-lg border border-gray-300 px-4 py-2 dark:border-gray-700">Cancel</button><button type="button" onClick={saveDraftEdit} disabled={isSavingEdit} className="rounded-lg bg-blue-600 px-4 py-2 font-bold text-white disabled:opacity-50">{isSavingEdit ? "Saving..." : "Save Revision"}</button></div>
           </section>
