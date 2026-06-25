@@ -15,6 +15,7 @@ const portalNav = [
   { label: "Materials", href: "/employee-portal/materials" },
   { label: "Photos", href: "/employee-portal/photos" },
   { label: "Updates", href: "/employee-portal/updates" },
+  { label: "Profile", href: "/employee-portal/profile" },
 ];
 
 function PortalCard({

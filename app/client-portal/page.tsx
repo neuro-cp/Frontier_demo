@@ -12,6 +12,7 @@ const portalNav = [
   { label: "Estimates", href: "/client-portal/estimates" },
   { label: "Documents", href: "/client-portal/documents" },
   { label: "Messages", href: "/client-portal/messages" },
+  { label: "Profile", href: "/client-portal/profile" },
 ];
 
 function PortalCard({
@@ -132,7 +133,7 @@ export default function ClientPortalPage() {
         <PortalCard
           title="Pending Estimates"
           value={String(metrics.pendingEstimates)}
-          note="Estimate approval workflow is not built yet."
+          note="Review, approve, or reject open estimates."
           href="/client-portal/estimates"
         />
         <PortalCard
@@ -142,6 +143,7 @@ export default function ClientPortalPage() {
           href="/client-portal/documents"
         />
         <PortalCard title="Messages" value="Coming Soon" note="Messaging is not built yet." href="/client-portal/messages" />
+        <PortalCard title="Profile" value="Active" note="Portal profile and contact settings placeholder." href="/client-portal/profile" />
       </div>
     </div>
   );

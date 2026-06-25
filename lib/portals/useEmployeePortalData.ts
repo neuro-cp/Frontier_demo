@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 
 import { useWorkspace } from "@/components/WorkspaceContext";
 
-export type EmployeePortalDataType = "jobs" | "routes" | "materials" | "photos" | "updates";
+export type EmployeePortalDataType = "jobs" | "routes" | "materials" | "photos" | "updates" | "assignments";
 
 export type EmployeePortalDataItem = Record<string, string | number | null>;
 

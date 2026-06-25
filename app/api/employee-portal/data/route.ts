@@ -3,9 +3,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServiceRoleClient } from "@/lib/platformAdmin/server";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 
-type DataType = "jobs" | "routes" | "materials" | "photos" | "updates";
+type DataType = "jobs" | "routes" | "materials" | "photos" | "updates" | "assignments";
 
-const validTypes = new Set<DataType>(["jobs", "routes", "materials", "photos", "updates"]);
+const validTypes = new Set<DataType>(["jobs", "routes", "materials", "photos", "updates", "assignments"]);
 
 function jsonError(message: string, status: number) {
   return NextResponse.json({ error: message }, { status });
@@ -56,6 +56,10 @@ export async function GET(request: NextRequest) {
   if (assignmentError) return jsonError(assignmentError.message || "Unable to load assignments.", 500);
 
   const jobIds = (assignments ?? []).map((assignment) => assignment.job_id);
+  if (type === "assignments") {
+    return NextResponse.json({ access, items: assignments ?? [] });
+  }
+
   if (type === "routes" || type === "updates") {
     return NextResponse.json({ access, items: [] });
   }

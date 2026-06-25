@@ -8,6 +8,7 @@ import { getWorkspaceDisplayName } from "@/lib/workspaceDisplay";
 import { defaultBusinessTypes } from "@/lib/workspaceOptions";
 import BillingSettings from "./BillingSettings";
 import DataMigrationSettings from "./DataMigrationSettings";
+import EmployeeAssignmentsSettings from "./EmployeeAssignmentsSettings";
 import PermissionsSettings from "./PermissionsSettings";
 import StorageSettings from "./StorageSettings";
 
@@ -17,6 +18,7 @@ type SettingsTab =
   | "tax"
   | "workspace"
   | "permissions"
+  | "employees"
   | "migration"
   | "storage"
   | "billing";
@@ -284,6 +286,9 @@ function SettingsWorkspacePanel({
           className={tabClass("permissions")}
         >
           Permissions
+        </button>
+        <button onClick={() => setTab("employees")} className={tabClass("employees")}>
+          Employees
         </button>
         <button onClick={() => setTab("migration")} className={tabClass("migration")}>
           Data Migration
@@ -657,6 +662,13 @@ function SettingsWorkspacePanel({
         <PermissionsSettings
           activeWorkspaceId={activeWorkspaceId}
           activeWorkspaceName={activeWorkspaceName}
+          setSavedNotice={showSavedNotice}
+        />
+      )}
+
+      {tab === "employees" && (
+        <EmployeeAssignmentsSettings
+          activeWorkspaceId={activeWorkspaceId}
           setSavedNotice={showSavedNotice}
         />
       )}

@@ -33,6 +33,8 @@ export default function InvoicesPage() {
   const [invoiceError, setInvoiceError] = useState("");
   const [selectedInvoices, setSelectedInvoices] = useState<string[]>([]);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [searchText, setSearchText] = useState("");
+  const [statusFilter, setStatusFilter] = useState<InvoiceStatus | "All">("All");
 
   const supabase = useMemo(() => (isDatabaseMode ? createBrowserSupabaseClient() : null), [isDatabaseMode]);
   const invoicesRepo = useMemo(() => createInvoicesRepository({ isSignedIn: isDatabaseMode, supabase, localInvoices, setLocalInvoices }), [isDatabaseMode, localInvoices, setLocalInvoices, supabase]);
@@ -63,6 +65,25 @@ export default function InvoicesPage() {
   const totalOutstanding = workspaceInvoices
     .filter((invoice) => invoice.status !== "Paid")
     .reduce((total, invoice) => total + getInvoiceTotals(invoice).total, 0);
+  const totalPaid = workspaceInvoices
+    .filter((invoice) => invoice.status === "Paid")
+    .reduce((total, invoice) => total + getInvoiceTotals(invoice).total, 0);
+  const overdueCount = workspaceInvoices.filter((invoice) => invoice.status === "Overdue").length;
+  const filteredInvoices = workspaceInvoices.filter((invoice) => {
+    const query = searchText.trim().toLowerCase();
+    const matchesStatus = statusFilter === "All" || invoice.status === statusFilter;
+    const matchesSearch =
+      !query ||
+      [
+        invoice.invoiceNumber,
+        getInvoiceClientName(invoice),
+        invoice.billToEmail,
+        invoice.jobName,
+      ]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(query));
+    return matchesStatus && matchesSearch;
+  });
 
   function saveInvoices(updatedInvoices: InvoiceRow[]) {
     if (isDatabaseMode) setDatabaseInvoices(updatedInvoices);
@@ -167,7 +188,7 @@ export default function InvoicesPage() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <div className="rounded-xl bg-white p-4 shadow dark:bg-gray-900">
           <p className="text-sm text-gray-500 dark:text-gray-400">Total Invoices</p>
           <p className="mt-1 text-2xl font-bold">{workspaceInvoices.length}</p>
@@ -181,7 +202,35 @@ export default function InvoicesPage() {
         </div>
 
         <div className="rounded-xl bg-white p-4 shadow dark:bg-gray-900">
-          <p className="text-sm text-gray-500 dark:text-gray-400">Workspace</p>
+          <p className="text-sm text-gray-500 dark:text-gray-400">Paid Revenue</p>
+          <p className="mt-1 text-2xl font-bold">{formatCurrency(totalPaid)}</p>
+        </div>
+
+        <div className="rounded-xl bg-white p-4 shadow dark:bg-gray-900">
+          <p className="text-sm text-gray-500 dark:text-gray-400">Overdue</p>
+          <p className="mt-1 text-2xl font-bold">{overdueCount}</p>
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-3 rounded-xl bg-white p-4 shadow dark:bg-gray-900 md:flex-row">
+        <input
+          value={searchText}
+          onChange={(event) => setSearchText(event.target.value)}
+          placeholder="Search invoice, client, email, or job"
+          className="min-w-0 flex-1 rounded-lg border border-gray-300 bg-white px-3 py-2 dark:border-gray-700 dark:bg-gray-800"
+        />
+        <select
+          value={statusFilter}
+          onChange={(event) => setStatusFilter(event.target.value as InvoiceStatus | "All")}
+          className="rounded-lg border border-gray-300 bg-white px-3 py-2 dark:border-gray-700 dark:bg-gray-800"
+        >
+          <option>All</option>
+          {invoiceStatuses.map((status) => (
+            <option key={status}>{status}</option>
+          ))}
+        </select>
+        <div className="rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-500 dark:border-gray-800 dark:text-gray-400">
+          Workspace:{" "}
           <p className="mt-1 truncate text-2xl font-bold">
             {workspaceDisplayName}
           </p>
@@ -203,8 +252,8 @@ export default function InvoicesPage() {
           </thead>
 
           <tbody>
-            {workspaceInvoices.length > 0 ? (
-              workspaceInvoices.map((invoice) => (
+            {filteredInvoices.length > 0 ? (
+              filteredInvoices.map((invoice) => (
                 <tr
                   key={invoice.id}
                   className="border-t border-gray-200 dark:border-gray-700"
@@ -258,6 +307,15 @@ export default function InvoicesPage() {
                         <option key={status}>{status}</option>
                       ))}
                     </select>
+                    <div className={`mt-2 inline-flex rounded-full px-2 py-1 text-xs font-bold ${
+                      invoice.status === "Paid"
+                        ? "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-200"
+                        : invoice.status === "Overdue"
+                          ? "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-200"
+                          : "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-200"
+                    }`}>
+                      {invoice.status === "Paid" ? "Paid" : "Balance open"}
+                    </div>
                   </td>
 
                   <td className="p-4 text-right font-medium">
@@ -271,7 +329,7 @@ export default function InvoicesPage() {
                   colSpan={7}
                   className="p-10 text-center text-lg text-gray-500 dark:text-gray-400"
                 >
-                  No invoices found for {workspaceDisplayName}
+                  No invoices match the current filters for {workspaceDisplayName}
                 </td>
               </tr>
             )}

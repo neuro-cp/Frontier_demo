@@ -14,6 +14,8 @@ type EstimateLineItem = {
 
 type Estimate = {
   id: string;
+  client_id: string | null;
+  job_id: string | null;
   estimate_number: string | null;
   estimate_date: string | null;
   status: string | null;
@@ -148,8 +150,8 @@ export default function EstimateDetailPage() {
 
   return (
     <main className="space-y-6 p-6">
-      <Link href="/clients" className="text-sm font-semibold text-blue-600 hover:underline">
-        Back to clients
+      <Link href="/estimates" className="text-sm font-semibold text-blue-600 hover:underline">
+        Back to estimates
       </Link>
 
       {error && (
@@ -178,6 +180,22 @@ export default function EstimateDetailPage() {
           </div>
 
           <div className="flex flex-wrap gap-2">
+            {estimate.client_id && (
+              <Link
+                href={`/clients/${estimate.client_id}`}
+                className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-800"
+              >
+                Open Client
+              </Link>
+            )}
+            {estimate.job_id && (
+              <Link
+                href={`/jobs/${estimate.job_id}`}
+                className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-800"
+              >
+                Open Job
+              </Link>
+            )}
             {convertedInvoiceId && (
               <Link
                 href={`/invoices/${convertedInvoiceId}`}
@@ -202,6 +220,11 @@ export default function EstimateDetailPage() {
         {convertedInvoiceId && (
           <p className="mt-4 rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-700 dark:border-green-900 dark:bg-green-950/40 dark:text-green-300">
             Converted to invoice {estimate.convertedInvoice?.invoice_number ?? convertedInvoiceId}.
+          </p>
+        )}
+        {!canShowConvert && !convertedInvoiceId && estimate.status !== "Accepted" && (
+          <p className="mt-4 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-700 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-300">
+            Estimate must be accepted before it can be converted to an invoice.
           </p>
         )}
 

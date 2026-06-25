@@ -262,8 +262,8 @@ export default function ClientPortalEstimatesList() {
             {estimate.converted_invoice_id && (
               <p className="mt-3 text-sm font-semibold text-green-700 dark:text-green-300">
                 Converted to invoice.{" "}
-                <Link href={`/invoices/${estimate.converted_invoice_id}`} className="text-blue-600 hover:underline">
-                  Open invoice
+                <Link href="/client-portal/invoices" className="text-blue-600 hover:underline">
+                  View invoices
                 </Link>
               </p>
             )}

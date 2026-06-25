@@ -123,10 +123,18 @@ export default function DashboardPage() {
   const scheduledJobs = workspaceJobs.filter(
     (job) => job.status === "Scheduled"
   ).length;
+  const activeJobs = workspaceJobs.filter(
+    (job) => job.status !== "Completed" && job.status !== "Paid"
+  ).length;
 
   const outstandingInvoices = workspaceInvoices
     .filter((invoice) => invoice.status !== "Paid")
     .reduce((total, invoice) => total + getInvoiceTotals(invoice).total, 0);
+  const paidRevenue = workspaceInvoices
+    .filter((invoice) => invoice.status === "Paid")
+    .reduce((total, invoice) => total + getInvoiceTotals(invoice).total, 0);
+  const unpaidInvoiceCount = workspaceInvoices.filter((invoice) => invoice.status !== "Paid").length;
+  const overdueInvoiceCount = workspaceInvoices.filter((invoice) => invoice.status === "Overdue").length;
 
   const totalExpenses = workspaceExpenses.reduce(
     (total, expense) => total + moneyToNumber(expense.amount),
@@ -139,11 +147,15 @@ export default function DashboardPage() {
 
   const recentActivity = [
     `- ${activeClients} active client(s)`,
+    `- ${activeJobs} active job(s)`,
     `- ${workspaceJobs.length} total job(s)`,
     `- ${openQuotes} open quote(s)`,
     `- ${scheduledJobs} scheduled job(s)`,
+    `- ${unpaidInvoiceCount} unpaid invoice(s)`,
+    `- ${overdueInvoiceCount} overdue invoice(s)`,
     `- ${inventoryAlerts} inventory alert(s)`,
     `- ${workspaceInvoices.length} invoice(s) in system`,
+    `- ${formatMoney(paidRevenue)} paid invoice revenue`,
     `- ${formatMoney(totalExpenses)} tracked expense(s)`,
   ];
 
@@ -221,14 +233,22 @@ export default function DashboardPage() {
       >
         <StatCard title="Active Clients" value={String(activeClients)} />
 
-        <StatCard title="Open Quotes" value={String(openQuotes)} />
+        <StatCard title="Active Jobs" value={String(activeJobs)} />
 
         <StatCard
           title="Outstanding Invoices"
           value={formatMoney(outstandingInvoices)}
         />
 
+        <StatCard title="Paid Revenue" value={formatMoney(paidRevenue)} />
+
+        <StatCard title="Open Quotes" value={String(openQuotes)} />
+
+        <StatCard title="Overdue Invoices" value={String(overdueInvoiceCount)} />
+
         <StatCard title="Inventory Alerts" value={String(inventoryAlerts)} />
+
+        <StatCard title="Scheduled Jobs" value={String(scheduledJobs)} />
       </div>
 
       <div className="mt-6 rounded-lg bg-white p-6 shadow dark:bg-gray-900">
