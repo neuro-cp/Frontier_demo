@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { useAuthSession } from "@/components/AuthSessionProvider";
+import { useWorkspace } from "@/components/WorkspaceContext";
 
 export type ClientPortalAccess = {
   id: string;
@@ -11,11 +12,13 @@ export type ClientPortalAccess = {
   email: string;
   status: "Active";
   accepted_at: string | null;
+  mode?: "workspace_preview";
   clients?: { id: string; name: string } | null;
 };
 
 export function useClientPortalAccess() {
   const { user } = useAuthSession();
+  const { activeWorkspace } = useWorkspace();
   const [access, setAccess] = useState<ClientPortalAccess[]>([]);
   const [error, setError] = useState("");
 
@@ -25,7 +28,8 @@ export function useClientPortalAccess() {
     }
 
     let cancelled = false;
-    fetch("/api/client-portal/access")
+    const query = new URLSearchParams({ workspaceId: activeWorkspace.id });
+    fetch(`/api/client-portal/access?${query.toString()}`)
       .then((response) => response.json())
       .then((payload: { access?: ClientPortalAccess[]; error?: string }) => {
         if (cancelled) return;
@@ -47,12 +51,13 @@ export function useClientPortalAccess() {
     return () => {
       cancelled = true;
     };
-  }, [user]);
+  }, [activeWorkspace.id, user]);
 
   return {
     access: user ? access : [],
     error,
     isLoading: false,
     hasActiveAccess: Boolean(user && access.length > 0),
+    isWorkspacePreview: access.some((item) => item.mode === "workspace_preview"),
   };
 }

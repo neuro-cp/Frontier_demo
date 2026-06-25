@@ -17,7 +17,6 @@ async function resolveEmployeeWorkspace(userId: string, requestedWorkspaceId: st
     .from("workspace_members")
     .select("workspace_id, role, status, workspaces(id, name, type)")
     .eq("user_id", userId)
-    .eq("role", "Employee")
     .eq("status", "Active")
     .order("created_at", { ascending: false });
 
@@ -43,15 +42,19 @@ export async function GET(request: NextRequest) {
   const requestedWorkspaceId = request.nextUrl.searchParams.get("workspaceId");
   const { serviceClient, access } = await resolveEmployeeWorkspace(user.id, requestedWorkspaceId);
   if (!access) return jsonError("Active employee portal access required.", 403);
+  if (access.role !== "Employee" && access.role !== "Owner" && access.role !== "Manager") {
+    return jsonError("Active employee portal access required.", 403);
+  }
 
   const workspaceId = access.workspace_id;
-  const { data: assignments, error: assignmentError } = await serviceClient
+  let assignmentQuery = serviceClient
     .from("employee_job_assignments")
     .select("id, job_id, status, notes, created_at")
     .eq("workspace_id", workspaceId)
-    .eq("employee_user_id", user.id)
     .neq("status", "Removed")
     .order("created_at", { ascending: false });
+  if (access.role === "Employee") assignmentQuery = assignmentQuery.eq("employee_user_id", user.id);
+  const { data: assignments, error: assignmentError } = await assignmentQuery;
 
   if (assignmentError) return jsonError(assignmentError.message || "Unable to load assignments.", 500);
 
@@ -61,42 +64,57 @@ export async function GET(request: NextRequest) {
   }
 
   if (type === "routes" || type === "updates") {
-    return NextResponse.json({ access, items: [] });
+    if (type === "routes") return NextResponse.json({ access, items: [] });
   }
 
-  if (jobIds.length === 0) {
+  if (jobIds.length === 0 && access.role === "Employee") {
     return NextResponse.json({ access, items: [] });
   }
 
   if (type === "jobs") {
-    const { data, error } = await serviceClient
+    let query = serviceClient
       .from("jobs")
-      .select("id, name, status, scheduled_date, scheduled_time, estimated_value_cents, notes, client_name_snapshot, created_at")
+      .select("id, workspace_id, name, status, scheduled_date, scheduled_time, estimated_value_cents, notes, client_name_snapshot, created_at")
       .eq("workspace_id", workspaceId)
-      .in("id", jobIds)
       .order("scheduled_date", { ascending: true, nullsFirst: false });
+    if (access.role === "Employee") query = query.in("id", jobIds);
+    const { data, error } = await query;
     if (error) return jsonError(error.message || "Unable to load assigned jobs.", 500);
     return NextResponse.json({ access, items: data ?? [] });
   }
 
   if (type === "materials") {
-    const { data, error } = await serviceClient
+    let query = serviceClient
       .from("job_materials")
       .select("id, job_id, name, quantity, created_at")
       .eq("workspace_id", workspaceId)
-      .in("job_id", jobIds)
       .order("created_at", { ascending: false });
+    if (access.role === "Employee") query = query.in("job_id", jobIds);
+    const { data, error } = await query;
     if (error) return jsonError(error.message || "Unable to load assigned materials.", 500);
     return NextResponse.json({ access, items: data ?? [] });
   }
 
-  const { data, error } = await serviceClient
+  if (type === "updates") {
+    let query = serviceClient
+      .from("employee_job_updates")
+      .select("id, job_id, update_type, body, completion_percent, material_name, material_quantity, status, created_at")
+      .eq("workspace_id", workspaceId)
+      .order("created_at", { ascending: false });
+    if (access.role === "Employee") query = query.eq("employee_user_id", user.id).in("job_id", jobIds);
+    const { data, error } = await query;
+    if (error) return jsonError(error.message || "Unable to load employee updates.", 500);
+    return NextResponse.json({ access, items: data ?? [] });
+  }
+
+  let query = serviceClient
     .from("documents")
     .select("id, job_id, name, detected_type, extraction_status, file_name, mime_type, size_bytes, created_at")
     .eq("workspace_id", workspaceId)
-    .in("job_id", jobIds)
     .like("mime_type", "image/%")
     .order("created_at", { ascending: false });
+  if (access.role === "Employee") query = query.in("job_id", jobIds);
+  const { data, error } = await query;
   if (error) return jsonError(error.message || "Unable to load assigned photos.", 500);
   return NextResponse.json({ access, items: data ?? [] });
 }

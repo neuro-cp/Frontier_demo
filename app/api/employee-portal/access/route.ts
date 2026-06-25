@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
 import { createServiceRoleClient } from "@/lib/platformAdmin/server";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
@@ -7,7 +7,7 @@ function jsonError(message: string, status: number) {
   return NextResponse.json({ error: message }, { status });
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   const userClient = await createServerSupabaseClient();
   const {
     data: { user },
@@ -17,14 +17,20 @@ export async function GET() {
   if (userError || !user) return jsonError("Sign in required.", 401);
 
   const serviceClient = createServiceRoleClient();
-  const { data, error } = await serviceClient
+  const workspaceId = new URL(request.url).searchParams.get("workspaceId");
+  let query = serviceClient
     .from("workspace_members")
     .select("id, workspace_id, role, status, workspaces(id, name, type)")
     .eq("user_id", user.id)
-    .eq("role", "Employee")
     .eq("status", "Active")
     .order("created_at", { ascending: false });
+  if (workspaceId) query = query.eq("workspace_id", workspaceId);
 
+  const { data, error } = await query;
   if (error) return jsonError(error.message || "Unable to load employee access.", 500);
-  return NextResponse.json({ access: data ?? [] });
+  return NextResponse.json({
+    access: (data ?? []).filter((row) =>
+      row.role === "Employee" || row.role === "Owner" || row.role === "Manager"
+    ),
+  });
 }

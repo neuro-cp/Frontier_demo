@@ -2,19 +2,23 @@
 
 import { useEffect, useState } from "react";
 
+import { useWorkspace } from "@/components/WorkspaceContext";
+
 export type ClientPortalDataType = "jobs" | "invoices" | "estimates" | "documents";
 
 export type ClientPortalDataItem = Record<string, string | number | null>;
 
 export function useClientPortalData(type: ClientPortalDataType) {
+  const { activeWorkspace } = useWorkspace();
   const [items, setItems] = useState<ClientPortalDataItem[]>([]);
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
+    const query = new URLSearchParams({ type, workspaceId: activeWorkspace.id });
 
-    fetch(`/api/client-portal/data?type=${encodeURIComponent(type)}`)
+    fetch(`/api/client-portal/data?${query.toString()}`)
       .then((response) => response.json())
       .then((payload: { items?: ClientPortalDataItem[]; error?: string }) => {
         if (cancelled) return;
@@ -38,7 +42,7 @@ export function useClientPortalData(type: ClientPortalDataType) {
     return () => {
       cancelled = true;
     };
-  }, [type]);
+  }, [activeWorkspace.id, type]);
 
   return { items, error, isLoading };
 }

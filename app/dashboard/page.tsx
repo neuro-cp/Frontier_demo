@@ -17,6 +17,7 @@ import { createInvoicesRepository } from "@/lib/db/invoices";
 import { createJobsRepository } from "@/lib/db/jobs";
 import { getInvoiceTotals, InvoiceRow } from "@/lib/frontierInvoices";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
+import OperationsActivityPanel from "@/app/dashboard/OperationsActivityPanel";
 
 function moneyToNumber(value: string) {
   return Number(value.replace(/[$,]/g, ""));
@@ -262,6 +263,8 @@ export default function DashboardPage() {
           ))}
         </ul>
       </div>
+
+      {user && <OperationsActivityPanel />}
     </div>
   );
 }

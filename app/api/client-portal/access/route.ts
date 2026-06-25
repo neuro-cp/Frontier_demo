@@ -52,5 +52,34 @@ export async function GET(request: NextRequest) {
     .order("accepted_at", { ascending: false });
 
   if (error) return jsonError(error.message || "Unable to load portal access.", 500);
-  return NextResponse.json({ access: data ?? [] });
+  if ((data ?? []).length > 0) return NextResponse.json({ access: data ?? [] });
+
+  if (workspaceId) {
+    const { data: member, error: memberError } = await serviceClient
+      .from("workspace_members")
+      .select("id, role")
+      .eq("workspace_id", workspaceId)
+      .eq("user_id", user.id)
+      .eq("status", "Active")
+      .maybeSingle();
+
+    if (memberError) return jsonError(memberError.message || "Unable to load portal access.", 500);
+    if (member && (member.role === "Owner" || member.role === "Manager")) {
+      return NextResponse.json({
+        access: [
+          {
+            id: `workspace-preview-${workspaceId}`,
+            workspace_id: workspaceId,
+            client_id: null,
+            email: user.email ?? "workspace-preview",
+            status: "Active",
+            accepted_at: null,
+            mode: "workspace_preview",
+          },
+        ],
+      });
+    }
+  }
+
+  return NextResponse.json({ access: [] });
 }

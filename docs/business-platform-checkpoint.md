@@ -1,6 +1,6 @@
 # Frontier Business Platform Checkpoint
 
-Current checkpoint after commit `2b8997d` and migration `0026_invoice_payment_stripe_metadata.sql`.
+Current checkpoint after the operations platform sprint. Latest prior pushed commit before this sprint was `4549a93`; current database migration work adds `0027_operations_messaging_notifications.sql`.
 
 ## Completed Platform Areas
 
@@ -23,6 +23,29 @@ Current checkpoint after commit `2b8997d` and migration `0026_invoice_payment_st
 - Employee assignment management added under Settings > Employees.
 - Employee profile and assignment history page added.
 - Dashboard summaries now surface active jobs, paid revenue, unpaid invoices, overdue invoices, scheduled jobs, inventory alerts, and expense totals.
+- Operations messaging foundation added:
+  - `workspace_conversations`
+  - `workspace_messages`
+  - client portal message UI
+  - client message notifications
+- Notification foundation added:
+  - `workspace_notifications`
+  - unread/archive-ready API
+  - notification event placeholders for client messages and employee updates
+- Employee productivity foundation added:
+  - `employee_job_updates`
+  - progress updates
+  - completion notes
+  - completion percentage
+  - material usage fields
+  - assigned-job update submission from the employee portal
+- Dashboard operations activity added:
+  - recent customer messages
+  - recent employee updates
+  - recent payment activity
+  - estimate pipeline summary
+  - invoice aging summary
+- Owner/Manager preview access added for client and employee portal pages without changing external client scoping.
 
 ## Frozen Systems
 
@@ -33,7 +56,6 @@ The following systems are intentionally not part of this business-platform sprin
 - Speech worker
 - Image analysis
 - Logistics optimization and routing engine
-- Messaging
 - Upload expansion
 - Time tracking
 - Public company search
@@ -41,16 +63,20 @@ The following systems are intentionally not part of this business-platform sprin
 ## Current Security Boundary
 
 - Client portal data resolves workspace/client scope from active `client_portal_access`.
+- Owner/Manager client portal preview is workspace-scoped and read-only for portal data inspection.
 - Employee portal data resolves employee workspace access from active Employee workspace membership.
+- Owner/Manager employee portal preview is workspace-scoped for operations review.
 - Employee job visibility is restricted to `employee_job_assignments`.
+- Employee update writes verify active Employee role and assigned job before accepting a field update.
 - Payment state remains server-authoritative through Stripe webhook processing.
 - Browser actions do not mark invoices paid.
 
 ## Recommended Next Phase
 
-1. Runtime QA for the new internal estimate list, invoice filters, and employee assignment settings.
-2. Messaging foundation for client portal and employee portal.
-3. Time tracking foundation for employee portal.
-4. Portal document/photo upload expansion.
-5. Final OCR/speech/image/logistics validation pass.
-6. Production launch hardening: secret rotation, Stripe live-mode checklist, billing enforcement, support playbooks.
+1. Apply migration `0027_operations_messaging_notifications.sql`.
+2. Runtime QA for client messages, notifications, employee updates, and dashboard activity.
+3. Add workspace-side conversation reply UI.
+4. Add time tracking foundation for employee portal.
+5. Portal document/photo upload expansion.
+6. Final OCR/speech/image/logistics validation pass.
+7. Production launch hardening: secret rotation, Stripe live-mode checklist, billing enforcement, support playbooks.
