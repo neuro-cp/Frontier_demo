@@ -37,7 +37,7 @@ export async function GET(request: NextRequest) {
   if (type === "invoices") {
     const { data, error } = await serviceClient
       .from("invoices")
-      .select("id, invoice_number, invoice_date, due_date, status, bill_to_name, bill_to_email, discount_type, discount_value, tax_rate, created_at, invoice_line_items(id, description, quantity, unit_price_cents, sort_order), invoice_payments(id, amount_cents, status, payment_date, method)")
+      .select("id, invoice_number, invoice_date, due_date, status, bill_to_name, bill_to_email, discount_type, discount_value, tax_rate, created_at, invoice_line_items(id, description, quantity, unit_price_cents, sort_order), invoice_payments(id, amount_cents, status, payment_date, method, reference, stripe_checkout_session_id, stripe_payment_intent_id, created_at)")
       .eq("workspace_id", workspaceId)
       .eq("client_id", clientId)
       .order("invoice_date", { ascending: false })

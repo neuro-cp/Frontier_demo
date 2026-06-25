@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
 type InvoiceLineItem = {
@@ -16,6 +17,10 @@ type InvoicePayment = {
   status: string | null;
   payment_date: string | null;
   method: string | null;
+  reference: string | null;
+  stripe_checkout_session_id: string | null;
+  stripe_payment_intent_id: string | null;
+  created_at: string | null;
 };
 
 type ClientInvoice = {
@@ -67,6 +72,38 @@ function statusClass(status: string | null) {
   if (status === "Paid") return "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-200";
   if (status === "Overdue") return "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-200";
   return "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-200";
+}
+
+function paymentStatusClass(status: string | null) {
+  if (status === "Succeeded") return "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-200";
+  if (status === "Failed" || status === "Refunded") return "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-200";
+  return "bg-yellow-100 text-yellow-800 dark:bg-yellow-950 dark:text-yellow-200";
+}
+
+function paymentReference(payment: InvoicePayment) {
+  return payment.reference || payment.stripe_payment_intent_id || payment.stripe_checkout_session_id || "-";
+}
+
+function latestSuccessfulPayment(invoice: ClientInvoice) {
+  return [...(invoice.invoice_payments ?? [])]
+    .filter((payment) => payment.status === "Succeeded" || payment.status === null)
+    .sort((a, b) => {
+      const aTime = new Date(a.created_at || a.payment_date || "").getTime();
+      const bTime = new Date(b.created_at || b.payment_date || "").getTime();
+      return bTime - aTime;
+    })[0];
+}
+
+function hasRecentPendingPayment(invoice: ClientInvoice) {
+  const pendingWindowMs = 30 * 60 * 1000;
+  const now = Date.now();
+
+  return (invoice.invoice_payments ?? []).some((payment) => {
+    if (payment.status !== "Pending") return false;
+    if (!payment.stripe_checkout_session_id) return false;
+    const createdAt = payment.created_at ? new Date(payment.created_at).getTime() : 0;
+    return Number.isFinite(createdAt) && now - createdAt < pendingWindowMs;
+  });
 }
 
 export default function ClientPortalInvoicesList() {
@@ -165,7 +202,14 @@ export default function ClientPortalInvoicesList() {
         const total = invoiceTotalCents(invoice);
         const paid = paidAmountCents(invoice);
         const balance = Math.max(total - paid, 0);
-        const canPay = invoice.status !== "Paid" && balance > 0;
+        const hasPendingPayment = hasRecentPendingPayment(invoice);
+        const canPay = invoice.status !== "Paid" && balance > 0 && !hasPendingPayment;
+        const successfulPayment = latestSuccessfulPayment(invoice);
+        const payments = [...(invoice.invoice_payments ?? [])].sort((a, b) => {
+          const aTime = new Date(a.created_at || a.payment_date || "").getTime();
+          const bTime = new Date(b.created_at || b.payment_date || "").getTime();
+          return bTime - aTime;
+        });
 
         return (
           <article
@@ -192,14 +236,29 @@ export default function ClientPortalInvoicesList() {
               <div className="text-left lg:text-right">
                 <div className="text-sm text-gray-500 dark:text-gray-400">Balance</div>
                 <div className="text-2xl font-bold">{formatMoney(balance)}</div>
-                <button
-                  type="button"
-                  onClick={() => payInvoice(invoice)}
-                  disabled={!canPay || busyId === invoice.id}
-                  className="mt-3 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-400"
-                >
-                  {busyId === invoice.id ? "Opening..." : invoice.status === "Paid" ? "Paid" : "Pay Invoice"}
-                </button>
+                {hasPendingPayment ? (
+                  <div className="mt-3 rounded-lg bg-yellow-100 px-4 py-2 text-sm font-semibold text-yellow-800 dark:bg-yellow-950 dark:text-yellow-200">
+                    Payment Pending
+                  </div>
+                ) : canPay ? (
+                  <button
+                    type="button"
+                    onClick={() => payInvoice(invoice)}
+                    disabled={busyId === invoice.id}
+                    className="mt-3 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-400"
+                  >
+                    {busyId === invoice.id ? "Opening..." : "Pay Invoice"}
+                  </button>
+                ) : successfulPayment ? (
+                  <Link
+                    href={`/client-portal/invoices/${invoice.id}/receipt`}
+                    className="mt-3 inline-flex rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-800"
+                  >
+                    View Receipt
+                  </Link>
+                ) : (
+                  <div className="mt-3 text-sm font-semibold text-green-700 dark:text-green-300">Paid</div>
+                )}
               </div>
             </div>
 
@@ -231,6 +290,49 @@ export default function ClientPortalInvoicesList() {
                     })}
                   </tbody>
                 </table>
+              </div>
+            )}
+
+            {payments.length > 0 && (
+              <div className="mt-4 rounded-lg border border-gray-200 p-3 dark:border-gray-800">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h4 className="text-sm font-bold">Payment History</h4>
+                  <span className="text-sm text-gray-500 dark:text-gray-400">
+                    Paid {formatMoney(paid)} of {formatMoney(total)}
+                  </span>
+                </div>
+                <div className="mt-3 overflow-x-auto">
+                  <table className="min-w-full text-left text-xs">
+                    <thead className="uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                      <tr>
+                        <th className="border-b border-gray-200 px-2 py-2 dark:border-gray-800">Date</th>
+                        <th className="border-b border-gray-200 px-2 py-2 dark:border-gray-800">Amount</th>
+                        <th className="border-b border-gray-200 px-2 py-2 dark:border-gray-800">Status</th>
+                        <th className="border-b border-gray-200 px-2 py-2 dark:border-gray-800">Reference</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {payments.map((payment) => (
+                        <tr key={payment.id}>
+                          <td className="border-b border-gray-100 px-2 py-2 dark:border-gray-800">
+                            {formatDate(payment.created_at || payment.payment_date)}
+                          </td>
+                          <td className="border-b border-gray-100 px-2 py-2 dark:border-gray-800">
+                            {formatMoney(Number(payment.amount_cents ?? 0))}
+                          </td>
+                          <td className="border-b border-gray-100 px-2 py-2 dark:border-gray-800">
+                            <span className={`rounded-full px-2 py-1 font-bold ${paymentStatusClass(payment.status)}`}>
+                              {payment.status ?? "Succeeded"}
+                            </span>
+                          </td>
+                          <td className="border-b border-gray-100 px-2 py-2 font-mono dark:border-gray-800">
+                            {paymentReference(payment)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             )}
           </article>

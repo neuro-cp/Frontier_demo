@@ -23,7 +23,12 @@ type InvoiceRow = {
   discount_value: number | string;
   tax_rate: number | string;
   invoice_line_items?: InvoiceLine[];
-  invoice_payments?: Array<{ amount_cents: number | string; status: string | null }>;
+  invoice_payments?: Array<{
+    amount_cents: number | string;
+    status: string | null;
+    created_at: string | null;
+    stripe_checkout_session_id: string | null;
+  }>;
 };
 
 function jsonError(message: string, status: number) {
@@ -58,6 +63,18 @@ function paidAmountCents(invoice: InvoiceRow) {
     .reduce((total, payment) => total + Number(payment.amount_cents ?? 0), 0);
 }
 
+function hasRecentPendingPayment(invoice: InvoiceRow) {
+  const pendingWindowMs = 30 * 60 * 1000;
+  const now = Date.now();
+
+  return (invoice.invoice_payments ?? []).some((payment) => {
+    if (payment.status !== "Pending") return false;
+    if (!payment.stripe_checkout_session_id) return false;
+    const createdAt = payment.created_at ? new Date(payment.created_at).getTime() : 0;
+    return Number.isFinite(createdAt) && now - createdAt < pendingWindowMs;
+  });
+}
+
 export async function POST(request: NextRequest, context: RouteContext) {
   const { id } = await context.params;
   const portal = await getSignedInClientPortalContext();
@@ -71,7 +88,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
   const { data, error } = await portal.serviceClient
     .from("invoices")
-    .select("id, workspace_id, client_id, invoice_number, status, bill_to_email, discount_type, discount_value, tax_rate, invoice_line_items(quantity, unit_price_cents), invoice_payments(amount_cents, status)")
+    .select("id, workspace_id, client_id, invoice_number, status, bill_to_email, discount_type, discount_value, tax_rate, invoice_line_items(quantity, unit_price_cents), invoice_payments(amount_cents, status, created_at, stripe_checkout_session_id)")
     .eq("id", id)
     .eq("workspace_id", portal.access.workspace_id)
     .eq("client_id", portal.access.client_id)
@@ -82,6 +99,9 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
   const invoice = data as InvoiceRow;
   if (invoice.status === "Paid") return jsonError("Invoice is already paid.", 409);
+  if (hasRecentPendingPayment(invoice)) {
+    return jsonError("A Stripe payment is already pending for this invoice. Wait a few minutes or refresh payment status.", 409);
+  }
 
   const totalCents = invoiceTotalCents(invoice);
   const remainingCents = totalCents - paidAmountCents(invoice);
@@ -104,7 +124,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
           },
         },
       ],
-      success_url: `${origin}/client-portal/invoices?payment=success`,
+      success_url: `${origin}/client-portal/invoices/${invoice.id}/receipt?payment=success`,
       cancel_url: `${origin}/client-portal/invoices?payment=cancelled`,
       metadata: {
         frontier_type: "invoice_payment",
@@ -123,6 +143,27 @@ export async function POST(request: NextRequest, context: RouteContext) {
         },
       },
     });
+
+    const { error: pendingPaymentError } = await portal.serviceClient.from("invoice_payments").insert({
+      workspace_id: portal.access.workspace_id,
+      invoice_id: invoice.id,
+      amount_cents: remainingCents,
+      payment_date: new Date().toISOString().slice(0, 10),
+      method: "Stripe",
+      reference: session.id,
+      notes: "Stripe Checkout payment pending.",
+      status: "Pending",
+      stripe_checkout_session_id: session.id,
+      stripe_customer_id:
+        typeof session.customer === "string"
+          ? session.customer
+          : session.customer?.id ?? null,
+      paid_by_user_id: portal.userId,
+    });
+
+    if (pendingPaymentError) {
+      return jsonError(pendingPaymentError.message || "Unable to record pending payment.", 500);
+    }
 
     return NextResponse.json({ url: session.url });
   } catch (checkoutError) {
