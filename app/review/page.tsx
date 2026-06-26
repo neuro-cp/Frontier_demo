@@ -32,10 +32,33 @@ import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 type ReviewDraftsResponse = {
   reviewDrafts?: AiReviewDraft[];
   reviewDraft?: AiReviewDraft;
+  operationsSummary?: AiOperationsSummary;
   executionResult?: unknown;
   revisions?: AiReviewDraftRevision[];
   auditEvents?: AiReviewDraftAuditEvent[];
   error?: string;
+};
+
+type AiQueueSummary = {
+  queued: number;
+  processing: number;
+  failed: number;
+  retries: number;
+  averageProcessingSeconds: number | null;
+};
+
+type AiOperationsSummary = {
+  ocr: AiQueueSummary;
+  speech: AiQueueSummary;
+  image: AiQueueSummary;
+  reviewBacklog: number;
+  approvalStats: {
+    pending: number;
+    approved: number;
+    rejected: number;
+    archived: number;
+    executed: number;
+  };
 };
 
 type TranscriptionResponse = {
@@ -108,6 +131,12 @@ function formatDate(value: string | null) {
   return new Date(value).toLocaleString();
 }
 
+function formatSeconds(value: number | null) {
+  if (typeof value !== "number") return "-";
+  if (value < 60) return `${Math.round(value)}s`;
+  return `${Math.round(value / 60)}m`;
+}
+
 function statusClass(status: AiReviewDraftStatus) {
   if (status === "Approved") {
     return "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300";
@@ -140,6 +169,7 @@ export default function ReviewQueuePage() {
     useWorkspace();
   const { user } = useAuthSession();
   const [reviewDrafts, setReviewDrafts] = useState<AiReviewDraft[]>([]);
+  const [operationsSummary, setOperationsSummary] = useState<AiOperationsSummary | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [updatingId, setUpdatingId] = useState("");
   const [executingId, setExecutingId] = useState("");
@@ -331,7 +361,7 @@ export default function ReviewQueuePage() {
       return "Transcript preview will appear here when speech source hydration is connected.";
     }
     if (draft.sourceType === "image") {
-      return "Image preview will appear here when secure attachment preview is connected.";
+      return "Image analysis summary will appear here after the source image is analyzed.";
     }
     return "Source preview is not available yet.";
   }
@@ -339,6 +369,7 @@ export default function ReviewQueuePage() {
   const loadReviewDrafts = useCallback(async () => {
     if (!user || !workspaceReady) {
       setReviewDrafts([]);
+      setOperationsSummary(null);
       return;
     }
 
@@ -353,6 +384,7 @@ export default function ReviewQueuePage() {
         throw new Error(payload.error || "Unable to load review drafts.");
       }
       setReviewDrafts(payload.reviewDrafts ?? []);
+      setOperationsSummary(payload.operationsSummary ?? null);
     } catch (loadError) {
       setError(
         loadError instanceof Error
@@ -1129,6 +1161,55 @@ export default function ReviewQueuePage() {
               ))
             )}
           </div>
+        </div>
+      </section>
+
+      <section className="rounded-lg border border-gray-200 bg-white p-4 text-sm shadow-sm dark:border-gray-800 dark:bg-gray-900">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h2 className="font-bold">AI Operations</h2>
+            <p className="mt-1 text-gray-500 dark:text-gray-400">
+              Intake health for OCR, speech, image analysis, and review backlog.
+            </p>
+          </div>
+          <div className="rounded-full border border-blue-200 px-3 py-1 text-xs font-bold uppercase text-blue-700 dark:border-blue-900 dark:text-blue-300">
+            Backlog {operationsSummary?.reviewBacklog ?? 0}
+          </div>
+        </div>
+        <div className="mt-4 grid gap-3 md:grid-cols-3">
+          {(["ocr", "speech", "image"] as const).map((key) => {
+            const summary = operationsSummary?.[key];
+            return (
+              <div
+                key={key}
+                className="rounded-lg border border-gray-100 bg-gray-50 p-3 dark:border-gray-800 dark:bg-gray-950"
+              >
+                <div className="mb-2 font-bold uppercase">{key}</div>
+                <dl className="grid grid-cols-2 gap-2 text-xs">
+                  <div>
+                    <dt className="text-gray-500 dark:text-gray-400">Queued</dt>
+                    <dd className="font-bold">{summary?.queued ?? 0}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-gray-500 dark:text-gray-400">Processing</dt>
+                    <dd className="font-bold">{summary?.processing ?? 0}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-gray-500 dark:text-gray-400">Failed</dt>
+                    <dd className="font-bold">{summary?.failed ?? 0}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-gray-500 dark:text-gray-400">Retries</dt>
+                    <dd className="font-bold">{summary?.retries ?? 0}</dd>
+                  </div>
+                  <div className="col-span-2">
+                    <dt className="text-gray-500 dark:text-gray-400">Average Processing</dt>
+                    <dd className="font-bold">{formatSeconds(summary?.averageProcessingSeconds ?? null)}</dd>
+                  </div>
+                </dl>
+              </div>
+            );
+          })}
         </div>
       </section>
 

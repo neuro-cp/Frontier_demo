@@ -47,10 +47,12 @@ Revision rows preserve prior title, summary, warnings, and action payloads when 
 - OCR source text is hydrated into the Review Queue when a draft is linked to a document.
 - Speech is activated for uploaded audio and microphone recordings through the Review Queue audio intake.
 - Transcript source text is hydrated into the Review Queue when a draft is linked to a persisted transcript.
-- Image analysis and logistics remain frozen.
+- Image analysis is activated for stored image documents and Review Queue image intake.
+- Image source summaries and provider metadata are hydrated into the Review Queue when a draft is linked to a document.
+- Logistics remains frozen.
 - The Review Queue still does not process files or call workers directly.
-- Image, upload timestamp, uploader, and attachment preview hydration remain placeholders.
+- Secure image preview, upload timestamp, uploader, and richer attachment preview hydration remain placeholders.
 
 ## Next Step
 
-Validate speech with one short audio sample, then activate image analysis against the same review and execution boundary.
+Complete final OCR/speech/image quality validation, then move to logistics activation and security hardening.

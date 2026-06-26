@@ -25,6 +25,17 @@ function toDataUrl(mimeType: string, bytes: ArrayBuffer) {
   return `data:${mimeType};base64,${Buffer.from(bytes).toString("base64")}`;
 }
 
+function imageSummaryFromWarnings(warnings: unknown[]) {
+  const firstWarning = warnings.find(
+    (warning) =>
+      typeof warning === "object" &&
+      warning !== null &&
+      "message" in warning &&
+      typeof (warning as { message?: unknown }).message === "string"
+  ) as { message?: string } | undefined;
+  return firstWarning?.message ?? "Enhanced image analysis completed.";
+}
+
 function hasOnlyHumanReviewWarnings(draft: Awaited<ReturnType<typeof getReviewDraftById>>) {
   return Boolean(
     draft?.warnings.length &&
@@ -97,7 +108,7 @@ export async function POST(request: NextRequest) {
 
     const { data: document, error } = await access.serviceClient
       .from("documents")
-      .select("id, workspace_id, name, file_name, mime_type, storage_bucket, storage_path")
+      .select("*")
       .eq("id", originalDraft.sourceId)
       .eq("workspace_id", workspaceId)
       .maybeSingle();
@@ -120,6 +131,22 @@ export async function POST(request: NextRequest) {
     }
 
     const imageBytes = await storageObject.arrayBuffer();
+    await access.serviceClient
+      .from("documents")
+      .update({
+        image_analysis_status: "processing",
+        image_analysis_started_at: new Date().toISOString(),
+        image_analysis_completed_at: null,
+        image_analysis_failed_at: null,
+        image_analysis_error: null,
+        image_analysis_retry_count:
+          typeof document.image_analysis_retry_count === "number"
+            ? document.image_analysis_retry_count + 1
+            : 1,
+      })
+      .eq("id", document.id)
+      .eq("workspace_id", workspaceId);
+
     const interpretation = await interpretImageWithAI(
       {
         workspaceId,
@@ -149,7 +176,33 @@ export async function POST(request: NextRequest) {
       createdBy: access.userId,
     });
 
-    return NextResponse.json({ reviewDraft, metadata });
+    const { data: updatedDocument, error: updateError } = await access.serviceClient
+      .from("documents")
+      .update({
+        image_analysis_status: "completed",
+        image_analysis_completed_at: new Date().toISOString(),
+        image_analysis_failed_at: null,
+        image_analysis_error: null,
+        image_analysis_provider: interpretation.provider,
+        image_analysis_model: interpretation.model,
+        image_analysis_confidence: interpretation.result.confidence,
+        image_analysis_summary: interpretation.result.actions.length
+          ? `${interpretation.result.actions.length} enhanced image action draft(s) created.`
+          : imageSummaryFromWarnings(interpretation.result.warnings),
+        image_review_draft_id: reviewDraft.id,
+      })
+      .eq("id", document.id)
+      .eq("workspace_id", workspaceId)
+      .select("*")
+      .maybeSingle();
+    if (updateError) {
+      console.warn("Enhanced image lifecycle update failed.", {
+        message: updateError.message,
+        documentId: document.id,
+      });
+    }
+
+    return NextResponse.json({ reviewDraft, metadata, document: updatedDocument ?? null });
   } catch (error) {
     return jsonError(
       error instanceof Error ? error.message : "Unable to run enhanced image analysis.",

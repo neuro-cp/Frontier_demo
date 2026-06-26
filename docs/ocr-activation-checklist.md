@@ -16,8 +16,12 @@ Use this checklist when Frontier is ready to reconnect OCR, speech, and image in
 - OCR extracted text and structured metadata are persisted on the source document.
 - Successful OCR creates a linked AI review draft when interpretation succeeds.
 - Review Queue hydrates OCR source text previews for linked document drafts.
+- Speech transcripts persist lifecycle state and source text in `speech_transcripts`.
+- Review Queue hydrates transcript source text for linked speech drafts.
+- Image analysis lifecycle is persisted on source documents.
+- Review Queue hydrates image source summaries and provider metadata for linked image drafts.
 
-## OCR Activation Steps
+## OCR Validation Steps
 
 1. Confirm OCR worker health and configured worker URL without exposing secrets.
 2. Run OCR on one small PDF.
@@ -29,7 +33,7 @@ Use this checklist when Frontier is ready to reconnect OCR, speech, and image in
 8. Confirm rejected, archived, needs-changes, and already-executed drafts cannot execute.
 9. Confirm workspace isolation blocks cross-workspace source access.
 
-## Speech Activation Steps
+## Speech Validation Steps
 
 1. Confirm speech worker health and configured worker URL without exposing secrets.
 2. Confirm microphone recording and file upload still post only to server routes.
@@ -38,14 +42,15 @@ Use this checklist when Frontier is ready to reconnect OCR, speech, and image in
 5. Hydrate transcript preview in the Review Queue.
 6. Confirm the same approval and execution boundaries as OCR.
 
-## Image Activation Steps
+## Image Validation Steps
 
 1. Confirm image normalization still stores original and normalized metadata.
 2. Confirm vision analysis route is server-only and quota guarded.
 3. Generate a review draft from one high-quality business image.
 4. Preserve source image attribution.
-5. Hydrate image preview through a safe signed or proxied source path.
-6. Confirm enhanced analysis remains explicit and one-time only.
+5. Confirm image lifecycle fields and review draft linkage persist.
+6. Hydrate image source summary in the Review Queue.
+7. Confirm enhanced analysis remains explicit and one-time only.
 
 ## Do Not Activate Until Verified
 
@@ -57,4 +62,4 @@ Use this checklist when Frontier is ready to reconnect OCR, speech, and image in
 
 ## Recommended Next Activation Sprint
 
-Speech should activate next after one browser/API pass confirms OCR source hydration and review draft execution boundaries in production-like use.
+Run focused OCR, speech, and image quality validation, then activate logistics and complete production security hardening.

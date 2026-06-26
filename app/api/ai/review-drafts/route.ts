@@ -34,6 +34,21 @@ type UpdateReviewDraftRequest = {
   actions?: SuggestedAction[];
 };
 
+type ProcessingRow = {
+  status?: string | null;
+  processing_status?: string | null;
+  image_analysis_status?: string | null;
+  retry_count?: number | null;
+  ocr_retry_count?: number | null;
+  image_analysis_retry_count?: number | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+  ocr_started_at?: string | null;
+  ocr_completed_at?: string | null;
+  image_analysis_started_at?: string | null;
+  image_analysis_completed_at?: string | null;
+};
+
 function jsonError(message: string, status: number) {
   return NextResponse.json({ error: message }, { status });
 }
@@ -83,7 +98,11 @@ async function attachSourcePreviews(
   const documentIds = Array.from(
     new Set(
       drafts
-        .filter((draft) => draft.sourceType === "ocr" && isUuid(draft.sourceId ?? ""))
+        .filter(
+          (draft) =>
+            (draft.sourceType === "ocr" || draft.sourceType === "image") &&
+            isUuid(draft.sourceId ?? "")
+        )
         .map((draft) => draft.sourceId as string)
     )
   );
@@ -101,7 +120,7 @@ async function attachSourcePreviews(
     documentIds.length
       ? supabase
           .from("documents")
-          .select("id, name, file_name, extracted_text, extracted_json, processing_status, ocr_provider, confidence, ocr_completed_at")
+          .select("id, name, file_name, extracted_text, extracted_json, processing_status, ocr_provider, confidence, ocr_completed_at, image_analysis_status, image_analysis_provider, image_analysis_confidence, image_analysis_completed_at, image_analysis_summary")
           .eq("workspace_id", workspaceId)
           .in("id", documentIds)
       : Promise.resolve({ data: [], error: null }),
@@ -121,16 +140,21 @@ async function attachSourcePreviews(
   return drafts.map((draft) => {
     const document = draft.sourceId ? documentsById.get(draft.sourceId) : undefined;
     if (document) {
+      const isImage = draft.sourceType === "image";
       return {
         ...draft,
         sourcePreview: {
           label: document.file_name ?? document.name ?? null,
-          text: document.extracted_text ?? null,
-          extractedJson: (document.extracted_json ?? null) as Record<string, unknown> | null,
-          processingStatus: document.processing_status ?? null,
-          provider: document.ocr_provider ?? null,
-          confidence: document.confidence ?? null,
-          completedAt: document.ocr_completed_at ?? null,
+          text: isImage ? document.image_analysis_summary ?? null : document.extracted_text ?? null,
+          extractedJson: isImage ? null : (document.extracted_json ?? null) as Record<string, unknown> | null,
+          processingStatus: isImage
+            ? document.image_analysis_status ?? null
+            : document.processing_status ?? null,
+          provider: isImage ? document.image_analysis_provider ?? null : document.ocr_provider ?? null,
+          confidence: isImage ? document.image_analysis_confidence ?? null : document.confidence ?? null,
+          completedAt: isImage
+            ? document.image_analysis_completed_at ?? null
+            : document.ocr_completed_at ?? null,
         },
       };
     }
@@ -149,6 +173,73 @@ async function attachSourcePreviews(
       },
     };
   });
+}
+
+function averageProcessingSeconds(rows: ProcessingRow[], startedKey: keyof ProcessingRow, completedKey: keyof ProcessingRow) {
+  const durations = rows
+    .map((row) => {
+      const started = row[startedKey];
+      const completed = row[completedKey];
+      if (typeof started !== "string" || typeof completed !== "string") return null;
+      const seconds = (new Date(completed).getTime() - new Date(started).getTime()) / 1000;
+      return Number.isFinite(seconds) && seconds >= 0 ? seconds : null;
+    })
+    .filter((value): value is number => typeof value === "number");
+  if (!durations.length) return null;
+  return durations.reduce((total, value) => total + value, 0) / durations.length;
+}
+
+function queueSummary(
+  rows: ProcessingRow[],
+  statusKey: keyof ProcessingRow,
+  retryKey: keyof ProcessingRow,
+  startedKey: keyof ProcessingRow,
+  completedKey: keyof ProcessingRow
+) {
+  return {
+    queued: rows.filter((row) => row[statusKey] === "queued").length,
+    processing: rows.filter((row) => row[statusKey] === "processing").length,
+    failed: rows.filter((row) => row[statusKey] === "failed").length,
+    retries: rows.reduce((total, row) => {
+      const retries = row[retryKey];
+      return total + (typeof retries === "number" ? retries : 0);
+    }, 0),
+    averageProcessingSeconds: averageProcessingSeconds(rows, startedKey, completedKey),
+  };
+}
+
+async function getOperationsSummary(
+  supabase: Awaited<ReturnType<typeof createServerSupabaseClient>>,
+  workspaceId: string,
+  reviewDrafts: AiReviewDraft[]
+) {
+  const [documentsResult, transcriptsResult] = await Promise.all([
+    supabase
+      .from("documents")
+      .select("processing_status, ocr_retry_count, ocr_started_at, ocr_completed_at, image_analysis_status, image_analysis_retry_count, image_analysis_started_at, image_analysis_completed_at")
+      .eq("workspace_id", workspaceId),
+    supabase
+      .from("speech_transcripts")
+      .select("status, retry_count, started_at, completed_at")
+      .eq("workspace_id", workspaceId),
+  ]);
+  if (documentsResult.error) throw new Error(documentsResult.error.message || "Unable to load document operation summary.");
+  if (transcriptsResult.error) throw new Error(transcriptsResult.error.message || "Unable to load speech operation summary.");
+  const documentRows = (documentsResult.data ?? []) as ProcessingRow[];
+  const transcriptRows = (transcriptsResult.data ?? []) as ProcessingRow[];
+  return {
+    ocr: queueSummary(documentRows, "processing_status", "ocr_retry_count", "ocr_started_at", "ocr_completed_at"),
+    speech: queueSummary(transcriptRows, "status", "retry_count", "started_at", "completed_at"),
+    image: queueSummary(documentRows, "image_analysis_status", "image_analysis_retry_count", "image_analysis_started_at", "image_analysis_completed_at"),
+    reviewBacklog: reviewDrafts.filter((draft) => draft.status === "Pending" || draft.status === "Needs Changes").length,
+    approvalStats: {
+      pending: reviewDrafts.filter((draft) => draft.status === "Pending").length,
+      approved: reviewDrafts.filter((draft) => draft.status === "Approved").length,
+      rejected: reviewDrafts.filter((draft) => draft.status === "Rejected").length,
+      archived: reviewDrafts.filter((draft) => draft.status === "Archived").length,
+      executed: reviewDrafts.filter((draft) => draft.executionStatus === "Executed").length,
+    },
+  };
 }
 
 export async function GET(request: NextRequest) {
@@ -182,7 +273,8 @@ export async function GET(request: NextRequest) {
       workspaceId,
       await getReviewDrafts(auth.supabase, workspaceId)
     );
-    return NextResponse.json({ reviewDrafts });
+    const operationsSummary = await getOperationsSummary(auth.supabase, workspaceId, reviewDrafts);
+    return NextResponse.json({ reviewDrafts, operationsSummary });
   } catch (error) {
     return jsonError(
       error instanceof Error ? error.message : "Unable to load review drafts.",

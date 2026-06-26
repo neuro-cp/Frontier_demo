@@ -26,6 +26,17 @@ function toDataUrl(mimeType: string, bytes: ArrayBuffer) {
   return `data:${mimeType};base64,${Buffer.from(bytes).toString("base64")}`;
 }
 
+function imageSummaryFromWarnings(warnings: unknown[]) {
+  const firstWarning = warnings.find(
+    (warning) =>
+      typeof warning === "object" &&
+      warning !== null &&
+      "message" in warning &&
+      typeof (warning as { message?: unknown }).message === "string"
+  ) as { message?: string } | undefined;
+  return firstWarning?.message ?? "Image analyzed for review.";
+}
+
 async function readImageFile(file: File) {
   const mimeType = file.type || "";
   if (!isSupportedImageType(mimeType)) {
@@ -85,6 +96,7 @@ export async function POST(request: NextRequest) {
       ? sourceLabel.trim()
       : "Image upload";
   let sourceId: string | undefined;
+  let documentRow: Record<string, unknown> | null = null;
   let fallbackImage:
     | { bytes: ArrayBuffer; mimeType: string; label: string }
     | null = null;
@@ -108,7 +120,7 @@ export async function POST(request: NextRequest) {
   } else if (typeof documentId === "string" && documentId.trim()) {
     const { data: document, error } = await access.serviceClient
       .from("documents")
-      .select("id, workspace_id, name, file_name, mime_type, storage_bucket, storage_path")
+      .select("*")
       .eq("id", documentId)
       .eq("workspace_id", workspaceId)
       .maybeSingle();
@@ -135,9 +147,31 @@ export async function POST(request: NextRequest) {
     }
     imageBytes = await storageObject.arrayBuffer();
     sourceId = document.id;
+    documentRow = document;
     label = document.file_name ?? document.name ?? label;
   } else {
     return jsonError("Image file or document id is required.", 400);
+  }
+
+  if (sourceId) {
+    const now = new Date().toISOString();
+    const retryCount =
+      typeof documentRow?.image_analysis_retry_count === "number"
+        ? documentRow.image_analysis_retry_count + 1
+        : 1;
+    await access.serviceClient
+      .from("documents")
+      .update({
+        image_analysis_status: "processing",
+        image_analysis_queued_at: now,
+        image_analysis_started_at: now,
+        image_analysis_completed_at: null,
+        image_analysis_failed_at: null,
+        image_analysis_error: null,
+        image_analysis_retry_count: retryCount,
+      })
+      .eq("id", sourceId)
+      .eq("workspace_id", workspaceId);
   }
 
   try {
@@ -197,6 +231,36 @@ export async function POST(request: NextRequest) {
       createdBy: access.userId,
     });
 
+    let updatedDocument: Record<string, unknown> | null = null;
+    if (sourceId) {
+      const { data: documentUpdate, error: documentUpdateError } = await access.serviceClient
+        .from("documents")
+        .update({
+          image_analysis_status: "completed",
+          image_analysis_completed_at: new Date().toISOString(),
+          image_analysis_failed_at: null,
+          image_analysis_error: null,
+          image_analysis_provider: interpretation.provider,
+          image_analysis_model: interpretation.model,
+          image_analysis_confidence: interpretation.result.confidence,
+          image_analysis_summary: interpretation.result.actions.length
+            ? `${interpretation.result.actions.length} image action draft(s) created.`
+            : imageSummaryFromWarnings(interpretation.result.warnings),
+          image_review_draft_id: reviewDraft.id,
+        })
+        .eq("id", sourceId)
+        .eq("workspace_id", workspaceId)
+        .select("*")
+        .maybeSingle();
+      if (documentUpdateError) {
+        console.warn("Image analysis document lifecycle update failed.", {
+          message: documentUpdateError.message,
+          documentId: sourceId,
+        });
+      }
+      updatedDocument = documentUpdate ?? null;
+    }
+
     console.info("Saved image review draft. " + JSON.stringify({
       draftId: reviewDraft.id,
       sourceId: reviewDraft.sourceId,
@@ -211,6 +275,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       reviewDraft,
+      document: updatedDocument,
       analysis: {
         provider: interpretation.provider,
         model: interpretation.model,
@@ -222,6 +287,18 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch (error) {
+    if (sourceId) {
+      await access.serviceClient
+        .from("documents")
+        .update({
+          image_analysis_status: "failed",
+          image_analysis_failed_at: new Date().toISOString(),
+          image_analysis_error:
+            error instanceof Error ? error.message : "Unable to analyze image.",
+        })
+        .eq("id", sourceId)
+        .eq("workspace_id", workspaceId);
+    }
     return jsonError(
       error instanceof Error ? error.message : "Unable to analyze image.",
       500

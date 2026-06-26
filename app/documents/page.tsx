@@ -76,6 +76,18 @@ type ApiDocument = {
   ocr_error?: string | null;
   ocr_retry_count?: number | null;
   ocr_review_draft_id?: string | null;
+  image_analysis_status?: StoredDocument["imageAnalysisStatus"] | null;
+  image_analysis_queued_at?: string | null;
+  image_analysis_started_at?: string | null;
+  image_analysis_completed_at?: string | null;
+  image_analysis_failed_at?: string | null;
+  image_analysis_error?: string | null;
+  image_analysis_retry_count?: number | null;
+  image_analysis_provider?: string | null;
+  image_analysis_model?: string | null;
+  image_analysis_confidence?: number | null;
+  image_analysis_summary?: string | null;
+  image_review_draft_id?: string | null;
 };
 
 type ApiReviewDraft = {
@@ -132,6 +144,18 @@ function apiDocumentToStoredDocument(document: ApiDocument): StoredDocument {
     ocrError: document.ocr_error ?? "",
     ocrRetryCount: document.ocr_retry_count ?? 0,
     ocrReviewDraftId: document.ocr_review_draft_id ?? "",
+    imageAnalysisStatus: document.image_analysis_status ?? "",
+    imageAnalysisQueuedAt: document.image_analysis_queued_at ?? "",
+    imageAnalysisStartedAt: document.image_analysis_started_at ?? "",
+    imageAnalysisCompletedAt: document.image_analysis_completed_at ?? "",
+    imageAnalysisFailedAt: document.image_analysis_failed_at ?? "",
+    imageAnalysisError: document.image_analysis_error ?? "",
+    imageAnalysisRetryCount: document.image_analysis_retry_count ?? 0,
+    imageAnalysisProvider: document.image_analysis_provider ?? "",
+    imageAnalysisModel: document.image_analysis_model ?? "",
+    imageAnalysisConfidence: document.image_analysis_confidence ?? null,
+    imageAnalysisSummary: document.image_analysis_summary ?? "",
+    imageReviewDraftId: document.image_review_draft_id ?? "",
   };
 }
 
@@ -605,10 +629,34 @@ export default function DocumentsPage() {
       };
     }
     if (isImage) {
+      const failed = document.imageAnalysisStatus === "failed";
+      const processing = document.imageAnalysisStatus === "processing";
+      const queued = document.imageAnalysisStatus === "queued";
+      const completed = document.imageAnalysisStatus === "completed";
       return {
-        label: document.processingStatus === "reviewed" ? "analyzed" : "uploaded",
-        detail: document.processingStatus === "reviewed" ? "Image analyzed" : "Image uploaded",
-        className: "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200",
+        label: failed
+          ? "failed"
+          : completed
+            ? "analyzed"
+            : processing
+              ? "processing"
+              : queued
+                ? "queued"
+                : "uploaded",
+        detail: failed
+          ? document.imageAnalysisError || "Image analysis failed"
+          : completed
+            ? document.imageAnalysisSummary || "Image analyzed"
+            : processing || queued
+              ? "Image analysis in progress"
+              : "Image uploaded",
+        className: failed
+          ? "bg-red-100 text-red-800 dark:bg-red-950/50 dark:text-red-300"
+          : completed
+            ? "bg-blue-100 text-blue-800 dark:bg-blue-950/50 dark:text-blue-300"
+            : processing || queued
+              ? "bg-yellow-100 text-yellow-800 dark:bg-yellow-950/50 dark:text-yellow-300"
+              : "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200",
       };
     }
 
@@ -706,6 +754,7 @@ export default function DocumentsPage() {
       });
       const payload = (await response.json()) as {
         reviewDraft?: { id: string };
+        document?: ApiDocument | null;
         error?: string;
       };
       if (!response.ok || !payload.reviewDraft) {
@@ -719,6 +768,9 @@ export default function DocumentsPage() {
         ...current,
         [document.id]: "Pending",
       }));
+      if (payload.document) {
+        replaceDocument(apiDocumentToStoredDocument(payload.document));
+      }
       setDocumentNotice("Image analysis draft created. Open Review Queue to approve it.");
     } catch (error) {
       setDocumentError(error instanceof Error ? error.message : "Unable to analyze image.");
@@ -940,6 +992,26 @@ export default function DocumentsPage() {
                     {isPdf && Boolean(document.ocrRetryCount) && (
                       <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                         OCR attempts: {document.ocrRetryCount}
+                      </div>
+                    )}
+                    {isImage && document.imageAnalysisProvider && (
+                      <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        Provider: {document.imageAnalysisProvider}
+                      </div>
+                    )}
+                    {isImage && document.imageAnalysisCompletedAt && (
+                      <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        Image analyzed: {new Date(document.imageAnalysisCompletedAt).toLocaleString()}
+                      </div>
+                    )}
+                    {isImage && document.imageAnalysisFailedAt && (
+                      <div className="mt-1 text-xs text-red-600 dark:text-red-300">
+                        Image failed: {new Date(document.imageAnalysisFailedAt).toLocaleString()}
+                      </div>
+                    )}
+                    {isImage && Boolean(document.imageAnalysisRetryCount) && (
+                      <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        Image attempts: {document.imageAnalysisRetryCount}
                       </div>
                     )}
                   </td>

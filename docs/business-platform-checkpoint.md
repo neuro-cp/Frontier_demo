@@ -1,6 +1,6 @@
 # Frontier Business Platform Checkpoint
 
-Current checkpoint after the Speech activation sprint. Latest prior pushed commit before this sprint was `1031d4d`; current database migration work adds `0030_speech_transcript_lifecycle.sql`.
+Current checkpoint after the Unified AI Ingestion sprint. Latest prior pushed commit before this sprint was `a69cea3`; current database migration work adds `0031_document_image_lifecycle.sql`.
 
 ## Completed Platform Areas
 
@@ -81,12 +81,20 @@ Current checkpoint after the Speech activation sprint. Latest prior pushed commi
   - uploaded audio and microphone recordings can create linked transcript review drafts
   - voice assistant transcription persists source text without creating duplicate automatic review drafts
   - Review Queue hydrates transcript source text and source speech metadata
+- Image activation:
+  - image analysis lifecycle records queued, processing, completed, failed, retry count, timestamps, and error text on the source document
+  - image analysis stores provider, model, confidence, summary, and linked review draft metadata
+  - image analysis creates review drafts without executing actions
+  - enhanced image analysis remains explicit and one-time
+  - Review Queue hydrates image source summaries and provider metadata
+- Unified AI operations:
+  - Review Queue surfaces OCR, speech, and image queue counts
+  - Review Queue surfaces failed jobs, retry counts, average processing time, and review backlog
 
 ## Frozen Systems
 
 The following systems are intentionally not part of this business-platform sprint:
 
-- Image analysis
 - Logistics optimization and routing engine
 - Upload expansion
 - Time tracking
@@ -111,13 +119,16 @@ The following systems are intentionally not part of this business-platform sprin
 - OCR source previews are workspace-scoped through the review draft and document workspace relationship.
 - Speech draft creation does not execute actions.
 - Speech source previews are workspace-scoped through the review draft and transcript workspace relationship.
+- Image draft creation does not execute actions.
+- Image source previews are workspace-scoped through the review draft and document workspace relationship.
 
 ## Recommended Next Phase
 
-1. Runtime validate speech with one short audio sample in a signed-in workspace.
-2. Image activation against the completed Review Queue.
+1. Focused OCR, speech, and image quality validation with representative samples.
+2. Logistics activation and dispatch validation.
+3. Security hardening: secret rotation, route auth audit, RLS audit, worker/provider failure drills.
+4. Full workflow QA on desktop/mobile/dark mode.
 5. Add richer per-record activity timelines on client/job/invoice/estimate detail pages.
 6. Add time tracking foundation for employee portal.
 7. Portal document/photo upload expansion.
-8. Final logistics validation pass.
-9. Production launch hardening: secret rotation, Stripe live-mode checklist, billing enforcement, support playbooks.
+8. Production launch hardening: Stripe live-mode checklist, billing enforcement, support playbooks.
