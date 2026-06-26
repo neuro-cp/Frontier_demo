@@ -36,7 +36,9 @@ function jsonError(message: string, status: number) {
 }
 
 function originFromRequest(request: NextRequest) {
-  return request.headers.get("origin") ?? request.nextUrl.origin;
+  const configuredOrigin =
+    process.env.APP_URL?.trim() || process.env.NEXT_PUBLIC_APP_URL?.trim();
+  return (configuredOrigin || request.nextUrl.origin).replace(/\/$/, "");
 }
 
 function invoiceTotalCents(invoice: InvoiceRow) {

@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import {
+  sanitizeBusinessPayload,
+  withoutWorkspaceKeys,
+} from "@/lib/api/businessPayloads";
 import { createServiceRoleClient } from "@/lib/platformAdmin/server";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 
@@ -19,10 +23,12 @@ function asRecord(value: unknown) {
     : null;
 }
 
-function withoutKeys(record: Record<string, unknown>, keys: string[]) {
-  return Object.fromEntries(
-    Object.entries(record).filter(([key]) => !keys.includes(key))
-  );
+function errorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === "object" && "message" in error) {
+    return String((error as { message?: unknown }).message || fallback);
+  }
+  return fallback;
 }
 
 function getWorkspaceId(entity: string, payload: Record<string, unknown>) {
@@ -40,7 +46,7 @@ async function verifyWorkspaceAccess(workspaceId: unknown, userId: string) {
   const serviceClient = createServiceRoleClient();
   const { data, error } = await serviceClient
     .from("workspace_members")
-    .select("id")
+    .select("id, role")
     .eq("workspace_id", workspaceId)
     .eq("user_id", userId)
     .eq("status", "Active")
@@ -53,6 +59,13 @@ async function verifyWorkspaceAccess(workspaceId: unknown, userId: string) {
     };
   }
 
+  if (data.role !== "Owner" && data.role !== "Manager") {
+    return {
+      ok: false as const,
+      response: jsonError("Only Owners and Managers can change workspace records.", 403),
+    };
+  }
+
   return { ok: true as const, serviceClient, workspaceId };
 }
 
@@ -62,12 +75,14 @@ async function mutateSimpleRow({
   select = "*",
   payload,
   operation,
+  values,
 }: {
   entity: string;
   table: string;
   select?: string;
   payload: Record<string, unknown>;
   operation: "update" | "delete";
+  values: Record<string, unknown>;
 }) {
   const id = payload.id;
   const workspaceId = payload.workspace_id;
@@ -88,7 +103,6 @@ async function mutateSimpleRow({
     return NextResponse.json({ data: true });
   }
 
-  const values = withoutKeys(payload, ["id", "workspace_id"]);
   const { data, error } = await serviceClient
     .from(table)
     .update(values)
@@ -137,6 +151,7 @@ export async function POST(request: NextRequest) {
         select: "id, workspace_id, name, status, balance_cents, email, phone, address, city, state, zip, notes, latitude, longitude",
         payload,
         operation: body.operation,
+        values: withoutWorkspaceKeys(sanitizeBusinessPayload("client", payload, workspaceId)),
       });
     }
 
@@ -173,6 +188,7 @@ export async function POST(request: NextRequest) {
         table: "expenses",
         payload,
         operation: body.operation,
+        values: withoutWorkspaceKeys(sanitizeBusinessPayload("expense", payload, workspaceId)),
       });
     }
 
@@ -182,6 +198,7 @@ export async function POST(request: NextRequest) {
         table: "documents",
         payload,
         operation: body.operation,
+        values: withoutWorkspaceKeys(sanitizeBusinessPayload("document", payload, workspaceId)),
       });
     }
 
@@ -191,6 +208,7 @@ export async function POST(request: NextRequest) {
         table: "client_calendar_events",
         payload,
         operation: body.operation,
+        values: withoutWorkspaceKeys(sanitizeBusinessPayload("calendar_event", payload, workspaceId)),
       });
     }
 
@@ -200,6 +218,7 @@ export async function POST(request: NextRequest) {
         ? (payload.materials as Record<string, unknown>[])
         : [];
       if (!job) return jsonError("Job payload is required.", 400);
+      const jobPayload = sanitizeBusinessPayload("job", job, workspaceId);
 
       if (body.operation === "delete") {
         const { error } = await serviceClient
@@ -212,8 +231,10 @@ export async function POST(request: NextRequest) {
       }
 
       const { error } = await serviceClient.rpc("upsert_job_with_materials", {
-        job_payload: job,
-        materials_payload: materials,
+        job_payload: jobPayload,
+        materials_payload: materials.map((material) =>
+          sanitizeBusinessPayload("job_material", material, workspaceId)
+        ),
       });
       if (error) throw error;
 
@@ -251,8 +272,7 @@ export async function POST(request: NextRequest) {
         .from("job_materials")
         .insert(
           materials.map((material) => ({
-            ...material,
-            workspace_id: workspaceId,
+            ...sanitizeBusinessPayload("job_material", material, workspaceId),
             job_id: jobId,
           }))
         );
@@ -266,6 +286,7 @@ export async function POST(request: NextRequest) {
         ? (payload.lineItems as Record<string, unknown>[])
         : [];
       if (!invoice) return jsonError("Invoice payload is required.", 400);
+      const invoicePayload = sanitizeBusinessPayload("invoice", invoice, workspaceId);
 
       if (body.operation === "delete") {
         const { error } = await serviceClient
@@ -278,8 +299,10 @@ export async function POST(request: NextRequest) {
       }
 
       const { error } = await serviceClient.rpc("upsert_invoice_with_lines", {
-        invoice_payload: invoice,
-        line_items_payload: lineItems,
+        invoice_payload: invoicePayload,
+        line_items_payload: lineItems.map((lineItem) =>
+          sanitizeBusinessPayload("invoice_line", lineItem, workspaceId)
+        ),
       });
       if (error) throw error;
 
@@ -299,6 +322,7 @@ export async function POST(request: NextRequest) {
         ? (payload.stops as Record<string, unknown>[])
         : [];
       if (!route) return jsonError("Route payload is required.", 400);
+      const routePayload = sanitizeBusinessPayload("route_plan", route, workspaceId);
 
       if (body.operation === "delete") {
         const { error } = await serviceClient
@@ -311,8 +335,10 @@ export async function POST(request: NextRequest) {
       }
 
       const { error } = await serviceClient.rpc("upsert_route_with_stops", {
-        route_payload: route,
-        stops_payload: stops,
+        route_payload: routePayload,
+        stops_payload: stops.map((stop) =>
+          sanitizeBusinessPayload("route_stop", stop, workspaceId)
+        ),
       });
       if (error) throw error;
 
@@ -328,7 +354,6 @@ export async function POST(request: NextRequest) {
 
     return jsonError("Unsupported mutation entity.", 400);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Mutation failed.";
-    return jsonError(message, 500);
+    return jsonError(errorMessage(error, "Mutation failed."), 500);
   }
 }

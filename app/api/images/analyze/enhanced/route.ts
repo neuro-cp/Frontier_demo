@@ -6,7 +6,13 @@ import { isUuid } from "@/lib/db/ids";
 import { canUseAiDrafts } from "@/lib/plans/capabilities";
 import { checkUserAndWorkspaceDailyLimits } from "@/lib/rateLimit/dailyCounters";
 import { RateLimitError } from "@/lib/rateLimit/policy";
-import { jsonError, planUpgradeError, requireWorkspaceAccess } from "@/lib/services/routeProtection";
+import {
+  canManageWorkspaceData,
+  jsonError,
+  managerRequiredError,
+  planUpgradeError,
+  requireWorkspaceAccess,
+} from "@/lib/services/routeProtection";
 import { serviceLimits } from "@/lib/services/serviceLimits";
 import { DOCUMENT_STORAGE_BUCKET } from "@/lib/storage/documents";
 
@@ -76,6 +82,7 @@ export async function POST(request: NextRequest) {
 
   const access = await requireWorkspaceAccess(workspaceId);
   if (!access.ok) return access.response;
+  if (!canManageWorkspaceData(access.role)) return managerRequiredError("run enhanced image analysis");
   if (!canUseAiDrafts(access.plan)) return planUpgradeError();
 
   try {

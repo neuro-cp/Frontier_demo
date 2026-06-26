@@ -5,7 +5,13 @@ import { geocodeAddress } from "@/lib/geocoding/provider";
 import { checkUserAndWorkspaceDailyLimits } from "@/lib/rateLimit/dailyCounters";
 import { RateLimitError } from "@/lib/rateLimit/policy";
 import { canUseExternalRouting } from "@/lib/plans/capabilities";
-import { jsonError, planUpgradeError, requireWorkspaceAccess } from "@/lib/services/routeProtection";
+import {
+  canManageWorkspaceData,
+  jsonError,
+  managerRequiredError,
+  planUpgradeError,
+  requireWorkspaceAccess,
+} from "@/lib/services/routeProtection";
 import { serviceLimits } from "@/lib/services/serviceLimits";
 
 type GeocodeRequest = {
@@ -30,6 +36,7 @@ export async function POST(request: NextRequest) {
 
   const access = await requireWorkspaceAccess(body.workspaceId);
   if (!access.ok) return access.response;
+  if (!canManageWorkspaceData(access.role)) return managerRequiredError("geocode addresses");
   if (!canUseExternalRouting(access.plan)) return planUpgradeError();
 
   const { serviceClient, userId, workspaceId } = access;

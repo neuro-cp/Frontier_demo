@@ -25,6 +25,14 @@ export function cleanRouteError(error: unknown, fallback: string) {
   return jsonError(fallback, 400);
 }
 
+export function canManageWorkspaceData(role?: string | null) {
+  return role === "Owner" || role === "Manager";
+}
+
+export function managerRequiredError(action = "perform this action") {
+  return jsonError(`Only Owners and Managers can ${action}.`, 403);
+}
+
 export async function requireWorkspaceAccess(workspaceId?: string) {
   if (!workspaceId) {
     return { ok: false as const, response: jsonError("Workspace is required.", 400) };
@@ -43,7 +51,7 @@ export async function requireWorkspaceAccess(workspaceId?: string) {
   const serviceClient = createServiceRoleClient();
   const { data } = await serviceClient
     .from("workspace_members")
-    .select("id")
+    .select("id, role")
     .eq("workspace_id", workspaceId)
     .eq("user_id", user.id)
     .eq("status", "Active")
@@ -62,6 +70,7 @@ export async function requireWorkspaceAccess(workspaceId?: string) {
     serviceClient,
     userId: user.id,
     workspaceId,
+    role: data.role as string | null,
     plan: resolveWorkspacePlan(),
   };
 }

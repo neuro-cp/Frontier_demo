@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { sanitizeBusinessPayload } from "@/lib/api/businessPayloads";
 import { createServiceRoleClient } from "@/lib/platformAdmin/server";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 
@@ -18,6 +19,14 @@ function asRecord(value: unknown) {
     : null;
 }
 
+function errorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === "object" && "message" in error) {
+    return String((error as { message?: unknown }).message || fallback);
+  }
+  return fallback;
+}
+
 function getWorkspaceId(entity: string, payload: Record<string, unknown>) {
   if (entity === "job") return asRecord(payload.job)?.workspace_id;
   if (entity === "invoice") return asRecord(payload.invoice)?.workspace_id;
@@ -33,7 +42,7 @@ async function verifyWorkspaceAccess(workspaceId: unknown, userId: string) {
   const serviceClient = createServiceRoleClient();
   const { data, error } = await serviceClient
     .from("workspace_members")
-    .select("id")
+    .select("id, role")
     .eq("workspace_id", workspaceId)
     .eq("user_id", userId)
     .eq("status", "Active")
@@ -43,6 +52,13 @@ async function verifyWorkspaceAccess(workspaceId: unknown, userId: string) {
     return {
       ok: false as const,
       response: jsonError("You do not have access to this workspace.", 403),
+    };
+  }
+
+  if (data.role !== "Owner" && data.role !== "Manager") {
+    return {
+      ok: false as const,
+      response: jsonError("Only Owners and Managers can change workspace records.", 403),
     };
   }
 
@@ -82,9 +98,10 @@ export async function POST(request: NextRequest) {
 
   try {
     if (body.entity === "client") {
+      const clientPayload = sanitizeBusinessPayload("client", payload, workspaceId);
       const { data, error } = await serviceClient
         .from("clients")
-        .insert(payload)
+        .insert(clientPayload)
         .select("id, workspace_id, name, status, balance_cents, email, phone, address, city, state, zip, notes, latitude, longitude")
         .single();
       if (error) throw error;
@@ -92,9 +109,10 @@ export async function POST(request: NextRequest) {
     }
 
     if (body.entity === "inventory_item") {
+      const itemPayload = sanitizeBusinessPayload("inventory_item", payload, workspaceId);
       const { data, error } = await serviceClient
         .from("inventory_items")
-        .insert(payload)
+        .insert(itemPayload)
         .select("*")
         .single();
       if (error) throw error;
@@ -102,9 +120,10 @@ export async function POST(request: NextRequest) {
     }
 
     if (body.entity === "calendar_event") {
+      const eventPayload = sanitizeBusinessPayload("calendar_event", payload, workspaceId);
       const { data, error } = await serviceClient
         .from("client_calendar_events")
-        .insert(payload)
+        .insert(eventPayload)
         .select("*")
         .single();
       if (error) throw error;
@@ -112,9 +131,10 @@ export async function POST(request: NextRequest) {
     }
 
     if (body.entity === "expense") {
+      const expensePayload = sanitizeBusinessPayload("expense", payload, workspaceId);
       const { data, error } = await serviceClient
         .from("expenses")
-        .insert(payload)
+        .insert(expensePayload)
         .select("*")
         .single();
       if (error) throw error;
@@ -122,9 +142,10 @@ export async function POST(request: NextRequest) {
     }
 
     if (body.entity === "document") {
+      const documentPayload = sanitizeBusinessPayload("document", payload, workspaceId);
       const { data, error } = await serviceClient
         .from("documents")
-        .insert(payload)
+        .insert(documentPayload)
         .select("*")
         .single();
       if (error) throw error;
@@ -137,10 +158,11 @@ export async function POST(request: NextRequest) {
         ? (payload.materials as Record<string, unknown>[])
         : [];
       if (!job) return jsonError("Job payload is required.", 400);
+      const jobPayload = sanitizeBusinessPayload("job", job, workspaceId);
 
       const { data: insertedJob, error: jobError } = await serviceClient
         .from("jobs")
-        .insert(job)
+        .insert(jobPayload)
         .select("*")
         .single();
       if (jobError || !insertedJob) throw jobError;
@@ -151,8 +173,7 @@ export async function POST(request: NextRequest) {
             .from("job_materials")
             .insert(
               materials.map((material) => ({
-                ...material,
-                workspace_id: workspaceId,
+                ...sanitizeBusinessPayload("job_material", material, workspaceId),
                 job_id: insertedJob.id,
               }))
             );
@@ -178,10 +199,11 @@ export async function POST(request: NextRequest) {
         ? (payload.lineItems as Record<string, unknown>[])
         : [];
       if (!invoice) return jsonError("Invoice payload is required.", 400);
+      const invoicePayload = sanitizeBusinessPayload("invoice", invoice, workspaceId);
 
       const { data: insertedInvoice, error: invoiceError } = await serviceClient
         .from("invoices")
-        .insert(invoice)
+        .insert(invoicePayload)
         .select("*")
         .single();
       if (invoiceError || !insertedInvoice) throw invoiceError;
@@ -192,8 +214,7 @@ export async function POST(request: NextRequest) {
             .from("invoice_line_items")
             .insert(
               lineItems.map((lineItem) => ({
-                ...lineItem,
-                workspace_id: workspaceId,
+                ...sanitizeBusinessPayload("invoice_line", lineItem, workspaceId),
                 invoice_id: insertedInvoice.id,
               }))
             );
@@ -219,10 +240,11 @@ export async function POST(request: NextRequest) {
         ? (payload.stops as Record<string, unknown>[])
         : [];
       if (!route) return jsonError("Route payload is required.", 400);
+      const routePayload = sanitizeBusinessPayload("route_plan", route, workspaceId);
 
       const { data: insertedRoute, error: routeError } = await serviceClient
         .from("route_plans")
-        .insert(route)
+        .insert(routePayload)
         .select("*")
         .single();
       if (routeError || !insertedRoute) throw routeError;
@@ -233,8 +255,7 @@ export async function POST(request: NextRequest) {
             .from("route_plan_stops")
             .insert(
               stops.map((stop) => ({
-                ...stop,
-                workspace_id: workspaceId,
+                ...sanitizeBusinessPayload("route_stop", stop, workspaceId),
                 route_plan_id: insertedRoute.id,
               }))
             );
@@ -256,7 +277,6 @@ export async function POST(request: NextRequest) {
 
     return jsonError("Unsupported create entity.", 400);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Create failed.";
-    return jsonError(message, 500);
+    return jsonError(errorMessage(error, "Create failed."), 500);
   }
 }

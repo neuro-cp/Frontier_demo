@@ -1,7 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { canUseCloudStorage } from "@/lib/plans/capabilities";
-import { jsonError, planUpgradeError, requireWorkspaceAccess } from "@/lib/services/routeProtection";
+import {
+  canManageWorkspaceData,
+  jsonError,
+  managerRequiredError,
+  planUpgradeError,
+  requireWorkspaceAccess,
+} from "@/lib/services/routeProtection";
 import { DOCUMENT_STORAGE_BUCKET } from "@/lib/storage/documents";
 
 function validWorkspacePath(workspaceId: string, path: string) {
@@ -25,6 +31,7 @@ export async function POST(request: NextRequest) {
 
   const access = await requireWorkspaceAccess(workspaceId);
   if (!access.ok) return access.response;
+  if (!canManageWorkspaceData(access.role)) return managerRequiredError("upload documents");
   if (!canUseCloudStorage(access.plan)) return planUpgradeError();
   if (!validWorkspacePath(workspaceId, path)) return jsonError("Invalid document storage path.", 400);
 
@@ -40,6 +47,7 @@ export async function GET(request: NextRequest) {
   const path = request.nextUrl.searchParams.get("path") ?? "";
   const access = await requireWorkspaceAccess(workspaceId);
   if (!access.ok) return access.response;
+  if (!canManageWorkspaceData(access.role)) return managerRequiredError("download documents");
   if (!canUseCloudStorage(access.plan)) return planUpgradeError();
   if (!validWorkspacePath(workspaceId, path)) return jsonError("Invalid document storage path.", 400);
 
@@ -62,6 +70,7 @@ export async function DELETE(request: NextRequest) {
   const path = body.path ?? "";
   const access = await requireWorkspaceAccess(workspaceId);
   if (!access.ok) return access.response;
+  if (!canManageWorkspaceData(access.role)) return managerRequiredError("delete documents");
   if (!canUseCloudStorage(access.plan)) return planUpgradeError();
   if (!validWorkspacePath(workspaceId, path)) return jsonError("Invalid document storage path.", 400);
 

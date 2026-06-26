@@ -4,7 +4,13 @@ import { getOpenRouteServiceMatrix } from "@/lib/logistics/openRouteService";
 import type { LogisticsCoordinate } from "@/lib/logistics/providers";
 import { checkUserAndWorkspaceDailyLimits } from "@/lib/rateLimit/dailyCounters";
 import { canUseExternalRouting } from "@/lib/plans/capabilities";
-import { jsonError, planUpgradeError, requireWorkspaceAccess } from "@/lib/services/routeProtection";
+import {
+  canManageWorkspaceData,
+  jsonError,
+  managerRequiredError,
+  planUpgradeError,
+  requireWorkspaceAccess,
+} from "@/lib/services/routeProtection";
 import { serviceLimits } from "@/lib/services/serviceLimits";
 
 type MatrixRequest = {
@@ -42,6 +48,7 @@ export async function POST(request: NextRequest) {
 
   const access = await requireWorkspaceAccess(body.workspaceId);
   if (!access.ok) return access.response;
+  if (!canManageWorkspaceData(access.role)) return managerRequiredError("calculate route distances");
   if (!canUseExternalRouting(access.plan)) return planUpgradeError();
 
   try {

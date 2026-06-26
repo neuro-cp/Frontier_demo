@@ -1,38 +1,61 @@
 # Continuation Checkpoint
 
-Latest baseline before this sprint:
+Latest baseline before this launch-prep pass:
 
-- Latest pushed commit before this work: `a69cea3 Activate speech review draft pipeline`
-- Supabase migrations were applied through `0030_speech_transcript_lifecycle.sql`
+- Latest pushed commit before this work: `282140d Complete unified AI ingestion layer`
+- Supabase migrations applied through `0031_document_image_lifecycle.sql`
+- Production deployment was ready before this pass.
 
-This sprint adds:
+Current completed subsystems:
 
-- `0031_document_image_lifecycle.sql`
-- Image lifecycle persistence on `documents`
-- Linked image review draft persistence
-- Review Queue source hydration for image drafts
-- Unified AI Operations summary in Review Queue
-- AI ingestion and security hardening documentation
+- Core business platform: clients, jobs, estimates, invoices, inventory, calendar, dashboard, financials.
+- Billing and payments: Stripe subscriptions, invoice checkout, webhook synchronization, receipts, payment history.
+- Client portal: invite/linking, scoped jobs/invoices/estimates/documents, estimate approval/rejection, invoice payment.
+- Employee portal: assignment foundation, scoped jobs/materials/photos/routes placeholders/updates.
+- Collaboration: conversations, messages, notifications, activity feeds.
+- AI review: unified Review Queue, draft editing, archive/audit, explicit approve and execute.
+- AI ingestion: OCR, speech, and image intake feed Review Queue; no autonomous execution.
+- Logistics: nearest-neighbor route optimization, provider fallback structure, route save/load foundation, Google Maps export.
 
-Current AI intake status:
+Launch-prep hardening completed in this pass:
 
-- OCR: active, lifecycle persisted, source text hydrated into Review Queue.
-- Speech: active, lifecycle persisted, transcript source hydrated into Review Queue.
-- Image: active, lifecycle persisted, source summary/provider metadata hydrated into Review Queue.
-- All intake paths still require human review and explicit execute.
-- No autonomous execution is enabled.
+- Generic app mutation routes now require Owner or Manager role before service-role writes.
+- Generic app mutation routes now apply server-side payload allowlists before database writes.
+- Document storage upload/download/delete now requires Owner or Manager role.
+- OCR, speech, image analysis, enhanced image analysis, document AI interpretation, transcript AI interpretation, voice draft creation, geocoding, route optimization, and matrix lookups now require Owner or Manager role.
+- Stripe invoice checkout redirect origin now uses configured `APP_URL` or `NEXT_PUBLIC_APP_URL` instead of the request `Origin` header.
+- `.env.example` now includes `APP_URL`.
 
-Still frozen:
+Validation performed:
 
-- Logistics activation and dispatch validation.
-- Time tracking.
-- Payroll.
-- Public company search.
-- Upload expansion beyond existing document/image/audio flows.
+- `npm.cmd run lint` passed.
+- `npm.cmd run build` passed.
+- Authenticated app-route smoke passed for:
+  - create/delete client
+  - create/delete job with materials
+  - create/delete invoice with line item
+  - create/delete expense
+  - create/delete inventory item
+  - create/delete calendar event
+  - create/delete route plan
+  - nearest-neighbor route optimization
+  - workspace messaging list/reply/archive/reopen
+- Negative permission smoke passed:
+  - Employee-role workspace member receives 403 from generic create route.
 
-Next recommended sprint:
+Known remaining launch items:
 
-1. Focused OCR, speech, and image quality validation with representative samples.
-2. Logistics activation.
-3. Security hardening and resilience testing.
-4. Full QA and beta readiness.
+- Rotate every temporary key, password, API token, worker secret, Stripe key, Vercel token, Supabase key, AI provider key, Google key, and Cloudflare/R2 key before public launch.
+- Complete manual QA on desktop and mobile.
+- Perform full portal two-user validation again after any permission changes.
+- Run a focused RLS audit after manual QA findings are patched.
+- Add worker/provider outage drills.
+- Add moderated global business-type suggestions for "Other" workspace creation values.
+
+Recommended next phase:
+
+1. Manual QA workflow pass using a fresh workspace.
+2. Capture findings into `bugs.md`, `polish.md`, and `future.md`.
+3. Patch high-priority manual QA blockers.
+4. Run final security/resilience sweep.
+5. Beta readiness checklist and private beta.

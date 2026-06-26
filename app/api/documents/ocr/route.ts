@@ -45,7 +45,7 @@ export async function POST(request: NextRequest) {
 
   const { data: membership, error: membershipError } = await supabase
     .from("workspace_members")
-    .select("id")
+    .select("id, role")
     .eq("workspace_id", body.workspaceId)
     .eq("user_id", user.id)
     .eq("status", "Active")
@@ -53,6 +53,9 @@ export async function POST(request: NextRequest) {
 
   if (membershipError || !membership) {
     return jsonError("You do not have access to this workspace.", 403);
+  }
+  if (membership.role !== "Owner" && membership.role !== "Manager") {
+    return jsonError("Only Owners and Managers can run OCR.", 403);
   }
   if (!canUseOcr(resolveWorkspacePlan())) return planUpgradeError();
   try {

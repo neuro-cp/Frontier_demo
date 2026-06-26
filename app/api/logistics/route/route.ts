@@ -9,7 +9,13 @@ import {
 } from "@/lib/logistics/routingProviders";
 import { checkUserAndWorkspaceDailyLimits } from "@/lib/rateLimit/dailyCounters";
 import { canUseLogistics } from "@/lib/plans/capabilities";
-import { jsonError, planUpgradeError, requireWorkspaceAccess } from "@/lib/services/routeProtection";
+import {
+  canManageWorkspaceData,
+  jsonError,
+  managerRequiredError,
+  planUpgradeError,
+  requireWorkspaceAccess,
+} from "@/lib/services/routeProtection";
 import { serviceLimits } from "@/lib/services/serviceLimits";
 
 type RouteStopInput = LogisticsCoordinate & {
@@ -82,6 +88,7 @@ export async function POST(request: NextRequest) {
 
   const access = await requireWorkspaceAccess(body.workspaceId);
   if (!access.ok) return access.response;
+  if (!canManageWorkspaceData(access.role)) return managerRequiredError("optimize routes");
   if (!canUseLogistics(access.plan)) return planUpgradeError();
 
   checkUserAndWorkspaceDailyLimits({
