@@ -19,6 +19,7 @@ import {
   InvoiceRow,
 } from "@/lib/frontierInvoices";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
+import { formatDateTime12Hour } from "@/lib/formatDateTime";
 
 const jobStatuses: JobStatus[] = ["Lead", "Quoted", "Scheduled", "Completed", "Paid"];
 
@@ -220,6 +221,28 @@ export default function JobPage() {
     }
   }
 
+  async function markJobComplete() {
+    if (!job || job.status === "Completed") return;
+    const confirmed = window.confirm("Mark this job complete?");
+    if (!confirmed) return;
+    try {
+      const result = await updateJobAction(jobsRepository, {
+        ...job,
+        status: "Completed",
+        completedAt: job.completedAt ?? new Date().toISOString(),
+      });
+      if (!result.ok) {
+        setDataError(result.error);
+        return;
+      }
+      if (isDatabaseMode) setDatabaseJob(result.data);
+      else setLocalJobItems((current) => current.map((item) => item.id === job.id ? result.data : item));
+      setDataError("");
+    } catch (error) {
+      setDataError(error instanceof Error ? error.message : "Unable to complete job.");
+    }
+  }
+
   if (isLoadingJob) {
     return (
       <div className="space-y-4 p-6 text-gray-950 dark:text-gray-100">
@@ -267,6 +290,15 @@ export default function JobPage() {
           >
             Edit Job
           </button>
+          {job.status !== "Completed" && (
+            <button
+              type="button"
+              onClick={markJobComplete}
+              className="rounded-lg bg-green-600 px-5 py-3 font-semibold text-white hover:bg-green-700"
+            >
+              Mark Complete
+            </button>
+          )}
         </div>
       </div>
 
@@ -278,7 +310,8 @@ export default function JobPage() {
             <strong>Status:</strong>
             <span className={`rounded-full px-3 py-1 text-sm font-semibold ${getStatusClasses(job.status)}`}>{job.status}</span>
           </div>
-          <p><strong>Scheduled:</strong> {job.date || "-"}{job.time ? ` at ${job.time}` : ""}</p>
+          <p><strong>Scheduled:</strong> {formatDateTime12Hour(job.date, job.time)}</p>
+          {job.completedAt && <p><strong>Completed:</strong> {new Date(job.completedAt).toLocaleString()}</p>}
           <p><strong>Estimated Value:</strong> {job.value}</p>
         </div>
       </div>

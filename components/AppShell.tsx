@@ -192,11 +192,25 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   }
 
   function closeNewWorkspaceModal() {
+    if (isCreatingWorkspace) return;
     setNewWorkspaceOpen(false);
     setWorkspaceOpen(false);
     setUserOpen(false);
     resetNewWorkspaceForm();
   }
+
+  useEffect(() => {
+    if (!newWorkspaceOpen) return;
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key !== "Escape" || isCreatingWorkspace) return;
+      setNewWorkspaceOpen(false);
+      setWorkspaceOpen(false);
+      setUserOpen(false);
+      resetNewWorkspaceForm();
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isCreatingWorkspace, newWorkspaceOpen]);
 
   async function createWorkspace() {
     if (!workspaceName.trim()) return;
@@ -408,11 +422,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               </div>
             )}
           </div>
+          <NotificationBell />
         </div>
 
         <div className="flex flex-shrink-0 items-center gap-2 sm:gap-4">
-          <NotificationBell />
-
           <button
             onClick={toggleDarkMode}
             className="flex h-12 w-12 items-center justify-center rounded-xl text-3xl hover:bg-gray-100 dark:hover:bg-gray-800"
@@ -511,8 +524,14 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       </div>
 
       {newWorkspaceOpen && (
-        <div className="fixed inset-0 z-[2200] flex items-center justify-center bg-black/70 p-4">
-          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl dark:bg-gray-900">
+        <div
+          className="fixed inset-0 z-[2200] flex items-center justify-center bg-black/70 p-4"
+          onMouseDown={closeNewWorkspaceModal}
+        >
+          <div
+            className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl dark:bg-gray-900"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
             <div className="mb-6 flex items-center justify-between">
               <h2 className="text-xl font-bold">New Workspace</h2>
 
@@ -577,7 +596,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             <h2 className="text-2xl font-bold">Welcome to Frontier</h2>
             <p className="mt-3 text-sm leading-6 text-gray-600 dark:text-gray-300">
               Start by creating a workspace for your business. After that you can add clients,
-              jobs, estimates, invoices, documents, routes, and portal access from one place.
+              add your business contact information in Settings - Profile, add your first client,
+              create your first job, and build your first estimate or invoice.
             </p>
             <label className="mt-5 flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
               <input
@@ -598,6 +618,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               >
                 Create Workspace
               </button>
+              <Link
+                href="/settings"
+                onClick={closeWelcome}
+                className="rounded-lg border border-blue-600 px-4 py-2 font-semibold text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-950/30"
+              >
+                Add Business Info
+              </Link>
               <button
                 type="button"
                 onClick={closeWelcome}

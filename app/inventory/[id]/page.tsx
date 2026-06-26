@@ -13,8 +13,8 @@ import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 
 type MaterialDetail = {
   inventory: { id: string; name: string; current_qty: number | null; target_qty: number | null };
-  catalog: { id: string; description: string | null; category: string | null; unit: string | null } | null;
-  vendorSkus: Array<{ id: string; vendor_name: string; sku: string; unit_cost_cents: number | null }>;
+  catalog: { id: string; description: string | null; category: string | null; unit: string | null; default_cost_cents: number | null } | null;
+  vendorSkus: Array<{ id: string; vendor_name: string; sku: string; unit_cost_cents: number | null; notes?: string | null }>;
   lots: Array<{ id: string; quantity: number; lot_reference: string | null; received_at: string | null }>;
   allocations: Array<{ id: string; quantity: number; mode: string; status: string; job_id: string | null }>;
   documents: Array<{ id: string; name: string; file_name: string | null; created_at: string }>;
@@ -27,6 +27,19 @@ export default function MaterialDetailPage() {
   const [localItems] = useStoredJsonState<InventoryRow[]>(storageKeys.inventory, []);
   const [detail, setDetail] = useState<MaterialDetail | null>(null);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+  const [editName, setEditName] = useState("");
+  const [editCurrentQty, setEditCurrentQty] = useState("");
+  const [editTargetQty, setEditTargetQty] = useState("");
+  const [editCategory, setEditCategory] = useState("");
+  const [editUnit, setEditUnit] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const [editDefaultCost, setEditDefaultCost] = useState("");
+  const [vendorName, setVendorName] = useState("");
+  const [vendorSku, setVendorSku] = useState("");
+  const [vendorUnitCost, setVendorUnitCost] = useState("");
+  const [vendorNotes, setVendorNotes] = useState("");
   const isDatabaseMode = Boolean(user && isSupabaseConfigured);
   const supabase = useMemo(() => isDatabaseMode ? createBrowserSupabaseClient() : null, [isDatabaseMode]);
 
@@ -46,7 +59,7 @@ export default function MaterialDetailPage() {
 
       const { data: catalog, error: catalogError } = await client
         .from("material_catalog_items")
-        .select("id, description, category, unit")
+        .select("id, description, category, unit, default_cost_cents")
         .eq("inventory_item_id", id)
         .eq("workspace_id", activeWorkspace.id)
         .maybeSingle();
@@ -55,7 +68,7 @@ export default function MaterialDetailPage() {
       const materialId = catalog?.id;
       const [vendorResult, lotResult, allocationResult, documentResult] = materialId
         ? await Promise.all([
-            client.from("material_vendor_skus").select("id, vendor_name, sku, unit_cost_cents").eq("workspace_id", activeWorkspace.id).eq("material_id", materialId),
+            client.from("material_vendor_skus").select("id, vendor_name, sku, unit_cost_cents, notes").eq("workspace_id", activeWorkspace.id).eq("material_id", materialId),
             client.from("inventory_lots").select("id, quantity, lot_reference, received_at").eq("workspace_id", activeWorkspace.id).eq("material_id", materialId),
             client.from("job_material_allocations").select("id, quantity, mode, status, job_id").eq("workspace_id", activeWorkspace.id).eq("material_id", materialId),
             client.from("documents").select("id, name, file_name, created_at").eq("workspace_id", activeWorkspace.id).eq("material_catalog_item_id", materialId),
@@ -82,22 +95,158 @@ export default function MaterialDetailPage() {
     return () => { cancelled = true; };
   }, [activeWorkspace.id, id, isDatabaseMode, supabase]);
 
-  const localItem = !isDatabaseMode ? localItems.find((item) => item.id === id) : null;
-  const inventory = detail?.inventory ?? (localItem ? { id: localItem.id ?? id, name: localItem.name, current_qty: localItem.currentQty, target_qty: localItem.targetQty } : null);
+  const inventory = useMemo(() => {
+    const localItem = !isDatabaseMode ? localItems.find((item) => item.id === id) : null;
+    return detail?.inventory ?? (localItem ? { id: localItem.id ?? id, name: localItem.name, current_qty: localItem.currentQty, target_qty: localItem.targetQty } : null);
+  }, [detail?.inventory, id, isDatabaseMode, localItems]);
+
+  useEffect(() => {
+    if (!inventory) return;
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      setEditName(inventory.name);
+      setEditCurrentQty(inventory.current_qty == null ? "" : String(inventory.current_qty));
+      setEditTargetQty(inventory.target_qty == null ? "" : String(inventory.target_qty));
+      setEditCategory(detail?.catalog?.category ?? "");
+      setEditUnit(detail?.catalog?.unit ?? "");
+      setEditDescription(detail?.catalog?.description ?? "");
+      setEditDefaultCost(detail?.catalog?.default_cost_cents == null ? "" : String(detail.catalog.default_cost_cents / 100));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [detail, inventory]);
+
+  function moneyToCents(value: string) {
+    if (!value.trim()) return null;
+    const amount = Number(value.replace(/[$,]/g, ""));
+    return Number.isFinite(amount) ? Math.round(amount * 100) : null;
+  }
+
+  async function postJson(path: string, body: Record<string, unknown>) {
+    const response = await fetch(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || "Unable to save material.");
+    return payload.data;
+  }
+
+  async function saveMaterialDetails() {
+    if (!inventory || !isUuid(activeWorkspace.id)) return;
+    setIsSaving(true);
+    setError("");
+    setNotice("");
+    try {
+      const savedInventory = await postJson("/api/data/mutate", {
+        entity: "inventory_item",
+        operation: "update",
+        payload: {
+          id: inventory.id,
+          workspace_id: activeWorkspace.id,
+          name: editName.trim(),
+          current_qty: editCurrentQty.trim() ? Number(editCurrentQty) : null,
+          target_qty: editTargetQty.trim() ? Number(editTargetQty) : null,
+        },
+      });
+
+      const catalogPayload = {
+        id: detail?.catalog?.id,
+        workspace_id: activeWorkspace.id,
+        inventory_item_id: inventory.id,
+        name: editName.trim(),
+        category: editCategory.trim() || null,
+        unit: editUnit.trim() || null,
+        description: editDescription.trim() || null,
+        default_cost_cents: moneyToCents(editDefaultCost),
+      };
+      const savedCatalog = detail?.catalog?.id
+        ? await postJson("/api/data/mutate", {
+            entity: "material_catalog_item",
+            operation: "update",
+            payload: catalogPayload,
+          })
+        : await postJson("/api/data/create", {
+            entity: "material_catalog_item",
+            payload: catalogPayload,
+          });
+
+      setDetail((current) => current ? { ...current, inventory: savedInventory, catalog: savedCatalog } : current);
+      setNotice("Material details saved.");
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Unable to save material.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function addVendorSku() {
+    if (!detail?.catalog?.id || !vendorName.trim() || !vendorSku.trim()) return;
+    setIsSaving(true);
+    setError("");
+    setNotice("");
+    try {
+      const savedSku = await postJson("/api/data/create", {
+        entity: "material_vendor_sku",
+        payload: {
+          workspace_id: activeWorkspace.id,
+          material_id: detail.catalog.id,
+          vendor_name: vendorName.trim(),
+          sku: vendorSku.trim(),
+          unit_cost_cents: moneyToCents(vendorUnitCost),
+          notes: vendorNotes.trim() || null,
+        },
+      });
+      setDetail((current) => current ? { ...current, vendorSkus: [...current.vendorSkus, savedSku] } : current);
+      setVendorName("");
+      setVendorSku("");
+      setVendorUnitCost("");
+      setVendorNotes("");
+      setNotice("Vendor SKU added.");
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Unable to add vendor SKU.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
 
   return (
     <div className="space-y-6 text-gray-950 dark:text-gray-100">
       <Link href="/inventory" className="text-sm font-semibold text-blue-600 hover:underline dark:text-blue-400">Back to Inventory</Link>
       {error && <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">{error}</div>}
+      {notice && <div className="rounded-lg border border-green-200 bg-green-50 p-4 text-green-700 dark:border-green-900 dark:bg-green-950/40 dark:text-green-300">{notice}</div>}
       {!inventory ? <div className="rounded-lg border border-gray-200 p-8 text-center dark:border-gray-800">Loading material...</div> : (
         <>
           <header><h1 className="text-3xl font-bold">{inventory.name}</h1><p className="mt-2 text-gray-500 dark:text-gray-400">Current {inventory.current_qty ?? "-"} - Target {inventory.target_qty ?? "-"}</p></header>
-          <section className="grid gap-4 sm:grid-cols-3">
-            <div className="rounded-lg border border-gray-200 p-4 dark:border-gray-800"><div className="text-sm text-gray-500">Category</div><div className="mt-2 font-semibold">{detail?.catalog?.category || "Not set"}</div></div>
-            <div className="rounded-lg border border-gray-200 p-4 dark:border-gray-800"><div className="text-sm text-gray-500">Unit</div><div className="mt-2 font-semibold">{detail?.catalog?.unit || "Not set"}</div></div>
-            <div className="rounded-lg border border-gray-200 p-4 dark:border-gray-800"><div className="text-sm text-gray-500">Description</div><div className="mt-2 font-semibold">{detail?.catalog?.description || "Not set"}</div></div>
+          <section className="rounded-lg border border-gray-200 p-4 dark:border-gray-800">
+            <h2 className="text-xl font-bold">Material Details</h2>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <label className="text-sm font-semibold">Name<input value={editName} onChange={(event) => setEditName(event.target.value)} className="mt-2 w-full rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800" /></label>
+              <label className="text-sm font-semibold">Category<input value={editCategory} onChange={(event) => setEditCategory(event.target.value)} className="mt-2 w-full rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800" /></label>
+              <label className="text-sm font-semibold">Unit<input value={editUnit} onChange={(event) => setEditUnit(event.target.value)} placeholder="bag, gallon, sq ft" className="mt-2 w-full rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800" /></label>
+              <label className="text-sm font-semibold">Default Unit Cost<input value={editDefaultCost} onChange={(event) => setEditDefaultCost(event.target.value)} placeholder="0.00" className="mt-2 w-full rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800" /></label>
+              <label className="text-sm font-semibold">Current Qty<input type="number" value={editCurrentQty} onChange={(event) => setEditCurrentQty(event.target.value)} className="mt-2 w-full rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800" /></label>
+              <label className="text-sm font-semibold">Target Qty<input type="number" value={editTargetQty} onChange={(event) => setEditTargetQty(event.target.value)} className="mt-2 w-full rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800" /></label>
+              <label className="text-sm font-semibold sm:col-span-2">Description<textarea rows={3} value={editDescription} onChange={(event) => setEditDescription(event.target.value)} className="mt-2 w-full rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800" /></label>
+            </div>
+            <button type="button" onClick={saveMaterialDetails} disabled={isSaving} className="mt-4 rounded-lg bg-blue-600 px-4 py-2 font-semibold text-white hover:bg-blue-700 disabled:opacity-50">Save Material Details</button>
           </section>
           <RelatedTable title="Vendor / SKU Variants" empty="No vendor SKUs." rows={detail?.vendorSkus.map((row) => `${row.vendor_name} - ${row.sku} - ${row.unit_cost_cents == null ? "No cost" : `$${(row.unit_cost_cents / 100).toFixed(2)}`}`) ?? []} />
+          {detail?.catalog?.id && (
+            <section className="rounded-lg border border-gray-200 p-4 dark:border-gray-800">
+              <h2 className="text-xl font-bold">Add Vendor / SKU Variant</h2>
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <input value={vendorName} onChange={(event) => setVendorName(event.target.value)} placeholder="Vendor" className="rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800" />
+                <input value={vendorSku} onChange={(event) => setVendorSku(event.target.value)} placeholder="SKU" className="rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800" />
+                <input value={vendorUnitCost} onChange={(event) => setVendorUnitCost(event.target.value)} placeholder="Unit cost" className="rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800" />
+                <input value={vendorNotes} onChange={(event) => setVendorNotes(event.target.value)} placeholder="Notes" className="rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800" />
+              </div>
+              <button type="button" onClick={addVendorSku} disabled={isSaving || !vendorName.trim() || !vendorSku.trim()} className="mt-4 rounded-lg bg-blue-600 px-4 py-2 font-semibold text-white hover:bg-blue-700 disabled:opacity-50">Add Vendor SKU</button>
+            </section>
+          )}
           <RelatedTable title="Inventory Lots" empty="No inventory lots." rows={detail?.lots.map((row) => `${row.quantity} - ${row.lot_reference || "No reference"} - ${row.received_at || "No received date"}`) ?? []} />
           <RelatedTable title="Assigned Jobs / Usage History" empty="No material allocations." rows={detail?.allocations.map((row) => `${row.quantity} - ${row.mode} - ${row.status} - Job ${row.job_id || "unassigned"}`) ?? []} />
           <RelatedTable title="Linked Documents" empty="No linked documents." rows={detail?.documents.map((row) => `${row.file_name || row.name} - ${new Date(row.created_at).toLocaleDateString()}`) ?? []} />

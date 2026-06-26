@@ -182,6 +182,30 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ data });
     }
 
+    if (body.entity === "material_catalog_item") {
+      return await mutateSimpleRow({
+        entity: "Material catalog item",
+        table: "material_catalog_items",
+        payload,
+        operation: body.operation,
+        values: withoutWorkspaceKeys(
+          sanitizeBusinessPayload("material_catalog_item", payload, workspaceId)
+        ),
+      });
+    }
+
+    if (body.entity === "material_vendor_sku") {
+      return await mutateSimpleRow({
+        entity: "Material vendor SKU",
+        table: "material_vendor_skus",
+        payload,
+        operation: body.operation,
+        values: withoutWorkspaceKeys(
+          sanitizeBusinessPayload("material_vendor_sku", payload, workspaceId)
+        ),
+      });
+    }
+
     if (body.entity === "expense") {
       return await mutateSimpleRow({
         entity: "Expense",
@@ -230,18 +254,48 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ data: true });
       }
 
-      const { error } = await serviceClient.rpc("upsert_job_with_materials", {
-        job_payload: jobPayload,
-        materials_payload: materials.map((material) =>
-          sanitizeBusinessPayload("job_material", material, workspaceId)
-        ),
-      });
-      if (error) throw error;
+      const jobId = String(job.id ?? "");
+      if (!jobId) return jsonError("Job id is required.", 400);
+
+      const { data: existingJob, error: existingJobError } = await serviceClient
+        .from("jobs")
+        .select("id")
+        .eq("id", jobId)
+        .eq("workspace_id", workspaceId)
+        .maybeSingle();
+      if (existingJobError) throw existingJobError;
+      if (!existingJob) return jsonError("Job not found in this workspace.", 404);
+
+      const { error: jobError } = await serviceClient
+        .from("jobs")
+        .update(withoutWorkspaceKeys(jobPayload))
+        .eq("id", jobId)
+        .eq("workspace_id", workspaceId);
+      if (jobError) throw jobError;
+
+      const { error: deleteMaterialsError } = await serviceClient
+        .from("job_materials")
+        .delete()
+        .eq("job_id", jobId)
+        .eq("workspace_id", workspaceId);
+      if (deleteMaterialsError) throw deleteMaterialsError;
+
+      if (materials.length > 0) {
+        const { error: insertMaterialsError } = await serviceClient
+          .from("job_materials")
+          .insert(
+            materials.map((material) => ({
+              ...sanitizeBusinessPayload("job_material", material, workspaceId),
+              job_id: jobId,
+            }))
+          );
+        if (insertMaterialsError) throw insertMaterialsError;
+      }
 
       const { data, error: loadError } = await serviceClient
         .from("jobs")
         .select("*, job_materials(*)")
-        .eq("id", String(job.id ?? ""))
+        .eq("id", jobId)
         .eq("workspace_id", workspaceId)
         .single();
       if (loadError) throw loadError;
@@ -298,18 +352,49 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ data: true });
       }
 
-      const { error } = await serviceClient.rpc("upsert_invoice_with_lines", {
-        invoice_payload: invoicePayload,
-        line_items_payload: lineItems.map((lineItem) =>
-          sanitizeBusinessPayload("invoice_line", lineItem, workspaceId)
-        ),
-      });
-      if (error) throw error;
+      const invoiceId = String(invoice.id ?? "");
+      if (!invoiceId) return jsonError("Invoice id is required.", 400);
+
+      const { data: existingInvoice, error: existingInvoiceError } = await serviceClient
+        .from("invoices")
+        .select("id")
+        .eq("id", invoiceId)
+        .eq("workspace_id", workspaceId)
+        .maybeSingle();
+      if (existingInvoiceError) throw existingInvoiceError;
+      if (!existingInvoice) return jsonError("Invoice not found in this workspace.", 404);
+
+      const { error: invoiceError } = await serviceClient
+        .from("invoices")
+        .update(withoutWorkspaceKeys(invoicePayload))
+        .eq("id", invoiceId)
+        .eq("workspace_id", workspaceId);
+      if (invoiceError) throw invoiceError;
+
+      const { error: deleteLinesError } = await serviceClient
+        .from("invoice_line_items")
+        .delete()
+        .eq("invoice_id", invoiceId)
+        .eq("workspace_id", workspaceId);
+      if (deleteLinesError) throw deleteLinesError;
+
+      if (lineItems.length > 0) {
+        const { error: insertLinesError } = await serviceClient
+          .from("invoice_line_items")
+          .insert(
+            lineItems.map((lineItem, index) => ({
+              ...sanitizeBusinessPayload("invoice_line", lineItem, workspaceId),
+              invoice_id: invoiceId,
+              sort_order: index,
+            }))
+          );
+        if (insertLinesError) throw insertLinesError;
+      }
 
       const { data, error: loadError } = await serviceClient
         .from("invoices")
         .select("*, invoice_line_items(*)")
-        .eq("id", String(invoice.id ?? ""))
+        .eq("id", invoiceId)
         .eq("workspace_id", workspaceId)
         .single();
       if (loadError) throw loadError;

@@ -20,6 +20,7 @@ export type Job = {
   value: string;
   date: string;
   time?: string;
+  completedAt?: string;
   materials: JobMaterial[];
   notes?: string;
 };

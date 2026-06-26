@@ -5,7 +5,7 @@ import Link from "next/link";
 
 import { useAuthSession } from "@/components/AuthSessionProvider";
 import { useWorkspace } from "@/components/WorkspaceContext";
-import { createJobAction, deleteJobAction } from "@/lib/actions/jobs";
+import { createJobAction, deleteJobAction, updateJobAction } from "@/lib/actions/jobs";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
 import type { Job, JobMaterial, JobStatus } from "@/lib/jobTypes";
 import type { ClientRow } from "@/lib/clientTypes";
@@ -20,6 +20,7 @@ import {
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { getWorkspaceDisplayName } from "@/lib/workspaceDisplay";
 import { consumeAiFormHydration, payloadNumber, payloadString } from "@/lib/ai/formHydration";
+import { formatDateTime12Hour } from "@/lib/formatDateTime";
 
 function getStatusColor(status: JobStatus) {
   switch (status) {
@@ -245,6 +246,49 @@ export default function JobsPage() {
     }
   }
 
+  async function markSelectedJobsComplete() {
+    const jobsToComplete = workspaceJobs.filter(
+      (job) => selectedJobs.includes(job.id) && job.status !== "Completed"
+    );
+    if (jobsToComplete.length === 0) return;
+    const confirmed = window.confirm(
+      `Mark ${jobsToComplete.length} selected job${jobsToComplete.length === 1 ? "" : "s"} complete?`
+    );
+    if (!confirmed) return;
+
+    const completedAt = new Date().toISOString();
+    try {
+      const results = await Promise.all(
+        jobsToComplete.map((job) =>
+          updateJobAction(jobsRepository, {
+            ...job,
+            status: "Completed",
+            completedAt: job.completedAt ?? completedAt,
+          })
+        )
+      );
+      const failed = results.find((result) => !result.ok);
+      if (failed) {
+        setDataError(failed.ok ? "Unable to complete selected jobs." : failed.error);
+        return;
+      }
+      const updatedJobs = results.filter((result) => result.ok).map((result) => result.data);
+      if (isDatabaseMode) {
+        setDatabaseJobItems((current) =>
+          current.map((job) => updatedJobs.find((updated) => updated.id === job.id) ?? job)
+        );
+      } else {
+        setLocalJobItems((current) =>
+          current.map((job) => updatedJobs.find((updated) => updated.id === job.id) ?? job)
+        );
+      }
+      setSelectedJobs([]);
+      setDataError("");
+    } catch (error) {
+      setDataError(error instanceof Error ? error.message : "Unable to complete selected jobs.");
+    }
+  }
+
   function addMaterial() {
     if (!materialName.trim()) return;
 
@@ -324,6 +368,15 @@ export default function JobsPage() {
             className="rounded-lg bg-red-600 px-4 py-2 text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
             Delete Job
+          </button>
+
+          <button
+            type="button"
+            onClick={markSelectedJobsComplete}
+            disabled={selectedJobs.length === 0}
+            className="rounded-lg bg-green-600 px-4 py-2 text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Mark Complete
           </button>
         </div>
       </div>
@@ -548,7 +601,7 @@ export default function JobsPage() {
                     </td>
 
                     <td className="p-4">
-                      {job.date || "-"}{job.time ? ` at ${job.time}` : ""}
+                      {formatDateTime12Hour(job.date, job.time)}
                     </td>
                     <td className="p-4 text-right font-medium">{job.value}</td>
                     <td className="p-4 text-right">

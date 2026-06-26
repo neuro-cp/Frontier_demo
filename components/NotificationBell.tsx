@@ -54,7 +54,11 @@ export default function NotificationBell() {
   return (
     <Link
       href="/notifications"
-      className="relative flex h-10 w-10 items-center justify-center rounded-full border border-gray-200 text-lg hover:bg-gray-100 dark:border-gray-700 dark:hover:bg-gray-800"
+      className={`relative flex h-10 w-10 items-center justify-center rounded-full border text-lg hover:bg-gray-100 dark:hover:bg-gray-800 ${
+        unreadCount > 0
+          ? "border-red-500 bg-red-600 text-white"
+          : "border-gray-200 dark:border-gray-700"
+      }`}
       aria-label="Notifications"
       title="Notifications"
     >

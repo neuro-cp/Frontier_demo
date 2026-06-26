@@ -119,6 +119,28 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ data });
     }
 
+    if (body.entity === "material_catalog_item") {
+      const catalogPayload = sanitizeBusinessPayload("material_catalog_item", payload, workspaceId);
+      const { data, error } = await serviceClient
+        .from("material_catalog_items")
+        .insert(catalogPayload)
+        .select("*")
+        .single();
+      if (error) throw error;
+      return NextResponse.json({ data });
+    }
+
+    if (body.entity === "material_vendor_sku") {
+      const skuPayload = sanitizeBusinessPayload("material_vendor_sku", payload, workspaceId);
+      const { data, error } = await serviceClient
+        .from("material_vendor_skus")
+        .insert(skuPayload)
+        .select("*")
+        .single();
+      if (error) throw error;
+      return NextResponse.json({ data });
+    }
+
     if (body.entity === "calendar_event") {
       const eventPayload = sanitizeBusinessPayload("calendar_event", payload, workspaceId);
       const { data, error } = await serviceClient

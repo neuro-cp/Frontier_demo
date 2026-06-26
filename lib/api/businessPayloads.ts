@@ -27,6 +27,27 @@ const INVENTORY_FIELDS = [
   "notes",
 ] as const;
 
+const MATERIAL_CATALOG_FIELDS = [
+  "id",
+  "workspace_id",
+  "inventory_item_id",
+  "name",
+  "description",
+  "category",
+  "unit",
+  "default_cost_cents",
+] as const;
+
+const MATERIAL_VENDOR_SKU_FIELDS = [
+  "id",
+  "workspace_id",
+  "material_id",
+  "vendor_name",
+  "sku",
+  "unit_cost_cents",
+  "notes",
+] as const;
+
 const EXPENSE_FIELDS = [
   "id",
   "workspace_id",
@@ -102,6 +123,7 @@ const JOB_FIELDS = [
   "estimated_value_cents",
   "scheduled_date",
   "scheduled_time",
+  "completed_at",
   "notes",
 ] as const;
 
@@ -217,6 +239,8 @@ export function sanitizeBusinessPayload(
 ) {
   if (entity === "client") return withWorkspace(pickAllowed(record, CLIENT_FIELDS), workspaceId);
   if (entity === "inventory_item") return withWorkspace(pickAllowed(record, INVENTORY_FIELDS), workspaceId);
+  if (entity === "material_catalog_item") return withWorkspace(pickAllowed(record, MATERIAL_CATALOG_FIELDS), workspaceId);
+  if (entity === "material_vendor_sku") return withWorkspace(pickAllowed(record, MATERIAL_VENDOR_SKU_FIELDS), workspaceId);
   if (entity === "expense") return withWorkspace(pickAllowed(record, EXPENSE_FIELDS), workspaceId);
   if (entity === "document") return withWorkspace(pickAllowed(record, DOCUMENT_FIELDS), workspaceId);
   if (entity === "calendar_event") return withWorkspace(pickAllowed(record, CALENDAR_FIELDS), workspaceId);
