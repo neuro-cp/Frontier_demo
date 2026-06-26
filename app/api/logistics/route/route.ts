@@ -9,6 +9,7 @@ import {
 } from "@/lib/logistics/routingProviders";
 import { checkUserAndWorkspaceDailyLimits } from "@/lib/rateLimit/dailyCounters";
 import { canUseLogistics } from "@/lib/plans/capabilities";
+import { featureDisabledMessage, featureFlags } from "@/lib/services/featureFlags";
 import {
   canManageWorkspaceData,
   jsonError,
@@ -76,6 +77,7 @@ export async function POST(request: NextRequest) {
   }
 
   if (!body.workspaceId) return jsonError("Workspace is required.", 400);
+  if (!featureFlags.routing()) return jsonError(featureDisabledMessage("Routing"), 503);
   if (!hasValidStops(body.stops)) {
     return jsonError("At least two route stops are required.", 400);
   }

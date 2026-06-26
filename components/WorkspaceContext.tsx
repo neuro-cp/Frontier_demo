@@ -23,6 +23,7 @@ export type Workspace = {
   id: string;
   name: string;
   type: string;
+  customType?: string;
   role?: WorkspaceRole;
 };
 
@@ -285,7 +286,12 @@ export function WorkspaceProvider({
     const response = await fetch("/api/workspaces", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(workspace),
+      body: JSON.stringify({
+        id: workspace.id,
+        name: workspace.name,
+        type: workspace.type,
+        customType: workspace.customType,
+      }),
     });
     const payload = (await response.json()) as {
       workspace?: Workspace;

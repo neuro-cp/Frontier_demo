@@ -18,3 +18,16 @@ export type PlanCapabilities = {
 };
 
 export type PlanCapability = keyof PlanCapabilities;
+
+export type PlanLimits = {
+  maxUsers: number;
+  maxClients: number;
+  maxJobs: number;
+  maxDocuments: number;
+  storageBytes: number;
+  ocrRequestsPerMonth: number;
+  speechMinutesPerMonth: number;
+  imageAnalysesPerMonth: number;
+  routeOptimizationsPerMonth: number;
+  aiReviewDraftsPerMonth: number;
+};

@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import {
+  displayBusinessTypeSuggestion,
+  normalizeBusinessTypeSuggestion,
+  validateBusinessTypeSuggestion,
+} from "@/lib/businessTypes";
 import { createServiceRoleClient } from "@/lib/platformAdmin/server";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 
@@ -7,6 +12,7 @@ type CreateWorkspaceRequest = {
   id?: string;
   name?: string;
   type?: string;
+  customType?: string;
 };
 
 function jsonError(message: string, status: number) {
@@ -33,10 +39,24 @@ export async function POST(request: NextRequest) {
 
   const workspaceId = body.id || crypto.randomUUID();
   const workspaceName = body.name?.trim();
-  const workspaceType = body.type?.trim() || "Other";
+  const selectedType = body.type?.trim() || "Other";
+  const customType = body.customType?.trim() ?? "";
+  let workspaceType = selectedType;
+  let pendingBusinessType:
+    | { normalizedName: string; displayName: string }
+    | null = null;
 
   if (!workspaceName) {
     return jsonError("Workspace name is required.", 400);
+  }
+
+  if (selectedType === "Other" && customType) {
+    const validationError = validateBusinessTypeSuggestion(customType);
+    if (validationError) return jsonError(validationError, 400);
+    const normalizedName = normalizeBusinessTypeSuggestion(customType);
+    const displayName = displayBusinessTypeSuggestion(customType);
+    workspaceType = displayName;
+    pendingBusinessType = { normalizedName, displayName };
   }
 
   const serviceClient = createServiceRoleClient();
@@ -81,6 +101,20 @@ export async function POST(request: NextRequest) {
   if (settingsError) {
     await serviceClient.from("workspaces").delete().eq("id", workspace.id);
     return jsonError(settingsError.message || "Unable to initialize workspace settings.", 500);
+  }
+
+  if (pendingBusinessType) {
+    await serviceClient
+      .from("business_type_suggestions")
+      .upsert(
+        {
+          normalized_name: pendingBusinessType.normalizedName,
+          display_name: pendingBusinessType.displayName,
+          status: "pending",
+          submitted_by: user.id,
+        },
+        { onConflict: "normalized_name", ignoreDuplicates: true }
+      );
   }
 
   return NextResponse.json({ workspace });

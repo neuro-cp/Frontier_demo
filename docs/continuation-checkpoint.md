@@ -30,6 +30,38 @@ Validation performed:
 
 - `npm.cmd run lint` passed.
 - `npm.cmd run build` passed.
+
+## Pre-QA Finalization Update
+
+Added in this pass:
+
+- Moderated business type suggestions:
+  - custom "Other" workspace types are normalized and stored as pending suggestions;
+  - platform admins can approve or reject suggestions;
+  - approved suggestions populate the workspace creation list for all users.
+- Free-plan launch posture:
+  - default signed-in plan is now `free`;
+  - workspace plan resolution checks `workspace_billing` first;
+  - costly features remain capability-gated.
+- Operational controls:
+  - config-backed kill switches exist for AI, OCR, speech, image analysis, and routing.
+- Abuse protection:
+  - server-side AI abuse guard blocks obvious destructive, credential-seeking, or prompt-injection requests;
+  - events are logged with severity, workspace, user, source, prompt excerpt, prompt hash, and timestamp;
+  - severe events restrict future AI use until manual review.
+- Signup/onboarding:
+  - signup requires acknowledgement;
+  - draft Terms, Privacy, and AI Usage pages exist;
+  - first-login welcome dialog points users toward workspace creation and can be dismissed permanently in local storage.
+- Manual QA preparation:
+  - manual QA checklist, bug template, polish template, future ideas template, marketing docs, pricing docs, and test-account workflow docs were added.
+
+Next recommended milestone:
+
+1. Apply migration `0032_business_type_moderation_abuse.sql`.
+2. Run manual QA from `docs/manual-qa-checklist.md`.
+3. Log bugs separately from polish and future ideas.
+4. Fix high-priority bugs before adding new product areas.
 - Authenticated app-route smoke passed for:
   - create/delete client
   - create/delete job with materials

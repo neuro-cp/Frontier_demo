@@ -1,12 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import {
+  aiRestrictionMessage,
+  checkAiInputForAbuse,
+  getActiveAiRestriction,
+  logAiAbuseEvent,
+} from "@/lib/ai/abuseGuard";
 import { interpretDocumentWithAI } from "@/lib/ai/providers/providerFactory";
 import { createReviewDraft } from "@/lib/db/aiReviewDrafts";
 import { getOcrProviderMode, runOcrExtraction } from "@/lib/ocr/provider";
+import { createServiceRoleClient } from "@/lib/platformAdmin/server";
 import { canUseOcr } from "@/lib/plans/capabilities";
-import { resolveWorkspacePlan } from "@/lib/plans/server";
+import { resolveWorkspacePlanForServiceClient } from "@/lib/plans/server";
 import { checkUserAndWorkspaceDailyLimits } from "@/lib/rateLimit/dailyCounters";
 import { RateLimitError } from "@/lib/rateLimit/policy";
+import { featureDisabledMessage, featureFlags } from "@/lib/services/featureFlags";
 import { planUpgradeError } from "@/lib/services/routeProtection";
 import { serviceLimits } from "@/lib/services/serviceLimits";
 import { DOCUMENT_STORAGE_BUCKET } from "@/lib/storage";
@@ -42,6 +50,7 @@ export async function POST(request: NextRequest) {
   if (!body.documentId || !body.workspaceId) {
     return jsonError("Document and workspace are required.", 400);
   }
+  if (!featureFlags.ocr()) return jsonError(featureDisabledMessage("OCR"), 503);
 
   const { data: membership, error: membershipError } = await supabase
     .from("workspace_members")
@@ -57,7 +66,9 @@ export async function POST(request: NextRequest) {
   if (membership.role !== "Owner" && membership.role !== "Manager") {
     return jsonError("Only Owners and Managers can run OCR.", 403);
   }
-  if (!canUseOcr(resolveWorkspacePlan())) return planUpgradeError();
+  const serviceClient = createServiceRoleClient();
+  const plan = await resolveWorkspacePlanForServiceClient(serviceClient, body.workspaceId);
+  if (!canUseOcr(plan)) return planUpgradeError();
   try {
     checkUserAndWorkspaceDailyLimits({
       service: "ocr",
@@ -233,6 +244,28 @@ export async function POST(request: NextRequest) {
     let reviewDraftId: string | null = null;
     let draftError: string | null = null;
     try {
+      if (!featureFlags.ai()) {
+        throw new Error("OCR completed, but AI review draft generation is temporarily disabled.");
+      }
+      const restriction = await getActiveAiRestriction(serviceClient, user.id);
+      if (restriction) {
+        throw new Error(aiRestrictionMessage);
+      }
+      const abuseCheck = checkAiInputForAbuse(extraction.text);
+      if (!abuseCheck.ok) {
+        await logAiAbuseEvent({
+          serviceClient,
+          workspaceId: body.workspaceId,
+          userId: user.id,
+          source: "ocr_extraction",
+          text: extraction.text,
+          reason: abuseCheck.reason,
+          severity: abuseCheck.severity,
+        });
+        throw new Error(
+          "OCR completed, but AI review draft creation was blocked for safety review."
+        );
+      }
       const interpretation = await interpretDocumentWithAI({
         workspaceId: body.workspaceId,
         sourceId: body.documentId,

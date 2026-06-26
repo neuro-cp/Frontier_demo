@@ -29,6 +29,8 @@ const localUserFallback = {
   email: "Sign in to save and sync workspaces",
 };
 
+const welcomeDismissedKey = "frontier-welcome-dismissed";
+
 function getWorkspaceInitials(name: string) {
   return name
     .split(" ")
@@ -64,6 +66,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     defaultBusinessTypes[0]
   );
   const [customWorkspaceType, setCustomWorkspaceType] = useState("");
+  const [businessTypes, setBusinessTypes] = useState<string[]>([
+    ...defaultBusinessTypes,
+  ]);
+  const [showWelcome, setShowWelcome] = useState(false);
+  const [neverShowWelcome, setNeverShowWelcome] = useState(false);
 
   const {
     workspaces,
@@ -109,6 +116,35 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       }
     });
 
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/business-types")
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data: { businessTypes?: string[] } | null) => {
+        if (!cancelled && Array.isArray(data?.businessTypes)) {
+          setBusinessTypes(data.businessTypes);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setBusinessTypes([...defaultBusinessTypes]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    if (window.localStorage.getItem(welcomeDismissedKey) === "true") return;
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (!cancelled) setShowWelcome(true);
+    });
     return () => {
       cancelled = true;
     };
@@ -178,7 +214,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     const newWorkspace = {
       id: crypto.randomUUID(),
       name: workspaceName.trim(),
-      type: resolvedType,
+      type: workspaceType,
+      customType: workspaceType === "Other" ? resolvedType : undefined,
     };
 
     let created = false;
@@ -239,6 +276,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     const supabase = createBrowserSupabaseClient();
     await supabase.auth.signOut();
     window.location.href = "/";
+  }
+
+  function closeWelcome() {
+    if (neverShowWelcome) {
+      window.localStorage.setItem(welcomeDismissedKey, "true");
+    }
+    setShowWelcome(false);
   }
 
   async function exitAdminView() {
@@ -494,7 +538,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 onChange={(e) => setWorkspaceType(e.target.value)}
                 className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800"
               >
-                {defaultBusinessTypes.map((type) => (
+                {businessTypes.map((type) => (
                   <option key={type}>{type}</option>
                 ))}
               </select>
@@ -521,6 +565,45 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 className="w-full rounded-lg bg-blue-600 py-3 text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {isCreatingWorkspace ? "Creating..." : "Create Workspace"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showWelcome && (
+        <div className="fixed inset-0 z-[2300] flex items-center justify-center bg-black/70 p-4">
+          <div className="w-full max-w-lg rounded-xl bg-white p-6 shadow-xl dark:bg-gray-900">
+            <h2 className="text-2xl font-bold">Welcome to Frontier</h2>
+            <p className="mt-3 text-sm leading-6 text-gray-600 dark:text-gray-300">
+              Start by creating a workspace for your business. After that you can add clients,
+              jobs, estimates, invoices, documents, routes, and portal access from one place.
+            </p>
+            <label className="mt-5 flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
+              <input
+                type="checkbox"
+                checked={neverShowWelcome}
+                onChange={(event) => setNeverShowWelcome(event.target.checked)}
+              />
+              Do not show this message again
+            </label>
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  closeWelcome();
+                  setNewWorkspaceOpen(true);
+                }}
+                className="rounded-lg bg-blue-600 px-4 py-2 font-semibold text-white hover:bg-blue-700"
+              >
+                Create Workspace
+              </button>
+              <button
+                type="button"
+                onClick={closeWelcome}
+                className="rounded-lg border border-gray-300 px-4 py-2 font-semibold dark:border-gray-700"
+              >
+                Later
               </button>
             </div>
           </div>

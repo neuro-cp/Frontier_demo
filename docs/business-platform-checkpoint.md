@@ -2,6 +2,16 @@
 
 Current checkpoint after the Unified AI Ingestion sprint. Latest prior pushed commit before this sprint was `a69cea3`; current database migration work adds `0031_document_image_lifecycle.sql`.
 
+## Pre-QA Launch Guardrails
+
+- Business type suggestions now support pending platform-admin moderation.
+- Free workspaces default to no costly cloud/AI/routing capabilities.
+- Paid plan resolution is billing-backed when `workspace_billing` is active.
+- AI, OCR, speech, image analysis, and routing have environment-backed kill switches.
+- Obvious malicious AI inputs are blocked and logged for admin review.
+- Signup acknowledgement and draft legal/policy pages are in place for review.
+- Manual QA, bug, polish, future ideas, marketing, and pricing documents are ready for the first hands-on QA cycle.
+
 ## Completed Platform Areas
 
 - Supabase auth, workspaces, RLS, platform admin, audit logs, and server-side action routes are established.

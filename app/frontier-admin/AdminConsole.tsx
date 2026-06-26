@@ -89,6 +89,18 @@ type AdminAuditLog = {
   created_at: string;
 };
 
+type BusinessTypeSuggestion = {
+  id: string;
+  normalized_name: string;
+  display_name: string;
+  status: "pending" | "approved" | "rejected";
+  submitted_by: string | null;
+  submitted_at: string;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  rejection_reason: string | null;
+};
+
 function formatDate(value: string | null) {
   if (!value) return "-";
   return new Date(value).toLocaleString();
@@ -129,9 +141,13 @@ export default function AdminConsole({ summary }: { summary: PlatformAdminSummar
   const [workspaceDetail, setWorkspaceDetail] = useState<WorkspaceDetail | null>(null);
   const [message, setMessage] = useState("");
   const [auditLogs, setAuditLogs] = useState<AdminAuditLog[]>([]);
+  const [businessTypeSuggestions, setBusinessTypeSuggestions] = useState<
+    BusinessTypeSuggestion[]
+  >([]);
   const [isSearching, setIsSearching] = useState(false);
   const [isLoadingDetail, setIsLoadingDetail] = useState(false);
   const [isLoadingAudit, setIsLoadingAudit] = useState(false);
+  const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false);
 
   const counts = [
     { label: "Auth Users", value: summary.auth_user_count },
@@ -254,6 +270,44 @@ export default function AdminConsole({ summary }: { summary: PlatformAdminSummar
       setMessage(error instanceof Error ? error.message : "Unable to load audit logs.");
     } finally {
       setIsLoadingAudit(false);
+    }
+  }
+
+  async function loadBusinessTypeSuggestions() {
+    setIsLoadingSuggestions(true);
+    setMessage("");
+    try {
+      const data = await readJson<{ suggestions: BusinessTypeSuggestion[] }>(
+        await fetch("/api/frontier-admin/business-types")
+      );
+      setBusinessTypeSuggestions(data.suggestions);
+    } catch (error) {
+      setMessage(
+        error instanceof Error ? error.message : "Unable to load business types."
+      );
+    } finally {
+      setIsLoadingSuggestions(false);
+    }
+  }
+
+  async function reviewBusinessTypeSuggestion(
+    id: string,
+    action: "approve" | "reject"
+  ) {
+    setMessage("");
+    try {
+      await readJson<{ suggestion: BusinessTypeSuggestion }>(
+        await fetch("/api/frontier-admin/business-types", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id, action }),
+        })
+      );
+      await loadBusinessTypeSuggestions();
+    } catch (error) {
+      setMessage(
+        error instanceof Error ? error.message : "Unable to review suggestion."
+      );
     }
   }
 
@@ -457,6 +511,76 @@ export default function AdminConsole({ summary }: { summary: PlatformAdminSummar
           ])}
           headers={["Action", "Admin User", "Target User", "Target Workspace", "Metadata", "Created"]}
         />
+      </section>
+
+      <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-gray-900 sm:p-6">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-xl font-bold">Business Type Moderation</h2>
+            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+              Approved suggestions appear in workspace creation for all users.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={loadBusinessTypeSuggestions}
+            disabled={isLoadingSuggestions}
+            className="rounded-lg bg-gray-900 px-4 py-2 font-semibold text-white disabled:cursor-not-allowed disabled:bg-gray-400 dark:bg-gray-100 dark:text-gray-950"
+          >
+            {isLoadingSuggestions ? "Loading..." : "Load Suggestions"}
+          </button>
+        </div>
+        <div className="mt-4 overflow-x-auto">
+          <table className="w-full min-w-[760px] text-sm">
+            <thead className="text-left text-gray-500 dark:text-gray-400">
+              <tr>
+                <th className="p-3">Suggestion</th>
+                <th className="p-3">Status</th>
+                <th className="p-3">Submitted</th>
+                <th className="p-3">Reviewed</th>
+                <th className="p-3 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {businessTypeSuggestions.map((suggestion) => (
+                <tr key={suggestion.id} className="border-t border-gray-200 dark:border-gray-800">
+                  <td className="p-3">
+                    <div className="font-semibold">{suggestion.display_name}</div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400">
+                      {suggestion.normalized_name}
+                    </div>
+                  </td>
+                  <td className="p-3">{suggestion.status}</td>
+                  <td className="p-3">{formatDate(suggestion.submitted_at)}</td>
+                  <td className="p-3">{formatDate(suggestion.reviewed_at)}</td>
+                  <td className="space-x-2 p-3 text-right">
+                    <button
+                      type="button"
+                      disabled={suggestion.status === "approved"}
+                      onClick={() => reviewBusinessTypeSuggestion(suggestion.id, "approve")}
+                      className="rounded-lg bg-green-600 px-3 py-2 font-semibold text-white disabled:cursor-not-allowed disabled:bg-gray-500"
+                    >
+                      Approve
+                    </button>
+                    <button
+                      type="button"
+                      disabled={suggestion.status === "rejected"}
+                      onClick={() => reviewBusinessTypeSuggestion(suggestion.id, "reject")}
+                      className="rounded-lg bg-red-600 px-3 py-2 font-semibold text-white disabled:cursor-not-allowed disabled:bg-gray-500"
+                    >
+                      Reject
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {businessTypeSuggestions.length === 0 && (
+          <div className="mt-4">
+            <EmptyState message="No business type suggestions loaded yet." />
+          </div>
+        )}
       </section>
 
       <section className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">

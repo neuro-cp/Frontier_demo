@@ -1,10 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import {
+  aiRestrictionMessage,
+  checkAiInputForAbuse,
+  getActiveAiRestriction,
+  logAiAbuseEvent,
+} from "@/lib/ai/abuseGuard";
 import { validateSuggestedAction } from "@/lib/ai/validators";
 import { createReviewDraft as makeReviewDraft } from "@/lib/ai/reviewTypes";
 import type { SuggestedAction } from "@/lib/ai/types";
 import { createReviewDraft } from "@/lib/db/aiReviewDrafts";
 import { isUuid } from "@/lib/db/ids";
+import { createServiceRoleClient } from "@/lib/platformAdmin/server";
+import { featureDisabledMessage, featureFlags } from "@/lib/services/featureFlags";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 
 type VoiceDraftRequest = {
@@ -37,6 +45,7 @@ export async function POST(request: NextRequest) {
   if (!body.workspaceId || !isUuid(body.workspaceId)) {
     return jsonError("Workspace is required.", 400);
   }
+  if (!featureFlags.ai()) return jsonError(featureDisabledMessage("AI draft generation"), 503);
   if (!body.action) return jsonError("Action draft is required.", 400);
 
   const { data: membership, error: membershipError } = await supabase
@@ -52,6 +61,28 @@ export async function POST(request: NextRequest) {
   }
   if (membership.role !== "Owner" && membership.role !== "Manager") {
     return jsonError("Only Owners and Managers can create voice drafts.", 403);
+  }
+
+  const serviceClient = createServiceRoleClient();
+  const restriction = await getActiveAiRestriction(serviceClient, user.id);
+  if (restriction) return jsonError(aiRestrictionMessage, 403);
+
+  const rawInput = body.rawInput?.trim() ?? "";
+  const abuseCheck = checkAiInputForAbuse(rawInput);
+  if (!abuseCheck.ok) {
+    await logAiAbuseEvent({
+      serviceClient,
+      workspaceId: body.workspaceId,
+      userId: user.id,
+      source: "voice_draft",
+      text: rawInput,
+      reason: abuseCheck.reason,
+      severity: abuseCheck.severity,
+    });
+    return jsonError(
+      "This voice draft was blocked for safety review. You can request reinstatement from account support.",
+      403
+    );
   }
 
   const validation = validateSuggestedAction(body.action);

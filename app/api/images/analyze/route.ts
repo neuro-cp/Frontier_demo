@@ -1,10 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import {
+  aiRestrictionMessage,
+  checkAiInputForAbuse,
+  getActiveAiRestriction,
+  logAiAbuseEvent,
+} from "@/lib/ai/abuseGuard";
 import { interpretImageWithAI } from "@/lib/ai/providers/providerFactory";
 import { createReviewDraft } from "@/lib/db/aiReviewDrafts";
 import { canUseAiDrafts } from "@/lib/plans/capabilities";
 import { checkUserAndWorkspaceDailyLimits } from "@/lib/rateLimit/dailyCounters";
 import { RateLimitError } from "@/lib/rateLimit/policy";
+import { featureDisabledMessage, featureFlags } from "@/lib/services/featureFlags";
 import {
   canManageWorkspaceData,
   jsonError,
@@ -75,9 +82,17 @@ export async function POST(request: NextRequest) {
   if (typeof workspaceId !== "string") {
     return jsonError("Workspace is required.", 400);
   }
+  if (!featureFlags.imageAnalysis()) {
+    return jsonError(featureDisabledMessage("Image analysis"), 503);
+  }
+  if (!featureFlags.ai()) {
+    return jsonError(featureDisabledMessage("AI draft generation"), 503);
+  }
 
   const access = await requireWorkspaceAccess(workspaceId);
   if (!access.ok) return access.response;
+  const restriction = await getActiveAiRestriction(access.serviceClient, access.userId);
+  if (restriction) return jsonError(aiRestrictionMessage, 403);
   if (!canManageWorkspaceData(access.role)) return managerRequiredError("analyze images");
   if (!canUseAiDrafts(access.plan)) return planUpgradeError();
 
@@ -107,6 +122,25 @@ export async function POST(request: NextRequest) {
   let fallbackImage:
     | { bytes: ArrayBuffer; mimeType: string; label: string }
     | null = null;
+
+  const labelAbuseCheck = checkAiInputForAbuse(
+    typeof sourceLabel === "string" ? sourceLabel : ""
+  );
+  if (!labelAbuseCheck.ok) {
+    await logAiAbuseEvent({
+      serviceClient: access.serviceClient,
+      workspaceId,
+      userId: access.userId,
+      source: "image_analysis",
+      text: String(sourceLabel ?? ""),
+      reason: labelAbuseCheck.reason,
+      severity: labelAbuseCheck.severity,
+    });
+    return jsonError(
+      "This image analysis request was blocked for safety review. You can request reinstatement from account support.",
+      403
+    );
+  }
 
   if (file instanceof File) {
     let primaryImage: Awaited<ReturnType<typeof readImageFile>>;

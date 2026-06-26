@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { aiRestrictionMessage, getActiveAiRestriction } from "@/lib/ai/abuseGuard";
 import { interpretImageWithAI } from "@/lib/ai/providers/providerFactory";
 import { createReviewDraft, getReviewDraftById, getReviewDrafts } from "@/lib/db/aiReviewDrafts";
 import { isUuid } from "@/lib/db/ids";
 import { canUseAiDrafts } from "@/lib/plans/capabilities";
 import { checkUserAndWorkspaceDailyLimits } from "@/lib/rateLimit/dailyCounters";
 import { RateLimitError } from "@/lib/rateLimit/policy";
+import { featureDisabledMessage, featureFlags } from "@/lib/services/featureFlags";
 import {
   canManageWorkspaceData,
   jsonError,
@@ -79,9 +81,17 @@ export async function POST(request: NextRequest) {
   if (!workspaceId || !draftId || !isUuid(workspaceId) || !isUuid(draftId)) {
     return jsonError("Workspace and review draft are required.", 400);
   }
+  if (!featureFlags.imageAnalysis()) {
+    return jsonError(featureDisabledMessage("Image analysis"), 503);
+  }
+  if (!featureFlags.ai()) {
+    return jsonError(featureDisabledMessage("AI draft generation"), 503);
+  }
 
   const access = await requireWorkspaceAccess(workspaceId);
   if (!access.ok) return access.response;
+  const restriction = await getActiveAiRestriction(access.serviceClient, access.userId);
+  if (restriction) return jsonError(aiRestrictionMessage, 403);
   if (!canManageWorkspaceData(access.role)) return managerRequiredError("run enhanced image analysis");
   if (!canUseAiDrafts(access.plan)) return planUpgradeError();
 

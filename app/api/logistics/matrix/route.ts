@@ -4,6 +4,7 @@ import { getOpenRouteServiceMatrix } from "@/lib/logistics/openRouteService";
 import type { LogisticsCoordinate } from "@/lib/logistics/providers";
 import { checkUserAndWorkspaceDailyLimits } from "@/lib/rateLimit/dailyCounters";
 import { canUseExternalRouting } from "@/lib/plans/capabilities";
+import { featureDisabledMessage, featureFlags } from "@/lib/services/featureFlags";
 import {
   canManageWorkspaceData,
   jsonError,
@@ -39,6 +40,7 @@ export async function POST(request: NextRequest) {
   }
 
   if (!body.workspaceId) return jsonError("Workspace is required.", 400);
+  if (!featureFlags.routing()) return jsonError(featureDisabledMessage("Routing"), 503);
   if (!hasValidLocations(body.locations)) {
     return jsonError("At least two route locations are required.", 400);
   }

@@ -3,7 +3,7 @@ import "server-only";
 import { NextResponse } from "next/server";
 
 import { createServiceRoleClient } from "@/lib/platformAdmin/server";
-import { resolveWorkspacePlan } from "@/lib/plans/server";
+import { resolveWorkspacePlanForServiceClient } from "@/lib/plans/server";
 import { RateLimitError } from "@/lib/rateLimit/policy";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 
@@ -71,6 +71,6 @@ export async function requireWorkspaceAccess(workspaceId?: string) {
     userId: user.id,
     workspaceId,
     role: data.role as string | null,
-    plan: resolveWorkspacePlan(),
+    plan: await resolveWorkspacePlanForServiceClient(serviceClient, workspaceId),
   };
 }

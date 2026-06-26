@@ -1,12 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import {
+  aiRestrictionMessage,
+  checkAiInputForAbuse,
+  getActiveAiRestriction,
+  logAiAbuseEvent,
+} from "@/lib/ai/abuseGuard";
 import { interpretDocumentWithAI } from "@/lib/ai/providers/providerFactory";
 import { createReviewDraft } from "@/lib/db/aiReviewDrafts";
 import { isUuid } from "@/lib/db/ids";
+import { createServiceRoleClient } from "@/lib/platformAdmin/server";
 import { canUseAiDrafts } from "@/lib/plans/capabilities";
-import { resolveWorkspacePlan } from "@/lib/plans/server";
+import { resolveWorkspacePlanForServiceClient } from "@/lib/plans/server";
 import { checkUserAndWorkspaceDailyLimits } from "@/lib/rateLimit/dailyCounters";
 import { RateLimitError } from "@/lib/rateLimit/policy";
+import { featureDisabledMessage, featureFlags } from "@/lib/services/featureFlags";
 import { planUpgradeError } from "@/lib/services/routeProtection";
 import { serviceLimits } from "@/lib/services/serviceLimits";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
@@ -44,6 +52,7 @@ export async function POST(request: NextRequest) {
   if (!workspaceId || !documentId || !isUuid(workspaceId) || !isUuid(documentId)) {
     return jsonError("Workspace and document are required.", 400);
   }
+  if (!featureFlags.ai()) return jsonError(featureDisabledMessage("AI draft generation"), 503);
 
   const { data: membership, error: membershipError } = await supabase
     .from("workspace_members")
@@ -59,7 +68,11 @@ export async function POST(request: NextRequest) {
   if (membership.role !== "Owner" && membership.role !== "Manager") {
     return jsonError("Only Owners and Managers can generate document drafts.", 403);
   }
-  if (!canUseAiDrafts(resolveWorkspacePlan())) return planUpgradeError();
+  const serviceClient = createServiceRoleClient();
+  const restriction = await getActiveAiRestriction(serviceClient, user.id);
+  if (restriction) return jsonError(aiRestrictionMessage, 403);
+  const plan = await resolveWorkspacePlanForServiceClient(serviceClient, workspaceId);
+  if (!canUseAiDrafts(plan)) return planUpgradeError();
   try {
     checkUserAndWorkspaceDailyLimits({
       service: "ai-draft",
@@ -89,6 +102,23 @@ export async function POST(request: NextRequest) {
     typeof document.extracted_text === "string" ? document.extracted_text.trim() : "";
   if (!extractedText) {
     return jsonError("Document does not have extracted text to interpret.", 400);
+  }
+
+  const abuseCheck = checkAiInputForAbuse(extractedText);
+  if (!abuseCheck.ok) {
+    await logAiAbuseEvent({
+      serviceClient,
+      workspaceId,
+      userId: user.id,
+      source: "document_interpretation",
+      text: extractedText,
+      reason: abuseCheck.reason,
+      severity: abuseCheck.severity,
+    });
+    return jsonError(
+      "This document was blocked for safety review. You can request reinstatement from account support.",
+      403
+    );
   }
 
   try {

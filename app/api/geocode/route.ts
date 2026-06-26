@@ -5,6 +5,7 @@ import { geocodeAddress } from "@/lib/geocoding/provider";
 import { checkUserAndWorkspaceDailyLimits } from "@/lib/rateLimit/dailyCounters";
 import { RateLimitError } from "@/lib/rateLimit/policy";
 import { canUseExternalRouting } from "@/lib/plans/capabilities";
+import { featureDisabledMessage, featureFlags } from "@/lib/services/featureFlags";
 import {
   canManageWorkspaceData,
   jsonError,
@@ -33,6 +34,8 @@ export async function POST(request: NextRequest) {
   } catch {
     return jsonError("Invalid geocode request.", 400);
   }
+
+  if (!featureFlags.routing()) return jsonError(featureDisabledMessage("Routing"), 503);
 
   const access = await requireWorkspaceAccess(body.workspaceId);
   if (!access.ok) return access.response;

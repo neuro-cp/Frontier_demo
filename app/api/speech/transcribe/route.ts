@@ -1,12 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import {
+  aiRestrictionMessage,
+  checkAiInputForAbuse,
+  getActiveAiRestriction,
+  logAiAbuseEvent,
+} from "@/lib/ai/abuseGuard";
 import { interpretTranscriptWithAI } from "@/lib/ai/providers/providerFactory";
 import { createReviewDraft } from "@/lib/db/aiReviewDrafts";
 import { isUuid } from "@/lib/db/ids";
+import { createServiceRoleClient } from "@/lib/platformAdmin/server";
 import { canUseSpeech } from "@/lib/plans/capabilities";
-import { resolveWorkspacePlan } from "@/lib/plans/server";
+import { resolveWorkspacePlanForServiceClient } from "@/lib/plans/server";
 import { checkUserAndWorkspaceDailyLimits } from "@/lib/rateLimit/dailyCounters";
 import { RateLimitError } from "@/lib/rateLimit/policy";
+import { featureDisabledMessage, featureFlags } from "@/lib/services/featureFlags";
 import { planUpgradeError } from "@/lib/services/routeProtection";
 import { serviceLimits } from "@/lib/services/serviceLimits";
 import { runSpeechWorker } from "@/lib/speech/workerClient";
@@ -56,6 +64,7 @@ export async function POST(request: NextRequest) {
   if (!(file instanceof File) || file.size === 0) {
     return jsonError("An audio file is required.", 400);
   }
+  if (!featureFlags.speech()) return jsonError(featureDisabledMessage("Speech transcription"), 503);
 
   const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
   if (!AUDIO_EXTENSIONS.has(extension)) {
@@ -76,7 +85,9 @@ export async function POST(request: NextRequest) {
   if (membership.role !== "Owner" && membership.role !== "Manager") {
     return jsonError("Only Owners and Managers can transcribe audio.", 403);
   }
-  if (!canUseSpeech(resolveWorkspacePlan())) return planUpgradeError();
+  const serviceClient = createServiceRoleClient();
+  const plan = await resolveWorkspacePlanForServiceClient(serviceClient, workspaceId);
+  if (!canUseSpeech(plan)) return planUpgradeError();
   try {
     checkUserAndWorkspaceDailyLimits({
       service: "speech",
@@ -187,6 +198,28 @@ export async function POST(request: NextRequest) {
 
   if (shouldCreateReviewDraft) {
     try {
+      if (!featureFlags.ai()) {
+        throw new Error("Speech transcription completed, but AI review draft generation is temporarily disabled.");
+      }
+      const restriction = await getActiveAiRestriction(serviceClient, user.id);
+      if (restriction) {
+        throw new Error(aiRestrictionMessage);
+      }
+      const abuseCheck = checkAiInputForAbuse(result.data.text);
+      if (!abuseCheck.ok) {
+        await logAiAbuseEvent({
+          serviceClient,
+          workspaceId,
+          userId: user.id,
+          source: "speech_transcription",
+          text: result.data.text,
+          reason: abuseCheck.reason,
+          severity: abuseCheck.severity,
+        });
+        throw new Error(
+          "This transcript was blocked for safety review. You can request reinstatement from account support."
+        );
+      }
       const interpretation = await interpretTranscriptWithAI({
         workspaceId,
         sourceId: transcriptRecord.id,

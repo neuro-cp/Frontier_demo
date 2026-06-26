@@ -40,6 +40,10 @@ Use this before beta and again before public launch.
 
 - Enforce server-only provider calls.
 - Enforce quota and entitlement checks.
+- Confirm AI/OCR/speech/image kill switches work in production.
+- Confirm `ai_abuse_events` records prompt hash, limited excerpt, severity, source, user, workspace, and timestamp.
+- Confirm restricted AI abuse events block future AI draft creation until manual review.
+- Add platform admin restore/suspend/ban controls before public beta.
 - Confirm worker shared secrets are not exposed to the browser.
 - Add timeout and retry limits where missing.
 - Confirm no AI draft executes automatically.
