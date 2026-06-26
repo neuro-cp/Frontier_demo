@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { useWorkspace } from "@/components/WorkspaceContext";
+import { isUuid } from "@/lib/db/ids";
 
 type ActivityPayload = {
   customerActivity?: Array<{ id: string; sender_type: string; body: string; created_at: string }>;
@@ -29,6 +30,18 @@ export default function OperationsActivityPanel() {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
+    if (!isUuid(activeWorkspace.id)) {
+      let cancelled = false;
+      queueMicrotask(() => {
+        if (!cancelled) {
+          setPayload({});
+          setIsLoading(false);
+        }
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
     let cancelled = false;
     const query = new URLSearchParams({ workspaceId: activeWorkspace.id });
 

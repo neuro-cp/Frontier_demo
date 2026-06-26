@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
 import { useWorkspace } from "@/components/WorkspaceContext";
+import { isUuid } from "@/lib/db/ids";
 
 type Notification = {
   id: string;
@@ -37,6 +38,12 @@ export default function NotificationsPage() {
   const [isLoading, setIsLoading] = useState(true);
 
   const loadNotifications = useCallback(() => {
+    if (!isUuid(activeWorkspace.id)) {
+      setNotifications([]);
+      setError("");
+      setIsLoading(false);
+      return;
+    }
     setIsLoading(true);
     const query = new URLSearchParams({ workspaceId: activeWorkspace.id });
     fetch(`/api/notifications?${query.toString()}`)
@@ -55,6 +62,19 @@ export default function NotificationsPage() {
   }, [activeWorkspace.id]);
 
   useEffect(() => {
+    if (!isUuid(activeWorkspace.id)) {
+      let cancelled = false;
+      queueMicrotask(() => {
+        if (!cancelled) {
+          setNotifications([]);
+          setError("");
+          setIsLoading(false);
+        }
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
     let cancelled = false;
     const query = new URLSearchParams({ workspaceId: activeWorkspace.id });
     fetch(`/api/notifications?${query.toString()}`)
@@ -81,6 +101,7 @@ export default function NotificationsPage() {
   }, [activeWorkspace.id]);
 
   async function updateNotification(action: "read" | "archive" | "all_read", notificationId?: string) {
+    if (!isUuid(activeWorkspace.id)) return;
     const response = await fetch("/api/notifications", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },

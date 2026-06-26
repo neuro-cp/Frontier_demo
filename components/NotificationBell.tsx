@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 
 import { useAuthSession } from "@/components/AuthSessionProvider";
 import { useWorkspace } from "@/components/WorkspaceContext";
+import { isUuid } from "@/lib/db/ids";
 
 export default function NotificationBell() {
   const { user } = useAuthSession();
@@ -14,6 +15,18 @@ export default function NotificationBell() {
 
   useEffect(() => {
     if (!user) return;
+    if (!isUuid(activeWorkspace.id)) {
+      let cancelled = false;
+      queueMicrotask(() => {
+        if (!cancelled) {
+          setCanViewNotifications(false);
+          setUnreadCount(0);
+        }
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
     let cancelled = false;
     const query = new URLSearchParams({ workspaceId: activeWorkspace.id });
 

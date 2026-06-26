@@ -13,6 +13,7 @@ import { useAuthSession } from "@/components/AuthSessionProvider";
 import {
   storageKeys,
   readStoredString,
+  removeStoredValue,
   writeStoredString,
   useStoredJsonState,
   useStoredStringState,
@@ -320,14 +321,15 @@ export function WorkspaceProvider({
 
   const deleteWorkspace = useCallback(async (workspaceId: string) => {
     if (!isDatabaseMode || !user) {
+      let nextActiveWorkspace = defaultWorkspaces[0];
       setWorkspaces((current) => {
         const nextWorkspaces = current.filter(
           (workspace) => workspace.id !== workspaceId
         );
-        const nextActiveWorkspace = nextWorkspaces[0] ?? defaultWorkspaces[0];
-        setActiveWorkspaceId(nextActiveWorkspace.id);
+        nextActiveWorkspace = nextWorkspaces[0] ?? defaultWorkspaces[0];
         return nextWorkspaces.length > 0 ? nextWorkspaces : defaultWorkspaces;
       });
+      setActiveWorkspaceId(nextActiveWorkspace.id);
       return true;
     }
 
@@ -341,17 +343,20 @@ export function WorkspaceProvider({
       return false;
     }
 
+    let nextActiveWorkspaceId: string | null = null;
     setDatabaseWorkspaces((current) => {
       const nextWorkspaces = current.filter(
         (workspace) => workspace.id !== workspaceId
       );
-      const nextActiveWorkspace = nextWorkspaces[0] ?? null;
-      setDatabaseActiveWorkspaceId(nextActiveWorkspace?.id ?? null);
-      if (nextActiveWorkspace) {
-        writeStoredString(storageKeys.activeWorkspace, nextActiveWorkspace.id);
-      }
+      nextActiveWorkspaceId = nextWorkspaces[0]?.id ?? null;
       return nextWorkspaces;
     });
+    setDatabaseActiveWorkspaceId(nextActiveWorkspaceId);
+    if (nextActiveWorkspaceId) {
+      writeStoredString(storageKeys.activeWorkspace, nextActiveWorkspaceId);
+    } else {
+      removeStoredValue(storageKeys.activeWorkspace);
+    }
 
     return true;
   }, [isDatabaseMode, setActiveWorkspaceId, setWorkspaces, user]);
