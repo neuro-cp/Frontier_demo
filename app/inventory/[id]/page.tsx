@@ -17,6 +17,7 @@ type MaterialDetail = {
   vendorSkus: Array<{ id: string; vendor_name: string; sku: string; unit_cost_cents: number | null; retail_price_cents?: number | null; variant_name?: string | null; notes?: string | null }>;
   lots: Array<{ id: string; quantity: number; lot_reference: string | null; received_at: string | null }>;
   allocations: Array<{ id: string; quantity: number; mode: string; status: string; job_id: string | null }>;
+  jobMaterials: Array<{ jobId: string; jobName: string; jobStatus: string; clientName: string | null; quantity: number; materialName: string }>;
   documents: Array<{ id: string; name: string; file_name: string | null; created_at: string }>;
 };
 
@@ -48,6 +49,13 @@ export default function MaterialDetailPage() {
   const [vendorUnitCost, setVendorUnitCost] = useState("");
   const [vendorRetailPrice, setVendorRetailPrice] = useState("");
   const [vendorNotes, setVendorNotes] = useState("");
+  const [selectedVendorSkuId, setSelectedVendorSkuId] = useState("");
+  const [vendorEditName, setVendorEditName] = useState("");
+  const [vendorEditSku, setVendorEditSku] = useState("");
+  const [vendorEditVariantName, setVendorEditVariantName] = useState("");
+  const [vendorEditUnitCost, setVendorEditUnitCost] = useState("");
+  const [vendorEditRetailPrice, setVendorEditRetailPrice] = useState("");
+  const [vendorEditNotes, setVendorEditNotes] = useState("");
   const isDatabaseMode = Boolean(user && isSupabaseConfigured);
   const supabase = useMemo(() => isDatabaseMode ? createBrowserSupabaseClient() : null, [isDatabaseMode]);
 
@@ -85,6 +93,41 @@ export default function MaterialDetailPage() {
       const relatedError = vendorResult.error || lotResult.error || allocationResult.error || documentResult.error;
       if (relatedError) throw new Error(relatedError.message);
 
+      const { data: jobs, error: jobsError } = await client
+        .from("jobs")
+        .select("id, name, status, client_name_snapshot, job_materials(name, quantity)")
+        .eq("workspace_id", activeWorkspace.id);
+      if (jobsError) throw new Error(jobsError.message);
+
+      const matchTokens = [
+        inventory.name,
+        catalog?.vendor_sku,
+        catalog?.variant_name,
+        ...(vendorResult.data ?? []).flatMap((sku) => [sku.sku, sku.variant_name]),
+      ]
+        .filter(Boolean)
+        .map((value) => String(value).trim().toLowerCase())
+        .filter((value) => value.length >= 2);
+
+      const jobMaterials = (jobs ?? []).flatMap((job) =>
+        ((job.job_materials ?? []) as Array<{ name: string; quantity: number }>).flatMap((material) => {
+          const materialName = material.name.trim().toLowerCase();
+          const matches = matchTokens.some(
+            (token) => materialName.includes(token) || token.includes(materialName)
+          );
+          return matches
+            ? [{
+                jobId: job.id,
+                jobName: job.name,
+                jobStatus: job.status,
+                clientName: job.client_name_snapshot,
+                quantity: Number(material.quantity),
+                materialName: material.name,
+              }]
+            : [];
+        })
+      );
+
       if (!cancelled) {
         setDetail({
           inventory,
@@ -92,6 +135,7 @@ export default function MaterialDetailPage() {
           vendorSkus: vendorResult.data ?? [],
           lots: lotResult.data ?? [],
           allocations: allocationResult.data ?? [],
+          jobMaterials,
           documents: documentResult.data ?? [],
         });
       }
@@ -231,9 +275,100 @@ export default function MaterialDetailPage() {
       setVendorUnitCost("");
       setVendorRetailPrice("");
       setVendorNotes("");
+      setSelectedVendorSkuId("");
       setNotice("Vendor SKU added.");
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "Unable to add vendor SKU.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  function isSupplierUnavailable(row: MaterialDetail["vendorSkus"][number]) {
+    return (row.notes ?? "").includes("[Unavailable]");
+  }
+
+  function setSupplierAvailabilityNote(notes: string | null | undefined, unavailable: boolean) {
+    const cleanNotes = (notes ?? "").replace(/\s*\[Unavailable\]\s*/g, " ").replace(/\s+/g, " ").trim();
+    return unavailable ? `[Unavailable]${cleanNotes ? ` ${cleanNotes}` : ""}` : cleanNotes || null;
+  }
+
+  function displaySupplierNotes(notes: string | null | undefined) {
+    return (notes ?? "").replace(/\s*\[Unavailable\]\s*/g, " ").replace(/\s+/g, " ").trim();
+  }
+
+  async function updateVendorSkuStatus(row: MaterialDetail["vendorSkus"][number], status: "Available" | "Unavailable") {
+    setIsSaving(true);
+    setError("");
+    setNotice("");
+    try {
+      const savedSku = await postJson("/api/data/mutate", {
+        entity: "material_vendor_sku",
+        operation: "update",
+        payload: {
+          ...row,
+          workspace_id: activeWorkspace.id,
+          material_id: detail?.catalog?.id,
+          notes: setSupplierAvailabilityNote(row.notes, status === "Unavailable"),
+        },
+      });
+      setDetail((current) => current ? { ...current, vendorSkus: current.vendorSkus.map((sku) => sku.id === row.id ? savedSku : sku) } : current);
+      setNotice(status === "Unavailable" ? "Supplier marked unavailable." : "Supplier marked available.");
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Unable to update supplier.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function saveSelectedVendorSku(row: MaterialDetail["vendorSkus"][number]) {
+    setIsSaving(true);
+    setError("");
+    setNotice("");
+    try {
+      const savedSku = await postJson("/api/data/mutate", {
+        entity: "material_vendor_sku",
+        operation: "update",
+        payload: {
+          id: row.id,
+          workspace_id: activeWorkspace.id,
+          material_id: detail?.catalog?.id,
+          vendor_name: vendorEditName.trim(),
+          sku: vendorEditSku.trim(),
+          variant_name: vendorEditVariantName.trim() || null,
+          unit_cost_cents: moneyToCents(vendorEditUnitCost),
+          retail_price_cents: moneyToCents(vendorEditRetailPrice),
+          notes: setSupplierAvailabilityNote(vendorEditNotes.trim() || null, isSupplierUnavailable(row)),
+        },
+      });
+      setDetail((current) => current ? { ...current, vendorSkus: current.vendorSkus.map((sku) => sku.id === row.id ? savedSku : sku) } : current);
+      setNotice("Supplier details saved.");
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Unable to update supplier.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function deleteSelectedVendorSku(row: MaterialDetail["vendorSkus"][number]) {
+    if (!window.confirm(`Delete supplier ${row.vendor_name} SKU ${row.sku}?`)) return;
+    setIsSaving(true);
+    setError("");
+    setNotice("");
+    try {
+      await postJson("/api/data/mutate", {
+        entity: "material_vendor_sku",
+        operation: "delete",
+        payload: {
+          id: row.id,
+          workspace_id: activeWorkspace.id,
+        },
+      });
+      setDetail((current) => current ? { ...current, vendorSkus: current.vendorSkus.filter((sku) => sku.id !== row.id) } : current);
+      setSelectedVendorSkuId("");
+      setNotice("Supplier deleted.");
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Unable to delete supplier.");
     } finally {
       setIsSaving(false);
     }
@@ -271,7 +406,35 @@ export default function MaterialDetailPage() {
             </div>
             <button type="button" onClick={saveMaterialDetails} disabled={isSaving} className="mt-4 rounded-lg bg-blue-600 px-4 py-2 font-semibold text-white hover:bg-blue-700 disabled:opacity-50">Save Material Details</button>
           </section>
-          <RelatedTable title="Vendor / SKU Variants" empty="No vendor SKUs." rows={detail?.vendorSkus.map((row) => `${row.vendor_name} - SKU ${row.sku}${row.variant_name ? ` - ${row.variant_name}` : ""} - Cost ${row.unit_cost_cents == null ? "Not set" : `$${(row.unit_cost_cents / 100).toFixed(2)}`} - Retail ${row.retail_price_cents == null ? "Not set" : `$${(row.retail_price_cents / 100).toFixed(2)}`}`) ?? []} />
+          <section>
+            <h2 className="text-xl font-bold">Vendor / SKU Variants</h2>
+            <div className="mt-3 overflow-hidden rounded-lg border border-gray-200 dark:border-gray-800">
+              {detail?.vendorSkus.length ? detail.vendorSkus.map((row) => (
+                <button
+                  key={row.id}
+                  type="button"
+                  onClick={() => {
+                    setSelectedVendorSkuId(row.id);
+                    setVendorEditName(row.vendor_name);
+                    setVendorEditSku(row.sku);
+                    setVendorEditVariantName(row.variant_name ?? "");
+                    setVendorEditUnitCost(row.unit_cost_cents == null ? "" : String(row.unit_cost_cents / 100));
+                    setVendorEditRetailPrice(row.retail_price_cents == null ? "" : String(row.retail_price_cents / 100));
+                    setVendorEditNotes(displaySupplierNotes(row.notes));
+                  }}
+                  className="flex w-full items-center justify-between gap-4 border-b border-gray-200 p-4 text-left last:border-0 hover:bg-blue-50 dark:border-gray-800 dark:hover:bg-blue-950/30"
+                >
+                  <span>
+                    {row.vendor_name} - SKU {row.sku}{row.variant_name ? ` - ${row.variant_name}` : ""} - Cost {row.unit_cost_cents == null ? "Not set" : `$${(row.unit_cost_cents / 100).toFixed(2)}`} - Retail {row.retail_price_cents == null ? "Not set" : `$${(row.retail_price_cents / 100).toFixed(2)}`}
+                    {isSupplierUnavailable(row) && <span className="ml-2 rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-700 dark:bg-red-950 dark:text-red-200">Unavailable</span>}
+                  </span>
+                  <span className="shrink-0 rounded-full bg-blue-100 px-3 py-1 text-xs font-semibold text-blue-700 dark:bg-blue-950 dark:text-blue-200">
+                    {detail.jobMaterials.length} linked job{detail.jobMaterials.length === 1 ? "" : "s"}
+                  </span>
+                </button>
+              )) : <div className="p-6 text-gray-500 dark:text-gray-400">No vendor SKUs.</div>}
+            </div>
+          </section>
           {detail?.catalog?.id && (
             <section className="rounded-lg border border-gray-200 p-4 dark:border-gray-800">
               <h2 className="text-xl font-bold">Add Vendor / SKU Variant</h2>
@@ -287,10 +450,124 @@ export default function MaterialDetailPage() {
             </section>
           )}
           <RelatedTable title="Inventory Lots" empty="No inventory lots." rows={detail?.lots.map((row) => `${row.quantity} - ${row.lot_reference || "No reference"} - ${row.received_at || "No received date"}`) ?? []} />
-          <RelatedTable title="Assigned Jobs / Usage History" empty="No material allocations." rows={detail?.allocations.map((row) => `${row.quantity} - ${row.mode} - ${row.status} - Job ${row.job_id || "unassigned"}`) ?? []} />
+          <RelatedTable title="Assigned Jobs / Usage History" empty="No material allocations or matching job materials." rows={[
+            ...(detail?.allocations.map((row) => `${row.quantity} - ${row.mode} - ${row.status} - Job ${row.job_id || "unassigned"}`) ?? []),
+            ...(detail?.jobMaterials.map((row) => `${row.quantity} - ${row.materialName} - ${row.jobName} (${row.jobStatus})${row.clientName ? ` - ${row.clientName}` : ""}`) ?? []),
+          ]} />
           <RelatedTable title="Linked Documents" empty="No linked documents." rows={detail?.documents.map((row) => `${row.file_name || row.name} - ${new Date(row.created_at).toLocaleDateString()}`) ?? []} />
+          {selectedVendorSkuId && (
+            <VendorSkuModal
+              row={detail?.vendorSkus.find((sku) => sku.id === selectedVendorSkuId) ?? null}
+              linkedJobs={detail?.jobMaterials ?? []}
+              isSaving={isSaving}
+              editName={vendorEditName}
+              editSku={vendorEditSku}
+              editVariantName={vendorEditVariantName}
+              editUnitCost={vendorEditUnitCost}
+              editRetailPrice={vendorEditRetailPrice}
+              editNotes={vendorEditNotes}
+              onEditName={setVendorEditName}
+              onEditSku={setVendorEditSku}
+              onEditVariantName={setVendorEditVariantName}
+              onEditUnitCost={setVendorEditUnitCost}
+              onEditRetailPrice={setVendorEditRetailPrice}
+              onEditNotes={setVendorEditNotes}
+              onSave={saveSelectedVendorSku}
+              onDelete={deleteSelectedVendorSku}
+              onStatusChange={updateVendorSkuStatus}
+              onClose={() => setSelectedVendorSkuId("")}
+            />
+          )}
         </>
       )}
+    </div>
+  );
+}
+
+function VendorSkuModal({
+  row,
+  linkedJobs,
+  isSaving,
+  editName,
+  editSku,
+  editVariantName,
+  editUnitCost,
+  editRetailPrice,
+  editNotes,
+  onEditName,
+  onEditSku,
+  onEditVariantName,
+  onEditUnitCost,
+  onEditRetailPrice,
+  onEditNotes,
+  onSave,
+  onDelete,
+  onStatusChange,
+  onClose,
+}: {
+  row: MaterialDetail["vendorSkus"][number] | null;
+  linkedJobs: MaterialDetail["jobMaterials"];
+  isSaving: boolean;
+  editName: string;
+  editSku: string;
+  editVariantName: string;
+  editUnitCost: string;
+  editRetailPrice: string;
+  editNotes: string;
+  onEditName: (value: string) => void;
+  onEditSku: (value: string) => void;
+  onEditVariantName: (value: string) => void;
+  onEditUnitCost: (value: string) => void;
+  onEditRetailPrice: (value: string) => void;
+  onEditNotes: (value: string) => void;
+  onSave: (row: MaterialDetail["vendorSkus"][number]) => Promise<void>;
+  onDelete: (row: MaterialDetail["vendorSkus"][number]) => Promise<void>;
+  onStatusChange: (row: MaterialDetail["vendorSkus"][number], status: "Available" | "Unavailable") => Promise<void>;
+  onClose: () => void;
+}) {
+  if (!row) return null;
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4">
+      <div className="w-full max-w-lg rounded-xl bg-white p-6 shadow-xl dark:bg-gray-900">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-xl font-bold">Supplier / SKU Details</h2>
+            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{row.vendor_name} - SKU {row.sku}</p>
+          </div>
+          <button type="button" onClick={onClose} className="text-2xl text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">x</button>
+        </div>
+        <div className="mt-5 grid gap-3 sm:grid-cols-2">
+          <label className="text-sm font-semibold">Supplier<input value={editName} onChange={(event) => onEditName(event.target.value)} className="mt-2 w-full rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800" /></label>
+          <label className="text-sm font-semibold">SKU<input value={editSku} onChange={(event) => onEditSku(event.target.value)} className="mt-2 w-full rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800" /></label>
+          <label className="text-sm font-semibold">Variant / Color / Size<input value={editVariantName} onChange={(event) => onEditVariantName(event.target.value)} className="mt-2 w-full rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800" /></label>
+          <label className="text-sm font-semibold">Unit Cost<input value={editUnitCost} onChange={(event) => onEditUnitCost(event.target.value)} className="mt-2 w-full rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800" /></label>
+          <label className="text-sm font-semibold">Retail<input value={editRetailPrice} onChange={(event) => onEditRetailPrice(event.target.value)} className="mt-2 w-full rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800" /></label>
+          <div className="text-sm"><span className="font-semibold">Linked Jobs</span><div className="mt-2 rounded-lg border border-gray-200 p-3 dark:border-gray-800">{linkedJobs.length}</div></div>
+          <label className="text-sm font-semibold sm:col-span-2">Contact / Notes<input value={editNotes} onChange={(event) => onEditNotes(event.target.value)} className="mt-2 w-full rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800" /></label>
+        </div>
+        <div className="mt-4 flex flex-wrap gap-2">
+          <button type="button" disabled={isSaving || !editName.trim() || !editSku.trim()} onClick={() => onSave(row)} className="rounded-lg bg-blue-600 px-4 py-2 font-semibold text-white hover:bg-blue-700 disabled:opacity-50">Save Supplier</button>
+          <button type="button" disabled={isSaving} onClick={() => onStatusChange(row, (row.notes ?? "").includes("[Unavailable]") ? "Available" : "Unavailable")} className="rounded-lg border border-yellow-500 px-4 py-2 font-semibold text-yellow-700 hover:bg-yellow-50 dark:text-yellow-300 dark:hover:bg-yellow-950/30">
+            {(row.notes ?? "").includes("[Unavailable]") ? "Mark Available" : "Mark Unavailable"}
+          </button>
+          <button type="button" disabled={isSaving} onClick={() => onDelete(row)} className="rounded-lg border border-red-600 px-4 py-2 font-semibold text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30">Delete Supplier</button>
+        </div>
+        <div className="mt-5">
+          <h3 className="font-semibold">Matching Job Usage</h3>
+          {linkedJobs.length ? (
+            <ul className="mt-2 space-y-2 text-sm">
+              {linkedJobs.map((job, index) => (
+                <li key={`${job.jobId}-${job.materialName}-${index}`} className="rounded-lg bg-gray-100 p-3 dark:bg-gray-800">
+                  {job.quantity} - {job.materialName} - {job.jobName} ({job.jobStatus})
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">No linked job usage found.</p>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

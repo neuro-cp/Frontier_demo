@@ -77,6 +77,9 @@ export async function POST(request: NextRequest) {
   }
 
   if (body.action === "deduct_later") {
+    const hasNewPendingLines = applicableLines.some(
+      (line) => line.inventory_deduction_status !== "Pending"
+    );
     const lineIds = applicableLines.map((line) => line.id);
     const { error: updateError } = await serviceClient
       .from("invoice_line_items")
@@ -85,16 +88,29 @@ export async function POST(request: NextRequest) {
       .eq("workspace_id", body.workspaceId);
     if (updateError) return jsonError(updateError.message, 500);
 
-    await serviceClient.from("workspace_notifications").insert({
-      workspace_id: body.workspaceId,
-      user_id: userId,
-      type: "inventory_deduction_pending",
-      title: "Inventory deduction pending",
-      body: `Invoice ${invoice.invoice_number} has inventory items that still need to be deducted.`,
-      entity_type: "invoice",
-      entity_id: body.invoiceId,
-      metadata: { invoiceId: body.invoiceId },
-    });
+    const { data: existingNotification } = await serviceClient
+      .from("workspace_notifications")
+      .select("id")
+      .eq("workspace_id", body.workspaceId)
+      .eq("user_id", userId)
+      .eq("type", "inventory_deduction_pending")
+      .eq("entity_type", "invoice")
+      .eq("entity_id", body.invoiceId)
+      .is("archived_at", null)
+      .maybeSingle();
+
+    if (hasNewPendingLines && !existingNotification) {
+      await serviceClient.from("workspace_notifications").insert({
+        workspace_id: body.workspaceId,
+        user_id: userId,
+        type: "inventory_deduction_pending",
+        title: "Inventory deduction pending",
+        body: `Invoice ${invoice.invoice_number} has inventory items that still need to be deducted.`,
+        entity_type: "invoice",
+        entity_id: body.invoiceId,
+        metadata: { invoiceId: body.invoiceId },
+      });
+    }
 
     return NextResponse.json({ ok: true, updatedLines: lineIds.length, status: "Pending" });
   }

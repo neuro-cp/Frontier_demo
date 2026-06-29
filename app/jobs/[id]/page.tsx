@@ -10,6 +10,7 @@ import { updateJobAction } from "@/lib/actions/jobs";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
 import type { ClientRow } from "@/lib/clientTypes";
 import { createClientsRepository } from "@/lib/db/clients";
+import { createInventoryRepository, type InventoryRow } from "@/lib/db/inventory";
 import { createInvoicesRepository } from "@/lib/db/invoices";
 import { createJobsRepository } from "@/lib/db/jobs";
 import type { Job, JobMaterial, JobStatus } from "@/lib/jobTypes";
@@ -22,6 +23,37 @@ import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { formatDateTime12Hour } from "@/lib/formatDateTime";
 
 const jobStatuses: JobStatus[] = ["Lead", "Quoted", "Scheduled", "Completed", "Paid"];
+
+type MaterialOption = {
+  key: string;
+  label: string;
+  details: string;
+  searchText: string;
+};
+
+type MaterialCatalogRow = {
+  id: string;
+  inventory_item_id: string;
+  name: string;
+  category: string | null;
+  unit: string | null;
+  default_cost_cents: number | null;
+  retail_price_cents: number | null;
+  preferred_vendor: string | null;
+  vendor_sku: string | null;
+  variant_name: string | null;
+};
+
+type VendorSkuRow = {
+  id: string;
+  material_id: string;
+  vendor_name: string;
+  sku: string;
+  unit_cost_cents: number | null;
+  retail_price_cents: number | null;
+  variant_name: string | null;
+  notes: string | null;
+};
 
 function getStatusClasses(status: string) {
   switch (status) {
@@ -54,8 +86,14 @@ export default function JobPage() {
     storageKeys.clients,
     []
   );
+  const [localInventoryItems, setLocalInventoryItems] = useStoredJsonState<InventoryRow[]>(
+    storageKeys.inventory,
+    []
+  );
   const [databaseJob, setDatabaseJob] = useState<Job | null>(null);
   const [databaseClients, setDatabaseClients] = useState<ClientRow[]>([]);
+  const [databaseInventoryItems, setDatabaseInventoryItems] = useState<InventoryRow[]>([]);
+  const [materialOptions, setMaterialOptions] = useState<MaterialOption[]>([]);
   const [localInvoiceItems, setLocalInvoiceItems] = useStoredJsonState<InvoiceRow[]>(
     storageKeys.invoices,
     []
@@ -80,9 +118,11 @@ export default function JobPage() {
   const supabase = useMemo(() => (isDatabaseMode ? createBrowserSupabaseClient() : null), [isDatabaseMode]);
   const jobsRepository = useMemo(() => createJobsRepository({ isSignedIn: isDatabaseMode, supabase, localJobs: localJobItems, setLocalJobs: setLocalJobItems }), [isDatabaseMode, localJobItems, setLocalJobItems, supabase]);
   const clientsRepository = useMemo(() => createClientsRepository({ isSignedIn: isDatabaseMode, supabase, localClients: localClientItems, setLocalClients: setLocalClientItems }), [isDatabaseMode, localClientItems, setLocalClientItems, supabase]);
+  const inventoryRepository = useMemo(() => createInventoryRepository({ isSignedIn: isDatabaseMode, supabase, localItems: localInventoryItems, setLocalItems: setLocalInventoryItems }), [isDatabaseMode, localInventoryItems, setLocalInventoryItems, supabase]);
   const invoicesRepository = useMemo(() => createInvoicesRepository({ isSignedIn: isDatabaseMode, supabase, localInvoices: localInvoiceItems, setLocalInvoices: setLocalInvoiceItems }), [isDatabaseMode, localInvoiceItems, setLocalInvoiceItems, supabase]);
   const job = isDatabaseMode ? databaseJob : localJobItems.find((item) => item.id === id);
   const clientItems = isDatabaseMode ? databaseClients : localClientItems;
+  const inventoryItems = isDatabaseMode ? databaseInventoryItems : localInventoryItems;
   const invoiceItems = isDatabaseMode ? databaseInvoices : localInvoiceItems;
 
   useEffect(() => {
@@ -98,13 +138,15 @@ export default function JobPage() {
       if (cancelled) return;
       setDatabaseJob(loadedJob);
       if (loadedJob) {
-        const [clients, invoices] = await Promise.all([
+        const [clients, invoices, inventory] = await Promise.all([
           clientsRepository.getClients(loadedJob.workspaceId),
           invoicesRepository.getInvoices(loadedJob.workspaceId),
+          inventoryRepository.getInventoryItems(loadedJob.workspaceId),
         ]);
         if (!cancelled) {
           setDatabaseClients(clients);
           setDatabaseInvoices(invoices);
+          setDatabaseInventoryItems(inventory);
         }
       }
     }).catch((error) => {
@@ -113,7 +155,7 @@ export default function JobPage() {
       if (!cancelled) setIsLoadingJob(false);
     });
     return () => { cancelled = true; };
-  }, [clientsRepository, id, invoicesRepository, isDatabaseMode, jobsRepository]);
+  }, [clientsRepository, id, inventoryRepository, invoicesRepository, isDatabaseMode, jobsRepository]);
   const workspaceClients = job
     ? clientItems.filter((client) => client.workspaceId === job.workspaceId)
     : [];
@@ -122,6 +164,114 @@ export default function JobPage() {
     (total, invoice) => total + getInvoiceTotals(invoice).total,
     0
   );
+
+  useEffect(() => {
+    if (!job) return;
+
+    const workspaceInventory = inventoryItems.filter(
+      (item) => item.workspaceId === job.workspaceId
+    );
+
+    if (!isDatabaseMode || !supabase) {
+      const nextOptions = workspaceInventory.map((item) => {
+          const details = [
+            item.unit ? `Unit: ${item.unit}` : undefined,
+            item.storageLocation ? `Location: ${item.storageLocation}` : undefined,
+            item.currentQty != null ? `Current: ${item.currentQty}` : undefined,
+            item.targetQty != null ? `Target: ${item.targetQty}` : undefined,
+          ].filter(Boolean).join(" | ");
+          return {
+            key: item.id ?? item.name,
+            label: item.name,
+            details: details || "Inventory item",
+            searchText: `${item.name} ${details}`.toLowerCase(),
+          };
+        });
+      queueMicrotask(() => setMaterialOptions(nextOptions));
+      return;
+    }
+
+    let cancelled = false;
+    Promise.all([
+      supabase
+        .from("material_catalog_items")
+        .select("id, inventory_item_id, name, category, unit, default_cost_cents, retail_price_cents, preferred_vendor, vendor_sku, variant_name")
+        .eq("workspace_id", job.workspaceId),
+      supabase
+        .from("material_vendor_skus")
+        .select("id, material_id, vendor_name, sku, unit_cost_cents, retail_price_cents, variant_name, notes")
+        .eq("workspace_id", job.workspaceId),
+    ])
+      .then(([catalogResult, skuResult]) => {
+        if (cancelled) return;
+        const catalogs = (catalogResult.data ?? []) as MaterialCatalogRow[];
+        const skus = (skuResult.data ?? []) as VendorSkuRow[];
+        const options: MaterialOption[] = [];
+
+        for (const item of workspaceInventory) {
+          const catalog = catalogs.find((row) => row.inventory_item_id === item.id);
+          const baseDetails = [
+            catalog?.category,
+            catalog?.unit ? `Unit: ${catalog.unit}` : item.unit ? `Unit: ${item.unit}` : undefined,
+            catalog?.preferred_vendor ? `Vendor: ${catalog.preferred_vendor}` : undefined,
+            catalog?.vendor_sku ? `SKU: ${catalog.vendor_sku}` : undefined,
+            catalog?.variant_name,
+            catalog?.default_cost_cents != null ? `Cost: $${(catalog.default_cost_cents / 100).toFixed(2)}` : undefined,
+            catalog?.retail_price_cents != null ? `Retail: $${(catalog.retail_price_cents / 100).toFixed(2)}` : undefined,
+            item.storageLocation ? `Location: ${item.storageLocation}` : undefined,
+          ].filter(Boolean).join(" | ");
+          const baseLabel = [
+            item.name,
+            catalog?.preferred_vendor,
+            catalog?.vendor_sku ? `SKU ${catalog.vendor_sku}` : undefined,
+            catalog?.variant_name,
+          ].filter(Boolean).join(" - ");
+
+          options.push({
+            key: item.id ?? item.name,
+            label: baseLabel || item.name,
+            details: baseDetails || "Inventory item",
+            searchText: `${item.name} ${baseLabel} ${baseDetails}`.toLowerCase(),
+          });
+
+          if (!catalog) continue;
+          for (const sku of skus.filter((row) => row.material_id === catalog.id)) {
+            const skuDetails = [
+              `Vendor: ${sku.vendor_name}`,
+              `SKU: ${sku.sku}`,
+              sku.variant_name,
+              sku.unit_cost_cents != null ? `Cost: $${(sku.unit_cost_cents / 100).toFixed(2)}` : undefined,
+              sku.retail_price_cents != null ? `Retail: $${(sku.retail_price_cents / 100).toFixed(2)}` : undefined,
+              sku.notes,
+            ].filter(Boolean).join(" | ");
+            const skuLabel = `${item.name} - ${sku.vendor_name} - SKU ${sku.sku}${sku.variant_name ? ` - ${sku.variant_name}` : ""}`;
+            options.push({
+              key: `${item.id}:${sku.id}`,
+              label: skuLabel,
+              details: skuDetails,
+              searchText: `${skuLabel} ${skuDetails}`.toLowerCase(),
+            });
+          }
+        }
+
+        setMaterialOptions(options);
+      })
+      .catch(() => {
+        if (!cancelled) setMaterialOptions([]);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [inventoryItems, isDatabaseMode, job, supabase]);
+
+  const filteredMaterialOptions = useMemo(() => {
+    const query = editMaterialName.trim().toLowerCase();
+    const options = query
+      ? materialOptions.filter((option) => option.searchText.includes(query))
+      : materialOptions;
+    return options.slice(0, 8);
+  }, [editMaterialName, materialOptions]);
 
   function getClientForJob(jobItem: Job) {
     if (jobItem.clientId) {
@@ -409,7 +559,25 @@ export default function JobPage() {
               <div className="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
                 <h3 className="text-lg font-semibold text-gray-950 dark:text-gray-100">Materials</h3>
                 <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-[1fr_140px_auto]">
-                  <input type="text" value={editMaterialName} onChange={(event) => setEditMaterialName(event.target.value)} placeholder="Material name" className="rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800" />
+                  <div>
+                    <input type="text" value={editMaterialName} onChange={(event) => setEditMaterialName(event.target.value)} placeholder="Search or type material name" className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800" />
+                    {filteredMaterialOptions.length > 0 && (
+                      <div className="mt-2 max-h-44 overflow-y-auto rounded-lg border border-gray-200 bg-white text-sm shadow-sm dark:border-gray-800 dark:bg-gray-950">
+                        {filteredMaterialOptions.map((option) => (
+                          <button
+                            key={option.key}
+                            type="button"
+                            title={option.details}
+                            onClick={() => setEditMaterialName(option.label)}
+                            className="block w-full border-b border-gray-100 px-3 py-2 text-left last:border-b-0 hover:bg-blue-50 dark:border-gray-800 dark:hover:bg-blue-950/40"
+                          >
+                            <span className="block font-semibold">{option.label}</span>
+                            <span className="block truncate text-xs text-gray-500 dark:text-gray-400">{option.details}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                   <input type="number" value={editMaterialQuantity} onChange={(event) => setEditMaterialQuantity(event.target.value)} placeholder="Qty" className="rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800" />
                   <button type="button" onClick={addEditMaterial} className="rounded-lg bg-blue-600 px-5 py-3 text-white hover:bg-blue-700">Add</button>
                 </div>
