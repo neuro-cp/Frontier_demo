@@ -11,6 +11,12 @@ export type InvoiceLineItem = {
   description: string;
   quantity: number;
   unitPrice: string;
+  inventoryItemId?: string;
+  materialVendorSkuId?: string;
+  skuSnapshot?: string;
+  unitSnapshot?: string;
+  unitCostSnapshotCents?: number;
+  inventoryDeductionStatus?: "Not Applicable" | "Pending" | "Deducted";
 };
 
 export type InvoiceRow = {

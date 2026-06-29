@@ -65,6 +65,36 @@ async function verifyWorkspaceAccess(workspaceId: unknown, userId: string) {
   return { ok: true as const, serviceClient, workspaceId };
 }
 
+async function ensureInventoryItemsForMaterials(
+  serviceClient: ReturnType<typeof createServiceRoleClient>,
+  workspaceId: string,
+  materials: Record<string, unknown>[]
+) {
+  const names = Array.from(
+    new Set(
+      materials
+        .map((material) => String(material.name ?? "").trim())
+        .filter(Boolean)
+    )
+  );
+
+  for (const name of names) {
+    const { data: existing, error: existingError } = await serviceClient
+      .from("inventory_items")
+      .select("id")
+      .eq("workspace_id", workspaceId)
+      .ilike("name", name)
+      .limit(1);
+    if (existingError) throw existingError;
+    if (existing && existing.length > 0) continue;
+
+    const { error } = await serviceClient
+      .from("inventory_items")
+      .insert({ workspace_id: workspaceId, name, current_qty: null, target_qty: null });
+    if (error) throw error;
+  }
+}
+
 export async function POST(request: NextRequest) {
   const userClient = await createServerSupabaseClient();
   const {
@@ -137,7 +167,10 @@ export async function POST(request: NextRequest) {
         .insert(skuPayload)
         .select("*")
         .single();
-      if (error) throw error;
+      if (error) {
+        if (error.code === "23505") return jsonError("This vendor and SKU already exist for this material.", 409);
+        throw error;
+      }
       return NextResponse.json({ data });
     }
 
@@ -201,6 +234,7 @@ export async function POST(request: NextRequest) {
             );
           if (materialsError) throw materialsError;
         }
+        await ensureInventoryItemsForMaterials(serviceClient, workspaceId, materials);
       } catch (error) {
         await serviceClient.from("jobs").delete().eq("id", insertedJob.id);
         throw error;
@@ -235,9 +269,10 @@ export async function POST(request: NextRequest) {
           const { error: lineItemsError } = await serviceClient
             .from("invoice_line_items")
             .insert(
-              lineItems.map((lineItem) => ({
+              lineItems.map((lineItem, index) => ({
                 ...sanitizeBusinessPayload("invoice_line", lineItem, workspaceId),
                 invoice_id: insertedInvoice.id,
+                sort_order: index,
               }))
             );
           if (lineItemsError) throw lineItemsError;
@@ -299,6 +334,10 @@ export async function POST(request: NextRequest) {
 
     return jsonError("Unsupported create entity.", 400);
   } catch (error) {
-    return jsonError(errorMessage(error, "Create failed."), 500);
+    const message = errorMessage(error, "Create failed.");
+    if (message.toLowerCase().includes("duplicate")) {
+      return jsonError("A duplicate record already exists. Use a different SKU or edit the existing item.", 409);
+    }
+    return jsonError(message, 500);
   }
 }

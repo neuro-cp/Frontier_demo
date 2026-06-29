@@ -8,6 +8,12 @@ import { mutateSignedInRecord } from "@/lib/db/serverMutate";
 type Setter<T> = (value: T | ((current: T) => T)) => void;
 type DbInvoiceLine = {
   id: string;
+  inventory_item_id?: string | null;
+  material_vendor_sku_id?: string | null;
+  sku_snapshot?: string | null;
+  unit_snapshot?: string | null;
+  unit_cost_snapshot_cents?: number | null;
+  inventory_deduction_status?: "Not Applicable" | "Pending" | "Deducted" | null;
   description: string;
   quantity: number;
   unit_price_cents: number;
@@ -45,7 +51,7 @@ type DbInvoice = {
 };
 const selectInvoice = "*, invoice_line_items(*)";
 function dbToInvoice(i: DbInvoice): InvoiceRow {
-  return { id: i.id, workspaceId: i.workspace_id, invoiceNumber: i.invoice_number, invoiceDate: i.invoice_date, jobId: i.job_id ?? undefined, jobName: undefined, sourceClientId: i.client_id ?? undefined, companyName: i.company_name ?? "", companyAddress: i.company_address ?? "", companyCity: i.company_city ?? "", companyState: i.company_state ?? "", companyZip: i.company_zip ?? "", companyPhone: i.company_phone ?? "", companyEmail: i.company_email ?? "", billToName: i.bill_to_name ?? "", billToCompany: i.bill_to_company ?? "", billToAddress: i.bill_to_address ?? "", billToCity: i.bill_to_city ?? "", billToState: i.bill_to_state ?? "", billToZip: i.bill_to_zip ?? "", billToPhone: i.bill_to_phone ?? "", billToEmail: i.bill_to_email ?? "", lineItems: (i.invoice_line_items ?? []).sort((a, b) => a.sort_order - b.sort_order).map((l) => ({ id: l.id, description: l.description, quantity: Number(l.quantity), unitPrice: centsToMoneyString(l.unit_price_cents) })), discountType: i.discount_type, discountValue: String(i.discount_value ?? 0), taxRate: String(i.tax_rate ?? 0), footerMessage: i.footer_message ?? "", contactMessage: i.contact_message ?? "", status: i.status };
+  return { id: i.id, workspaceId: i.workspace_id, invoiceNumber: i.invoice_number, invoiceDate: i.invoice_date, jobId: i.job_id ?? undefined, jobName: undefined, sourceClientId: i.client_id ?? undefined, companyName: i.company_name ?? "", companyAddress: i.company_address ?? "", companyCity: i.company_city ?? "", companyState: i.company_state ?? "", companyZip: i.company_zip ?? "", companyPhone: i.company_phone ?? "", companyEmail: i.company_email ?? "", billToName: i.bill_to_name ?? "", billToCompany: i.bill_to_company ?? "", billToAddress: i.bill_to_address ?? "", billToCity: i.bill_to_city ?? "", billToState: i.bill_to_state ?? "", billToZip: i.bill_to_zip ?? "", billToPhone: i.bill_to_phone ?? "", billToEmail: i.bill_to_email ?? "", lineItems: (i.invoice_line_items ?? []).sort((a, b) => a.sort_order - b.sort_order).map((l) => ({ id: l.id, description: l.description, quantity: Number(l.quantity), unitPrice: centsToMoneyString(l.unit_price_cents), inventoryItemId: l.inventory_item_id ?? undefined, materialVendorSkuId: l.material_vendor_sku_id ?? undefined, skuSnapshot: l.sku_snapshot ?? undefined, unitSnapshot: l.unit_snapshot ?? undefined, unitCostSnapshotCents: l.unit_cost_snapshot_cents ?? undefined, inventoryDeductionStatus: l.inventory_deduction_status ?? undefined })), discountType: i.discount_type, discountValue: String(i.discount_value ?? 0), taxRate: String(i.tax_rate ?? 0), footerMessage: i.footer_message ?? "", contactMessage: i.contact_message ?? "", status: i.status };
 }
 function invoiceToDb(i: InvoiceRow) {
   return { id: i.id, workspace_id: i.workspaceId, client_id: i.sourceClientId ?? null, job_id: i.jobId ?? null, invoice_number: i.invoiceNumber, invoice_date: i.invoiceDate, company_name: i.companyName, company_address: i.companyAddress, company_city: i.companyCity, company_state: i.companyState, company_zip: i.companyZip, company_phone: i.companyPhone, company_email: i.companyEmail, bill_to_name: i.billToName, bill_to_company: i.billToCompany, bill_to_address: i.billToAddress, bill_to_city: i.billToCity, bill_to_state: i.billToState, bill_to_zip: i.billToZip, bill_to_phone: i.billToPhone, bill_to_email: i.billToEmail, discount_type: i.discountType, discount_value: Number(i.discountValue) || 0, tax_rate: Number(i.taxRate) || 0, footer_message: i.footerMessage, contact_message: i.contactMessage, status: i.status };
@@ -55,6 +61,12 @@ export function createInvoicesRepository({ isSignedIn, supabase, localInvoices, 
   function invoiceLinesToRpcPayload(invoice: InvoiceRow) {
     return invoice.lineItems.map((l: InvoiceLineItem, index) => ({
       id: l.id,
+      inventory_item_id: l.inventoryItemId ?? null,
+      material_vendor_sku_id: l.materialVendorSkuId ?? null,
+      sku_snapshot: l.skuSnapshot ?? null,
+      unit_snapshot: l.unitSnapshot ?? null,
+      unit_cost_snapshot_cents: l.unitCostSnapshotCents ?? null,
+      inventory_deduction_status: l.inventoryItemId ? (l.inventoryDeductionStatus ?? "Pending") : "Not Applicable",
       description: l.description,
       quantity: l.quantity,
       unit_price_cents: moneyStringToCents(l.unitPrice),

@@ -114,6 +114,36 @@ async function mutateSimpleRow({
   return NextResponse.json({ data });
 }
 
+async function ensureInventoryItemsForMaterials(
+  serviceClient: ReturnType<typeof createServiceRoleClient>,
+  workspaceId: string,
+  materials: Record<string, unknown>[]
+) {
+  const names = Array.from(
+    new Set(
+      materials
+        .map((material) => String(material.name ?? "").trim())
+        .filter(Boolean)
+    )
+  );
+
+  for (const name of names) {
+    const { data: existing, error: existingError } = await serviceClient
+      .from("inventory_items")
+      .select("id")
+      .eq("workspace_id", workspaceId)
+      .ilike("name", name)
+      .limit(1);
+    if (existingError) throw existingError;
+    if (existing && existing.length > 0) continue;
+
+    const { error } = await serviceClient
+      .from("inventory_items")
+      .insert({ workspace_id: workspaceId, name, current_qty: null, target_qty: null });
+    if (error) throw error;
+  }
+}
+
 export async function POST(request: NextRequest) {
   const userClient = await createServerSupabaseClient();
   const {
@@ -290,6 +320,7 @@ export async function POST(request: NextRequest) {
             }))
           );
         if (insertMaterialsError) throw insertMaterialsError;
+        await ensureInventoryItemsForMaterials(serviceClient, workspaceId, materials);
       }
 
       const { data, error: loadError } = await serviceClient
@@ -331,6 +362,7 @@ export async function POST(request: NextRequest) {
           }))
         );
       if (error) throw error;
+      await ensureInventoryItemsForMaterials(serviceClient, workspaceId, materials);
       return NextResponse.json({ data: true });
     }
 
@@ -439,6 +471,10 @@ export async function POST(request: NextRequest) {
 
     return jsonError("Unsupported mutation entity.", 400);
   } catch (error) {
-    return jsonError(errorMessage(error, "Mutation failed."), 500);
+    const message = errorMessage(error, "Mutation failed.");
+    if (message.toLowerCase().includes("duplicate")) {
+      return jsonError("A duplicate record already exists. Use a different SKU or edit the existing item.", 409);
+    }
+    return jsonError(message, 500);
   }
 }

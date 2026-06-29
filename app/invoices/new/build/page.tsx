@@ -16,6 +16,7 @@ import {
 } from "@/lib/clientStorage";
 import { createClientsRepository } from "@/lib/db/clients";
 import { createInvoicesRepository } from "@/lib/db/invoices";
+import type { InventoryRow } from "@/lib/db/inventory";
 import type { ClientRow as SharedClientRow } from "@/lib/clientTypes";
 import type { InvoiceRow as SharedInvoiceRow } from "@/lib/frontierInvoices";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
@@ -30,6 +31,12 @@ type InvoiceLineItem = {
   description: string;
   quantity: number;
   unitPrice: string;
+  inventoryItemId?: string;
+  materialVendorSkuId?: string;
+  skuSnapshot?: string;
+  unitSnapshot?: string;
+  unitCostSnapshotCents?: number;
+  inventoryDeductionStatus?: "Not Applicable" | "Pending" | "Deducted";
 };
 
 type InvoiceRow = {
@@ -99,6 +106,19 @@ type InvoiceSetupDraft = Partial<InvoiceRow> & {
   editExisting?: boolean;
 };
 
+type InventoryOption = {
+  key: string;
+  inventoryItemId: string;
+  materialVendorSkuId?: string;
+  label: string;
+  description: string;
+  category?: string;
+  skuSnapshot?: string;
+  unitSnapshot?: string;
+  unitPrice?: string;
+  unitCostSnapshotCents?: number;
+};
+
 function moneyToNumber(value: string | number | undefined) {
   if (typeof value === "number") return value;
   if (!value) return 0;
@@ -156,7 +176,13 @@ export default function InvoiceBuilderPage() {
     storageKeys.clients,
     []
   );
+  const [savedInventory] = useStoredJsonState<InventoryRow[]>(
+    storageKeys.inventory,
+    []
+  );
   const [databaseClients, setDatabaseClients] = useState<SharedClientRow[]>([]);
+  const [inventoryOptions, setInventoryOptions] = useState<InventoryOption[]>([]);
+  const [inventorySearch, setInventorySearch] = useState<Record<string, string>>({});
   const [saveError, setSaveError] = useState("");
   const supabase = useMemo(() => (isDatabaseMode ? createBrowserSupabaseClient() : null), [isDatabaseMode]);
   const invoicesRepo = useMemo(() => createInvoicesRepository({ isSignedIn: isDatabaseMode, supabase, localInvoices: savedInvoices as unknown as SharedInvoiceRow[], setLocalInvoices: setSavedInvoices as unknown as (value: SharedInvoiceRow[] | ((current: SharedInvoiceRow[]) => SharedInvoiceRow[])) => void }), [isDatabaseMode, savedInvoices, setSavedInvoices, supabase]);
@@ -193,6 +219,72 @@ export default function InvoiceBuilderPage() {
     return () => { cancelled = true; };
   }, [activeWorkspace.id, clientsRepo, isDatabaseMode]);
 
+  useEffect(() => {
+    if (!isDatabaseMode || !supabase) {
+      let cancelled = false;
+      queueMicrotask(() => {
+        if (cancelled) return;
+        setInventoryOptions(
+          savedInventory
+            .filter((item) => item.workspaceId === activeWorkspace.id)
+            .map((item) => ({
+              key: item.id ?? item.name,
+              inventoryItemId: item.id ?? "",
+              label: item.name,
+              description: item.name,
+            }))
+        );
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
+    let cancelled = false;
+    Promise.all([
+      supabase.from("inventory_items").select("id, name").eq("workspace_id", activeWorkspace.id).order("name"),
+      supabase.from("material_catalog_items").select("id, inventory_item_id, name, description, category, unit, default_cost_cents").eq("workspace_id", activeWorkspace.id),
+      supabase.from("material_vendor_skus").select("id, material_id, vendor_name, sku, unit_cost_cents, notes").eq("workspace_id", activeWorkspace.id),
+    ]).then(([itemsResult, catalogResult, skuResult]) => {
+      if (cancelled) return;
+      if (itemsResult.error || catalogResult.error || skuResult.error) return;
+      const catalogs = (catalogResult.data ?? []) as Array<{ id: string; inventory_item_id: string; name: string; description: string | null; category: string | null; unit: string | null; default_cost_cents: number | null }>;
+      const skus = (skuResult.data ?? []) as Array<{ id: string; material_id: string; vendor_name: string; sku: string; unit_cost_cents: number | null; notes: string | null }>;
+      const options = ((itemsResult.data ?? []) as Array<{ id: string; name: string }>).flatMap((item) => {
+        const catalog = catalogs.find((row) => row.inventory_item_id === item.id);
+        const materialSkus = catalog ? skus.filter((row) => row.material_id === catalog.id) : [];
+        const baseOption: InventoryOption = {
+          key: item.id,
+          inventoryItemId: item.id,
+          label: `${item.name}${catalog?.category ? ` - ${catalog.category}` : ""}`,
+          description: catalog?.description?.trim() || item.name,
+          category: catalog?.category ?? undefined,
+          unitSnapshot: catalog?.unit ?? undefined,
+          unitPrice: catalog?.default_cost_cents == null ? undefined : String(catalog.default_cost_cents / 100),
+          unitCostSnapshotCents: catalog?.default_cost_cents ?? undefined,
+        };
+        return [
+          baseOption,
+          ...materialSkus.map((sku) => ({
+            key: `${item.id}:${sku.id}`,
+            inventoryItemId: item.id,
+            materialVendorSkuId: sku.id,
+            label: `${item.name} - ${sku.vendor_name} - ${sku.sku}`,
+            description: catalog?.description?.trim() || item.name,
+            category: catalog?.category ?? undefined,
+            skuSnapshot: sku.sku,
+            unitSnapshot: catalog?.unit ?? undefined,
+            unitPrice: sku.unit_cost_cents == null ? baseOption.unitPrice : String(sku.unit_cost_cents / 100),
+            unitCostSnapshotCents: sku.unit_cost_cents ?? baseOption.unitCostSnapshotCents,
+          })),
+        ];
+      });
+      setInventoryOptions(options);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeWorkspace.id, isDatabaseMode, savedInventory, supabase]);
+
   const totals = useMemo(() => {
     const subtotal = lineItems.reduce((sum, item) => {
       return sum + (Number(item.quantity) || 0) * moneyToNumber(item.unitPrice);
@@ -225,11 +317,54 @@ export default function InvoiceBuilderPage() {
         item.id === itemId
           ? {
               ...item,
-              [field]: field === "quantity" ? Number(value) || 0 : value,
+              [field]: field === "quantity" ? Number(value.replace(/^0+(?=\d)/, "")) || 0 : value,
             }
           : item
       )
     );
+  }
+
+  function applyInventoryOption(itemId: string, optionKey: string) {
+    const option = inventoryOptions.find((candidate) => candidate.key === optionKey);
+    if (!option) return;
+    setLineItems((current) =>
+      current.map((item) =>
+        item.id === itemId
+          ? {
+              ...item,
+              description: option.description,
+              unitPrice: option.unitPrice ?? item.unitPrice,
+              inventoryItemId: option.inventoryItemId,
+              materialVendorSkuId: option.materialVendorSkuId,
+              skuSnapshot: option.skuSnapshot,
+              unitSnapshot: option.unitSnapshot,
+              unitCostSnapshotCents: option.unitCostSnapshotCents,
+              inventoryDeductionStatus: "Pending",
+            }
+          : item
+      )
+    );
+  }
+
+  async function handleInventoryDeduction(invoice: SharedInvoiceRow) {
+    const hasInventoryLines = invoice.lineItems.some((item) => item.inventoryItemId);
+    if (!hasInventoryLines || !isDatabaseMode) return;
+    const deductNow = window.confirm(
+      "Would you like Frontier to deduct the applicable inventory items now?\n\nOK = Deduct Inventory Now\nCancel = I'll deduct inventory later"
+    );
+    const response = await fetch("/api/inventory/deduct", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        workspaceId: invoice.workspaceId,
+        invoiceId: invoice.id,
+        action: deductNow ? "deduct_now" : "deduct_later",
+      }),
+    });
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => ({}))) as { error?: string };
+      throw new Error(payload.error || "Invoice saved, but inventory deduction could not be updated.");
+    }
   }
 
   function addLineItem() {
@@ -389,6 +524,12 @@ export default function InvoiceBuilderPage() {
         description: item.description.trim(),
         quantity: Number(item.quantity) || 1,
         unitPrice: item.unitPrice.trim(),
+        inventoryItemId: item.inventoryItemId,
+        materialVendorSkuId: item.materialVendorSkuId,
+        skuSnapshot: item.skuSnapshot,
+        unitSnapshot: item.unitSnapshot,
+        unitCostSnapshotCents: item.unitCostSnapshotCents,
+        inventoryDeductionStatus: item.inventoryItemId ? "Pending" : "Not Applicable",
       })),
       discountType,
       discountValue,
@@ -430,8 +571,9 @@ export default function InvoiceBuilderPage() {
         return;
       }
       if (!isDatabaseMode) setSavedInvoices(updatedInvoices);
+      await handleInventoryDeduction(result.data as unknown as SharedInvoiceRow);
       removeStoredValue(storageKeys.invoiceDraft);
-      router.push(`/invoices/${savedInvoice.id}`);
+      router.push(`/invoices/${result.data.id}`);
     } catch (error) {
       setSaveError(error instanceof Error ? error.message : "Unable to save invoice.");
     }
@@ -552,6 +694,35 @@ export default function InvoiceBuilderPage() {
               >
                 <label className="block">
                   <span className="text-xs text-gray-500">Description</span>
+                  <div className="mb-2 grid gap-2 sm:grid-cols-[1fr_1fr]">
+                    <input
+                      value={inventorySearch[item.id] ?? ""}
+                      onChange={(event) => setInventorySearch((current) => ({ ...current, [item.id]: event.target.value }))}
+                      className="mt-1 w-full rounded-lg border border-gray-700 bg-gray-950 px-3 py-2 text-xs text-white"
+                      placeholder="Search inventory, category, SKU"
+                    />
+                    <select
+                      value=""
+                      onChange={(event) => applyInventoryOption(item.id, event.target.value)}
+                      className="mt-1 w-full rounded-lg border border-gray-700 bg-gray-950 px-3 py-2 text-xs text-white"
+                    >
+                      <option value="">Select inventory item</option>
+                      {inventoryOptions
+                        .filter((option) => {
+                          const query = (inventorySearch[item.id] ?? "").trim().toLowerCase();
+                          if (!query) return true;
+                          return [option.label, option.description, option.category, option.skuSnapshot]
+                            .filter(Boolean)
+                            .some((value) => String(value).toLowerCase().includes(query));
+                        })
+                        .slice(0, 50)
+                        .map((option) => (
+                          <option key={option.key} value={option.key}>
+                            {option.label}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
                   <input
                     value={item.description}
                     onChange={(event) =>
@@ -560,6 +731,12 @@ export default function InvoiceBuilderPage() {
                     className="mt-1 w-full rounded-lg border border-gray-700 bg-gray-950 px-3 py-2 text-sm text-white"
                     placeholder="Labor, materials, service..."
                   />
+                  {(item.skuSnapshot || item.unitSnapshot) && (
+                    <p className="mt-1 text-xs text-gray-400">
+                      {item.skuSnapshot ? `SKU ${item.skuSnapshot}` : "Inventory item"}
+                      {item.unitSnapshot ? ` - Unit ${item.unitSnapshot}` : ""}
+                    </p>
+                  )}
                 </label>
 
                 <label className="block">
