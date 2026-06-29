@@ -410,7 +410,11 @@ export default function DocumentsPage() {
     } catch (error) {
       if (isDatabaseMode && supabase && storagePath) {
         try {
-          await removeDocumentFile({ workspaceId: activeWorkspace.id, path: storagePath });
+          await removeDocumentFile({
+            workspaceId: activeWorkspace.id,
+            path: storagePath,
+            bucket: getDocumentStorageBucketLabel(),
+          });
         } catch (cleanupError) {
           console.error("Unable to clean up failed document upload.", cleanupError);
         }
