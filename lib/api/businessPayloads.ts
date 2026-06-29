@@ -25,6 +25,8 @@ const INVENTORY_FIELDS = [
   "target_qty",
   "unit",
   "notes",
+  "reorder_threshold",
+  "storage_location",
 ] as const;
 
 const MATERIAL_CATALOG_FIELDS = [
@@ -36,6 +38,10 @@ const MATERIAL_CATALOG_FIELDS = [
   "category",
   "unit",
   "default_cost_cents",
+  "preferred_vendor",
+  "vendor_sku",
+  "variant_name",
+  "retail_price_cents",
 ] as const;
 
 const MATERIAL_VENDOR_SKU_FIELDS = [
@@ -44,7 +50,9 @@ const MATERIAL_VENDOR_SKU_FIELDS = [
   "material_id",
   "vendor_name",
   "sku",
+  "variant_name",
   "unit_cost_cents",
+  "retail_price_cents",
   "notes",
 ] as const;
 

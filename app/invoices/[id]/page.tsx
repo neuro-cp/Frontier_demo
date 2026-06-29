@@ -24,6 +24,7 @@ import {
   InvoiceStatus,
   moneyToNumber,
 } from "@/lib/frontierInvoices";
+import { promptPaidInvoiceInventoryDeduction } from "@/lib/invoices/inventoryDeduction";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 
 const borderColor = "#9ca3af";
@@ -81,8 +82,15 @@ export default function InvoiceDetailPage() {
         return;
       }
       const saved = result.data;
+      if (nextStatus === "Paid" && invoice.status !== "Paid") {
+        await promptPaidInvoiceInventoryDeduction(saved);
+      }
       if (isDatabaseMode) setDatabaseInvoice(saved);
       else setLocalInvoices((current) => current.map((item) => item.id === invoice.id ? saved : item));
+      if (isDatabaseMode) {
+        const refreshed = await invoicesRepo.getInvoiceById(invoiceId);
+        setDatabaseInvoice(refreshed);
+      }
       setInvoiceError("");
     } catch (error) {
       setInvoiceError(error instanceof Error ? error.message : "Unable to update invoice status.");

@@ -67,7 +67,7 @@ export async function POST(request: NextRequest) {
     return jsonError("Only Owners and Managers can run OCR.", 403);
   }
   const serviceClient = createServiceRoleClient();
-  const plan = await resolveWorkspacePlanForServiceClient(serviceClient, body.workspaceId);
+  const plan = await resolveWorkspacePlanForServiceClient(serviceClient, body.workspaceId, user.id);
   if (!canUseOcr(plan)) return planUpgradeError();
   try {
     checkUserAndWorkspaceDailyLimits({

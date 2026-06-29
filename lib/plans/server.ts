@@ -11,8 +11,19 @@ export function resolveWorkspacePlan() {
 
 export async function resolveWorkspacePlanForServiceClient(
   serviceClient: SupabaseClient,
-  workspaceId: string
+  workspaceId: string,
+  userId?: string
 ): Promise<PlanTier> {
+  if (userId) {
+    const { data: platformAdmin } = await serviceClient
+      .from("platform_admins")
+      .select("user_id")
+      .eq("user_id", userId)
+      .limit(1)
+      .maybeSingle();
+    if (platformAdmin) return "business";
+  }
+
   const { data } = await serviceClient
     .from("workspace_billing")
     .select("plan, billing_status")

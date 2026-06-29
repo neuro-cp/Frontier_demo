@@ -16,6 +16,7 @@ import {
   invoiceStatuses,
   InvoiceStatus,
 } from "@/lib/frontierInvoices";
+import { promptPaidInvoiceInventoryDeduction } from "@/lib/invoices/inventoryDeduction";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { getWorkspaceDisplayName } from "@/lib/workspaceDisplay";
 
@@ -138,7 +139,14 @@ export default function InvoicesPage() {
         return;
       }
       const saved = result.data;
+      if (nextStatus === "Paid" && invoice.status !== "Paid") {
+        await promptPaidInvoiceInventoryDeduction(saved);
+      }
       saveInvoices(invoices.map((item) => item.id === id ? saved : item));
+      if (isDatabaseMode) {
+        const refreshed = await invoicesRepo.getInvoices(activeWorkspace.id);
+        setDatabaseInvoices(refreshed);
+      }
       setInvoiceError("");
     } catch (error) {
       setInvoiceError(error instanceof Error ? error.message : "Unable to update invoice.");

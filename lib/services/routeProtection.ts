@@ -71,6 +71,6 @@ export async function requireWorkspaceAccess(workspaceId?: string) {
     userId: user.id,
     workspaceId,
     role: data.role as string | null,
-    plan: await resolveWorkspacePlanForServiceClient(serviceClient, workspaceId),
+    plan: await resolveWorkspacePlanForServiceClient(serviceClient, workspaceId, user.id),
   };
 }

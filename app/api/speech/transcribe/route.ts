@@ -86,7 +86,7 @@ export async function POST(request: NextRequest) {
     return jsonError("Only Owners and Managers can transcribe audio.", 403);
   }
   const serviceClient = createServiceRoleClient();
-  const plan = await resolveWorkspacePlanForServiceClient(serviceClient, workspaceId);
+  const plan = await resolveWorkspacePlanForServiceClient(serviceClient, workspaceId, user.id);
   if (!canUseSpeech(plan)) return planUpgradeError();
   try {
     checkUserAndWorkspaceDailyLimits({

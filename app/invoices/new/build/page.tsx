@@ -119,6 +119,13 @@ type InventoryOption = {
   unitCostSnapshotCents?: number;
 };
 
+function compactInventoryLabel(name: string, parts: Array<string | null | undefined>) {
+  const detail = parts
+    .map((part) => part?.trim())
+    .filter((part): part is string => Boolean(part));
+  return [name, ...detail].join(" - ");
+}
+
 function moneyToNumber(value: string | number | undefined) {
   if (typeof value === "number") return value;
   if (!value) return 0;
@@ -242,24 +249,30 @@ export default function InvoiceBuilderPage() {
     let cancelled = false;
     Promise.all([
       supabase.from("inventory_items").select("id, name").eq("workspace_id", activeWorkspace.id).order("name"),
-      supabase.from("material_catalog_items").select("id, inventory_item_id, name, description, category, unit, default_cost_cents").eq("workspace_id", activeWorkspace.id),
-      supabase.from("material_vendor_skus").select("id, material_id, vendor_name, sku, unit_cost_cents, notes").eq("workspace_id", activeWorkspace.id),
+      supabase.from("material_catalog_items").select("id, inventory_item_id, name, description, category, unit, default_cost_cents, retail_price_cents, preferred_vendor, vendor_sku, variant_name").eq("workspace_id", activeWorkspace.id),
+      supabase.from("material_vendor_skus").select("id, material_id, vendor_name, sku, unit_cost_cents, retail_price_cents, variant_name, notes").eq("workspace_id", activeWorkspace.id),
     ]).then(([itemsResult, catalogResult, skuResult]) => {
       if (cancelled) return;
       if (itemsResult.error || catalogResult.error || skuResult.error) return;
-      const catalogs = (catalogResult.data ?? []) as Array<{ id: string; inventory_item_id: string; name: string; description: string | null; category: string | null; unit: string | null; default_cost_cents: number | null }>;
-      const skus = (skuResult.data ?? []) as Array<{ id: string; material_id: string; vendor_name: string; sku: string; unit_cost_cents: number | null; notes: string | null }>;
+      const catalogs = (catalogResult.data ?? []) as Array<{ id: string; inventory_item_id: string; name: string; description: string | null; category: string | null; unit: string | null; default_cost_cents: number | null; retail_price_cents: number | null; preferred_vendor: string | null; vendor_sku: string | null; variant_name: string | null }>;
+      const skus = (skuResult.data ?? []) as Array<{ id: string; material_id: string; vendor_name: string; sku: string; unit_cost_cents: number | null; retail_price_cents: number | null; variant_name: string | null; notes: string | null }>;
       const options = ((itemsResult.data ?? []) as Array<{ id: string; name: string }>).flatMap((item) => {
         const catalog = catalogs.find((row) => row.inventory_item_id === item.id);
         const materialSkus = catalog ? skus.filter((row) => row.material_id === catalog.id) : [];
         const baseOption: InventoryOption = {
           key: item.id,
           inventoryItemId: item.id,
-          label: `${item.name}${catalog?.category ? ` - ${catalog.category}` : ""}`,
+          label: compactInventoryLabel(item.name, [
+            catalog?.preferred_vendor,
+            catalog?.vendor_sku ? `SKU ${catalog.vendor_sku}` : undefined,
+            catalog?.variant_name,
+            catalog?.category,
+          ]),
           description: catalog?.description?.trim() || item.name,
           category: catalog?.category ?? undefined,
+          skuSnapshot: catalog?.vendor_sku ?? undefined,
           unitSnapshot: catalog?.unit ?? undefined,
-          unitPrice: catalog?.default_cost_cents == null ? undefined : String(catalog.default_cost_cents / 100),
+          unitPrice: (catalog?.retail_price_cents ?? catalog?.default_cost_cents) == null ? undefined : String((catalog?.retail_price_cents ?? catalog?.default_cost_cents ?? 0) / 100),
           unitCostSnapshotCents: catalog?.default_cost_cents ?? undefined,
         };
         return [
@@ -268,12 +281,17 @@ export default function InvoiceBuilderPage() {
             key: `${item.id}:${sku.id}`,
             inventoryItemId: item.id,
             materialVendorSkuId: sku.id,
-            label: `${item.name} - ${sku.vendor_name} - ${sku.sku}`,
+            label: compactInventoryLabel(item.name, [
+              sku.vendor_name,
+              sku.sku ? `SKU ${sku.sku}` : undefined,
+              sku.variant_name,
+              catalog?.category,
+            ]),
             description: catalog?.description?.trim() || item.name,
             category: catalog?.category ?? undefined,
             skuSnapshot: sku.sku,
             unitSnapshot: catalog?.unit ?? undefined,
-            unitPrice: sku.unit_cost_cents == null ? baseOption.unitPrice : String(sku.unit_cost_cents / 100),
+            unitPrice: (sku.retail_price_cents ?? sku.unit_cost_cents) == null ? baseOption.unitPrice : String((sku.retail_price_cents ?? sku.unit_cost_cents ?? 0) / 100),
             unitCostSnapshotCents: sku.unit_cost_cents ?? baseOption.unitCostSnapshotCents,
           })),
         ];

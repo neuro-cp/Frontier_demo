@@ -204,6 +204,10 @@ export async function POST(request: NextRequest) {
           name: payload.name,
           current_qty: payload.current_qty,
           target_qty: payload.target_qty,
+          unit: payload.unit,
+          notes: payload.notes,
+          reorder_threshold: payload.reorder_threshold,
+          storage_location: payload.storage_location,
         })
         .eq("workspace_id", workspaceId);
       query = id ? query.eq("id", id) : query.ilike("name", String(payload.name ?? ""));

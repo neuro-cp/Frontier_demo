@@ -74,7 +74,7 @@ export async function POST(request: NextRequest) {
   const serviceClient = createServiceRoleClient();
   const restriction = await getActiveAiRestriction(serviceClient, user.id);
   if (restriction) return jsonError(aiRestrictionMessage, 403);
-  const plan = await resolveWorkspacePlanForServiceClient(serviceClient, workspaceId);
+  const plan = await resolveWorkspacePlanForServiceClient(serviceClient, workspaceId, user.id);
   if (!canUseAiDrafts(plan)) return planUpgradeError();
   try {
     checkUserAndWorkspaceDailyLimits({

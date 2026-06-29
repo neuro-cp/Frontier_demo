@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import type { ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuthSession } from "@/components/AuthSessionProvider";
@@ -25,6 +26,41 @@ import {
 } from "@/lib/ai/formHydration";
 
 type AllocationMaterial = { name: string; quantity: number; notes?: string };
+type InventoryFormMode = "create" | "edit";
+
+type InventoryFormState = {
+  itemId: string;
+  name: string;
+  category: string;
+  unit: string;
+  description: string;
+  currentQty: string;
+  targetQty: string;
+  reorderThreshold: string;
+  preferredVendor: string;
+  vendorSku: string;
+  variantName: string;
+  unitCost: string;
+  retailPrice: string;
+  storageLocation: string;
+};
+
+const emptyInventoryForm: InventoryFormState = {
+  itemId: "",
+  name: "",
+  category: "",
+  unit: "",
+  description: "",
+  currentQty: "",
+  targetQty: "",
+  reorderThreshold: "",
+  preferredVendor: "",
+  vendorSku: "",
+  variantName: "",
+  unitCost: "",
+  retailPrice: "",
+  storageLocation: "",
+};
 
 export default function InventoryPage() {
   const router = useRouter();
@@ -45,14 +81,9 @@ export default function InventoryPage() {
 
   const [newItemOpen, setNewItemOpen] = useState(false);
   const [editTargetOpen, setEditTargetOpen] = useState(false);
-  const [editingItemId, setEditingItemId] = useState("");
-  const [editingItemName, setEditingItemName] = useState("");
-  const [editingCurrentQty, setEditingCurrentQty] = useState("");
-  const [editingTargetQty, setEditingTargetQty] = useState("");
-
-  const [itemName, setItemName] = useState("");
-  const [currentQty, setCurrentQty] = useState("");
-  const [targetQty, setTargetQty] = useState("");
+  const [inventoryFormMode, setInventoryFormMode] = useState<InventoryFormMode>("create");
+  const [inventoryForm, setInventoryForm] = useState<InventoryFormState>(emptyInventoryForm);
+  const [inventoryFormError, setInventoryFormError] = useState("");
   const [allocationHydration, setAllocationHydration] = useState<AiFormHydration | null>(null);
   const [allocationJobId, setAllocationJobId] = useState("");
   const [allocationMode, setAllocationMode] = useState("Append");
@@ -88,11 +119,15 @@ export default function InventoryPage() {
         setAllocationMaterials(parsedMaterials);
         return;
       }
-      setItemName(payloadString(hydration.payload, "name"));
       const quantity = payloadNumber(hydration.payload, "quantity");
       const target = payloadNumber(hydration.payload, "targetQuantity");
-      setCurrentQty(quantity === null ? "" : String(quantity));
-      setTargetQty(target === null ? "" : String(target));
+      setInventoryForm({
+        ...emptyInventoryForm,
+        name: payloadString(hydration.payload, "name"),
+        currentQty: quantity === null ? "" : String(quantity),
+        targetQty: target === null ? "" : String(target),
+      });
+      setInventoryFormMode("create");
       setNewItemOpen(true);
     });
   }, [activeWorkspace.id]);
@@ -217,6 +252,37 @@ export default function InventoryPage() {
     else setLocalInventoryItems(persistedItems);
   }
 
+  function setInventoryField(field: keyof InventoryFormState, value: string) {
+    setInventoryForm((current) => ({ ...current, [field]: value }));
+  }
+
+  function nullableNumber(value: string) {
+    if (!value.trim()) return null;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : Number.NaN;
+  }
+
+  function moneyToCents(value: string) {
+    if (!value.trim()) return null;
+    const amount = Number(value.replace(/[$,]/g, ""));
+    return Number.isFinite(amount) ? Math.round(amount * 100) : Number.NaN;
+  }
+
+  function centsToMoney(value?: number | null) {
+    return value == null ? "" : String(value / 100);
+  }
+
+  async function postJson(path: string, body: Record<string, unknown>) {
+    const response = await fetch(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const payload = (await response.json()) as { data?: unknown; error?: string };
+    if (!response.ok) throw new Error(payload.error || "Inventory request failed.");
+    return payload.data;
+  }
+
   function getReservedForItem(itemName: string) {
     return activeMaterialJobs.flatMap((job) =>
       job.materials
@@ -265,9 +331,9 @@ export default function InventoryPage() {
   }
 
   function resetNewItemForm() {
-    setItemName("");
-    setCurrentQty("");
-    setTargetQty("");
+    setInventoryForm(emptyInventoryForm);
+    setInventoryFormMode("create");
+    setInventoryFormError("");
   }
 
   function closeNewItemModal() {
@@ -276,110 +342,192 @@ export default function InventoryPage() {
   }
 
   async function addInventoryItem() {
-    if (!itemName.trim()) return;
+    return saveInventoryForm();
+  }
 
-    const current = Number(currentQty);
-    const target = Number(targetQty);
-    if (Number.isNaN(current) || Number.isNaN(target)) return;
+  async function saveInventoryForm() {
+    setInventoryFormError("");
+    const form = inventoryForm;
+    if (!form.name.trim()) {
+      setInventoryFormError("Item name is required.");
+      return;
+    }
 
-    const newItem: InventoryRow = {
-      name: itemName.trim(),
+    const duplicateName = inventoryItems.some(
+      (item) =>
+        item.workspaceId === activeWorkspace.id &&
+        !item.autoGenerated &&
+        item.id !== form.itemId &&
+        item.name.trim().toLowerCase() === form.name.trim().toLowerCase()
+    );
+    if (duplicateName && !form.vendorSku.trim()) {
+      setInventoryFormError("This item name already exists. Open the existing item or use a different SKU variant.");
+      return;
+    }
+
+    const current = nullableNumber(form.currentQty);
+    const target = nullableNumber(form.targetQty);
+    const reorderThreshold = nullableNumber(form.reorderThreshold);
+    const unitCostCents = moneyToCents(form.unitCost);
+    const retailPriceCents = moneyToCents(form.retailPrice);
+    if ([current, target, reorderThreshold, unitCostCents, retailPriceCents].some(Number.isNaN)) {
+      setInventoryFormError("Quantities and prices must be valid numbers.");
+      return;
+    }
+
+    const nextItem: InventoryRow = {
+      id: form.itemId || undefined,
+      name: form.name.trim(),
       currentQty: current,
       targetQty: target,
-      warning: current < target,
+      reorderThreshold,
+      unit: form.unit.trim() || undefined,
+      notes: form.description.trim() || undefined,
+      storageLocation: form.storageLocation.trim() || undefined,
+      warning: (current ?? 0) < (reorderThreshold ?? target ?? 0),
       workspaceId: activeWorkspace.id,
     };
 
     try {
-      const result = await createInventoryItemAction(inventoryRepo, newItem);
+      const result =
+        inventoryFormMode === "edit" && form.itemId
+          ? await updateInventoryItemAction(inventoryRepo, nextItem)
+          : await createInventoryItemAction(inventoryRepo, nextItem);
       if (!result.ok) {
-        setDataError(result.error);
+        setInventoryFormError(result.error);
         return;
       }
       const created = result.data;
-      if (isDatabaseMode) setDatabaseInventoryItems((current) => [...current, created]);
-      else saveInventory([...inventoryItems, created]);
+      if (isDatabaseMode) {
+        const catalogPayload = {
+          workspace_id: activeWorkspace.id,
+          inventory_item_id: created.id,
+          name: form.name.trim(),
+          category: form.category.trim() || null,
+          unit: form.unit.trim() || null,
+          description: form.description.trim() || null,
+          default_cost_cents: unitCostCents,
+          retail_price_cents: retailPriceCents,
+          preferred_vendor: form.preferredVendor.trim() || null,
+          vendor_sku: form.vendorSku.trim() || null,
+          variant_name: form.variantName.trim() || null,
+        };
+
+        const existingCatalog = created.id ? await loadCatalogForInventoryItem(created.id) : null;
+        const savedCatalog = existingCatalog?.id
+          ? await postJson("/api/data/mutate", {
+              entity: "material_catalog_item",
+              operation: "update",
+              payload: { ...catalogPayload, id: existingCatalog.id },
+            })
+          : await postJson("/api/data/create", {
+              entity: "material_catalog_item",
+              payload: catalogPayload,
+            });
+
+        if (form.preferredVendor.trim() && form.vendorSku.trim() && savedCatalog && typeof savedCatalog === "object" && "id" in savedCatalog) {
+          await postJson("/api/data/create", {
+            entity: "material_vendor_sku",
+            payload: {
+              workspace_id: activeWorkspace.id,
+              material_id: String((savedCatalog as { id: string }).id),
+              vendor_name: form.preferredVendor.trim(),
+              sku: form.vendorSku.trim(),
+              variant_name: form.variantName.trim() || null,
+              unit_cost_cents: unitCostCents,
+              retail_price_cents: retailPriceCents,
+              notes: null,
+            },
+          }).catch((error) => {
+            if (!(error instanceof Error) || !error.message.toLowerCase().includes("already exist")) throw error;
+          });
+        }
+
+        setDatabaseInventoryItems((current) =>
+          inventoryFormMode === "edit"
+            ? current.map((item) => item.id === created.id ? created : item)
+            : [...current, created]
+        );
+      } else {
+        saveInventory(
+          inventoryFormMode === "edit"
+            ? inventoryItems.map((item) => getItemKey(item) === getItemKey(created) ? created : item)
+            : [...inventoryItems, created]
+        );
+      }
       setDataError("");
       closeNewItemModal();
     } catch (error) {
-      setDataError(error instanceof Error ? error.message : "Unable to create inventory item.");
+      setInventoryFormError(error instanceof Error ? error.message : "Unable to create inventory item.");
     }
   }
 
-  function openTargetEditor(item: InventoryRow) {
-    setEditingItemId(item.id ?? "");
-    setEditingItemName(item.name);
-    setEditingCurrentQty(item.currentQty === null ? "" : String(item.currentQty));
-    setEditingTargetQty(item.targetQty === null ? "" : String(item.targetQty));
+  async function loadCatalogForInventoryItem(itemId: string) {
+    if (!supabase || !isDatabaseMode) return null;
+    const { data, error } = await supabase
+      .from("material_catalog_items")
+      .select("id, category, unit, description, default_cost_cents, retail_price_cents, preferred_vendor, vendor_sku, variant_name")
+      .eq("workspace_id", activeWorkspace.id)
+      .eq("inventory_item_id", itemId)
+      .maybeSingle();
+    if (error) throw error;
+    return data as {
+      id: string;
+      category: string | null;
+      unit: string | null;
+      description: string | null;
+      default_cost_cents: number | null;
+      retail_price_cents: number | null;
+      preferred_vendor: string | null;
+      vendor_sku: string | null;
+      variant_name: string | null;
+    } | null;
+  }
+
+  async function openTargetEditor(item: InventoryRow) {
+    setInventoryFormMode("edit");
+    setInventoryFormError("");
+    setInventoryForm({
+      ...emptyInventoryForm,
+      itemId: item.id ?? "",
+      name: item.name,
+      currentQty: item.currentQty === null ? "" : String(item.currentQty),
+      targetQty: item.targetQty === null ? "" : String(item.targetQty),
+      reorderThreshold: item.reorderThreshold == null ? "" : String(item.reorderThreshold),
+      unit: item.unit ?? "",
+      description: item.notes ?? "",
+      storageLocation: item.storageLocation ?? "",
+    });
+    if (item.id && isDatabaseMode) {
+      try {
+        const catalog = await loadCatalogForInventoryItem(item.id);
+        if (catalog) {
+          setInventoryForm((current) => ({
+            ...current,
+            category: catalog.category ?? "",
+            unit: catalog.unit ?? current.unit,
+            description: catalog.description ?? current.description,
+            unitCost: centsToMoney(catalog.default_cost_cents),
+            retailPrice: centsToMoney(catalog.retail_price_cents),
+            preferredVendor: catalog.preferred_vendor ?? "",
+            vendorSku: catalog.vendor_sku ?? "",
+            variantName: catalog.variant_name ?? "",
+          }));
+        }
+      } catch (error) {
+        setInventoryFormError(error instanceof Error ? error.message : "Unable to load material details.");
+      }
+    }
     setEditTargetOpen(true);
   }
 
   function closeTargetEditor() {
     setEditTargetOpen(false);
-    setEditingItemId("");
-    setEditingItemName("");
-    setEditingCurrentQty("");
-    setEditingTargetQty("");
+    resetNewItemForm();
   }
 
   async function saveTargetEditor() {
-    if (!editingItemName.trim()) return;
-    if (!editingCurrentQty.trim() || !editingTargetQty.trim()) return;
-
-    const current = Number(editingCurrentQty);
-    const target = Number(editingTargetQty);
-    if (Number.isNaN(current) || Number.isNaN(target)) return;
-
-    const existingItem = inventoryItems.find(
-      (item) =>
-        item.workspaceId === activeWorkspace.id &&
-        (editingItemId ? item.id === editingItemId : item.name.trim().toLowerCase() === editingItemName.trim().toLowerCase())
-    );
-
-    const updatedItem: InventoryRow = {
-      ...(existingItem ?? {
-        name: editingItemName.trim(),
-        workspaceId: activeWorkspace.id,
-      }),
-      currentQty: current,
-      targetQty: target,
-      warning: current < target,
-      autoGenerated: false,
-    };
-
-    const updatedItems = existingItem
-      ? inventoryItems.map((item) =>
-          item.workspaceId === activeWorkspace.id &&
-          (editingItemId ? item.id === editingItemId : item.name.trim().toLowerCase() === editingItemName.trim().toLowerCase())
-            ? updatedItem
-            : item
-        )
-      : [...inventoryItems, updatedItem];
-
-    try {
-      const shouldCreate = !existingItem || existingItem.autoGenerated || !existingItem.id;
-      const result = shouldCreate
-        ? await createInventoryItemAction(inventoryRepo, updatedItem)
-        : await updateInventoryItemAction(inventoryRepo, updatedItem);
-      if (!result.ok) {
-        setDataError(result.error);
-        return;
-      }
-      const saved = result.data;
-      if (isDatabaseMode) {
-        setDatabaseInventoryItems((current) =>
-          !shouldCreate
-            ? current.map((item) => (editingItemId ? item.id === editingItemId : item.name.trim().toLowerCase() === editingItemName.trim().toLowerCase()) ? saved : item)
-            : [...current, saved]
-        );
-      } else {
-        saveInventory(updatedItems);
-      }
-      setDataError("");
-      closeTargetEditor();
-    } catch (error) {
-      setDataError(error instanceof Error ? error.message : "Unable to update inventory.");
-    }
+    return saveInventoryForm();
   }
 
   return (
@@ -483,24 +631,44 @@ export default function InventoryPage() {
 
       {(newItemOpen || editTargetOpen) && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4">
-          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl dark:bg-gray-900">
+          <div className="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-xl bg-white p-6 shadow-xl dark:bg-gray-900">
             <div className="mb-6 flex items-center justify-between">
-              <h2 className="text-xl font-bold text-gray-950 dark:text-gray-100">{editTargetOpen ? `Edit Inventory Item: ${editingItemName}` : "Add Inventory Item"}</h2>
+              <h2 className="text-xl font-bold text-gray-950 dark:text-gray-100">{editTargetOpen ? `Edit Inventory Item: ${inventoryForm.name}` : "Add Inventory Item"}</h2>
               <button type="button" onClick={editTargetOpen ? closeTargetEditor : closeNewItemModal} className="text-2xl text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">-</button>
             </div>
 
-            <div className="space-y-4">
-              {!editTargetOpen && <input type="text" value={itemName} onChange={(event) => setItemName(event.target.value)} placeholder="Item Name" className="w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800" />}
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                Current Qty
-                <input type="number" value={editTargetOpen ? editingCurrentQty : currentQty} onChange={(event) => editTargetOpen ? setEditingCurrentQty(event.target.value) : setCurrentQty(event.target.value)} placeholder="Current Qty" className="mt-2 w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800" />
-              </label>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                Target Qty
-                <input type="number" value={editTargetOpen ? editingTargetQty : targetQty} onChange={(event) => editTargetOpen ? setEditingTargetQty(event.target.value) : setTargetQty(event.target.value)} placeholder="Target Qty" className="mt-2 w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800" />
-              </label>
+            <div className="space-y-5">
+              <FormSection title="Basic Information">
+                <FormInput label="Item Name" value={inventoryForm.name} onChange={(value) => setInventoryField("name", value)} required />
+                <FormInput label="Category" value={inventoryForm.category} onChange={(value) => setInventoryField("category", value)} placeholder="Roofing, mulch, pipe, fittings" />
+                <FormInput label="Unit" value={inventoryForm.unit} onChange={(value) => setInventoryField("unit", value)} placeholder="bag, bundle, gallon, sq ft" />
+                <label className="block text-sm font-medium text-gray-700 sm:col-span-2 dark:text-gray-300">
+                  Description
+                  <textarea value={inventoryForm.description} onChange={(event) => setInventoryField("description", event.target.value)} rows={3} className="mt-2 w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800" />
+                </label>
+              </FormSection>
+              <FormSection title="Inventory">
+                <FormInput label="Current Quantity" type="number" value={inventoryForm.currentQty} onChange={(value) => setInventoryField("currentQty", value)} />
+                <FormInput label="Target Quantity" type="number" value={inventoryForm.targetQty} onChange={(value) => setInventoryField("targetQty", value)} />
+                <FormInput label="Reorder Threshold" type="number" value={inventoryForm.reorderThreshold} onChange={(value) => setInventoryField("reorderThreshold", value)} />
+              </FormSection>
+              <FormSection title="Purchasing">
+                <FormInput label="Preferred Vendor" value={inventoryForm.preferredVendor} onChange={(value) => setInventoryField("preferredVendor", value)} />
+                <FormInput label="Vendor SKU / Part Number" value={inventoryForm.vendorSku} onChange={(value) => setInventoryField("vendorSku", value)} />
+                <FormInput label="Variant / Color / Size" value={inventoryForm.variantName} onChange={(value) => setInventoryField("variantName", value)} placeholder="Charcoal, 2 inch, left-hand" />
+                <FormInput label="Unit Cost" value={inventoryForm.unitCost} onChange={(value) => setInventoryField("unitCost", value)} placeholder="0.00" />
+                <FormInput label="Retail Price" value={inventoryForm.retailPrice} onChange={(value) => setInventoryField("retailPrice", value)} placeholder="0.00" />
+              </FormSection>
+              <FormSection title="Storage">
+                <FormInput label="Storage Location" value={inventoryForm.storageLocation} onChange={(value) => setInventoryField("storageLocation", value)} placeholder="Warehouse, Truck 1, Trailer, Shelf A" />
+              </FormSection>
+              {inventoryFormError && (
+                <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
+                  {inventoryFormError}
+                </div>
+              )}
               <button type="button" onClick={editTargetOpen ? saveTargetEditor : addInventoryItem} className="w-full rounded-lg bg-blue-600 py-3 text-white hover:bg-blue-700">
-                {editTargetOpen ? "Save Quantity Targets" : "Add Item"}
+                {editTargetOpen ? "Save Inventory Item" : "Add Item"}
               </button>
             </div>
           </div>
@@ -543,5 +711,37 @@ export default function InventoryPage() {
         </div>
       )}
     </div>
+  );
+}
+
+function FormSection({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="rounded-lg border border-gray-200 p-4 dark:border-gray-800">
+      <h3 className="font-bold text-gray-950 dark:text-gray-100">{title}</h3>
+      <div className="mt-3 grid gap-3 sm:grid-cols-2">{children}</div>
+    </section>
+  );
+}
+
+function FormInput({
+  label,
+  value,
+  onChange,
+  type = "text",
+  placeholder = "",
+  required = false,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  type?: string;
+  placeholder?: string;
+  required?: boolean;
+}) {
+  return (
+    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+      {label}{required ? " *" : ""}
+      <input type={type} value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} className="mt-2 w-full rounded-lg border border-gray-300 px-4 py-3 dark:border-gray-700 dark:bg-gray-800" />
+    </label>
   );
 }
