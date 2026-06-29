@@ -15,7 +15,7 @@ import { createExpensesRepository, type ExpenseRow } from "@/lib/db/expenses";
 import { createInventoryRepository, type InventoryRow } from "@/lib/db/inventory";
 import { createInvoicesRepository } from "@/lib/db/invoices";
 import { createJobsRepository } from "@/lib/db/jobs";
-import { getInvoiceTotals, InvoiceRow } from "@/lib/frontierInvoices";
+import { formatCurrency, getInvoiceTotals, InvoiceRow } from "@/lib/frontierInvoices";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import OperationsActivityPanel from "@/app/dashboard/OperationsActivityPanel";
 
@@ -24,7 +24,7 @@ function moneyToNumber(value: string) {
 }
 
 function formatMoney(value: number) {
-  return `$${value.toLocaleString()}`;
+  return formatCurrency(value);
 }
 
 export default function DashboardPage() {

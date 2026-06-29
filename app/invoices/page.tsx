@@ -133,13 +133,19 @@ export default function InvoicesPage() {
     const invoice = invoices.find((item) => item.id === id);
     if (!invoice) return;
     try {
-      const result = await updateInvoiceAction(invoicesRepo, { ...invoice, status: nextStatus });
+      const currentInvoice =
+        isDatabaseMode ? await invoicesRepo.getInvoiceById(id, activeWorkspace.id) : invoice;
+      if (!currentInvoice) {
+        setInvoiceError("Invoice not found.");
+        return;
+      }
+      const result = await updateInvoiceAction(invoicesRepo, { ...currentInvoice, status: nextStatus });
       if (!result.ok) {
         setInvoiceError(result.error);
         return;
       }
       const saved = result.data;
-      if (nextStatus === "Paid" && invoice.status !== "Paid") {
+      if (nextStatus === "Paid" && currentInvoice.status !== "Paid") {
         await promptPaidInvoiceInventoryDeduction(saved);
       }
       saveInvoices(invoices.map((item) => item.id === id ? saved : item));
