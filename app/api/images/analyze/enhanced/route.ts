@@ -16,7 +16,7 @@ import {
   requireWorkspaceAccess,
 } from "@/lib/services/routeProtection";
 import { serviceLimits } from "@/lib/services/serviceLimits";
-import { DOCUMENT_STORAGE_BUCKET } from "@/lib/storage/documents";
+import { downloadStoredDocumentObject } from "@/lib/storage/documentObjectsServer";
 
 type EnhancedAnalyzeRequest = {
   workspaceId?: string;
@@ -140,12 +140,11 @@ export async function POST(request: NextRequest) {
       return jsonError("Stored image does not have a file path.", 400);
     }
 
-    const { data: storageObject, error: downloadError } = await access.serviceClient.storage
-      .from(document.storage_bucket || DOCUMENT_STORAGE_BUCKET)
-      .download(document.storage_path);
-    if (downloadError || !storageObject) {
-      return jsonError(downloadError?.message || "Unable to load stored image.", 500);
-    }
+    const storageObject = await downloadStoredDocumentObject({
+      serviceClient: access.serviceClient,
+      bucket: document.storage_bucket,
+      path: document.storage_path,
+    });
 
     const imageBytes = await storageObject.arrayBuffer();
     await access.serviceClient

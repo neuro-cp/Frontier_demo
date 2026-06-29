@@ -17,7 +17,7 @@ import { RateLimitError } from "@/lib/rateLimit/policy";
 import { featureDisabledMessage, featureFlags } from "@/lib/services/featureFlags";
 import { planUpgradeError } from "@/lib/services/routeProtection";
 import { serviceLimits } from "@/lib/services/serviceLimits";
-import { DOCUMENT_STORAGE_BUCKET } from "@/lib/storage";
+import { downloadStoredDocumentObject } from "@/lib/storage/documentObjectsServer";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 
 type OcrRequestBody = {
@@ -192,14 +192,11 @@ export async function POST(request: NextRequest) {
         throw new Error("This document does not have a stored file to process.");
       }
 
-      const { data, error } = await supabase.storage
-        .from(document.storage_bucket || DOCUMENT_STORAGE_BUCKET)
-        .download(document.storage_path);
-
-      if (error || !data) {
-        throw new Error(error?.message || "Unable to load the stored document for OCR.");
-      }
-      storedFile = data;
+      storedFile = await downloadStoredDocumentObject({
+        serviceClient,
+        bucket: document.storage_bucket,
+        path: document.storage_path,
+      });
     }
 
     const extraction = await runOcrExtraction({

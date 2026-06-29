@@ -25,10 +25,10 @@ import {
   type NormalizedImageResult,
 } from "@/lib/images/normalizeImage";
 import {
-  DOCUMENT_STORAGE_BUCKET,
   buildDocumentStoragePath,
   createDocumentDownloadUrl,
   getDocumentEntity,
+  getDocumentStorageBucketLabel,
   removeDocumentFile,
   uploadDocumentFile,
 } from "@/lib/storage";
@@ -88,6 +88,12 @@ type ApiDocument = {
   image_analysis_confidence?: number | null;
   image_analysis_summary?: string | null;
   image_review_draft_id?: string | null;
+};
+
+type UploadFileItem = {
+  file: File;
+  originalFile: File;
+  normalization: NormalizedImageResult | null;
 };
 
 type ApiReviewDraft = {
@@ -193,6 +199,7 @@ export default function DocumentsPage() {
   const [sizeBytes, setSizeBytes] = useState(0);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [originalSelectedFile, setOriginalSelectedFile] = useState<File | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<UploadFileItem[]>([]);
   const [normalization, setNormalization] = useState<NormalizedImageResult | null>(null);
   const [notes, setNotes] = useState("");
   const [clientId, setClientId] = useState("");
@@ -323,6 +330,7 @@ export default function DocumentsPage() {
     setSizeBytes(0);
     setSelectedFile(null);
     setOriginalSelectedFile(null);
+    setSelectedFiles([]);
     setNormalization(null);
     setNotes("");
     setClientId("");
@@ -340,34 +348,36 @@ export default function DocumentsPage() {
     setJobId("");
   }
 
-  async function saveUploadPlaceholder() {
-    if (!documentName.trim()) return;
-    setDocumentError("");
-    setDocumentNotice("");
-    setIsSavingDocument(true);
-
+  async function createStoredDocumentFromUpload(uploadItem: UploadFileItem | null, total: number) {
     const documentId = crypto.randomUUID();
     const entity = getDocumentEntity({ clientId, jobId, invoiceId });
-    const storageFileName = selectedFile ? `${documentId}-${selectedFile.name}` : fileName;
+    const file = uploadItem?.file ?? selectedFile;
+    const originalFile = uploadItem?.originalFile ?? originalSelectedFile;
+    const fileLabel = file?.name || fileName || "No file selected";
+    const storageFileName = file ? `${documentId}-${file.name}` : fileName;
     const storagePath = isDatabaseMode && storageFileName
       ? buildDocumentStoragePath({
           workspaceId: activeWorkspace.id,
           entityType: entity.entityType,
           entityId: entity.entityId,
           fileName: storageFileName,
-        })
+      })
       : "";
+    const baseName = documentName.trim();
+    const documentDisplayName =
+      total > 1 && file?.name ? `${baseName} - ${file.name}` : baseName;
+    const fileNormalization = uploadItem?.normalization ?? normalization;
 
     const newDocument: StoredDocument = {
       id: documentId,
       workspaceId: activeWorkspace.id,
-      name: documentName.trim(),
+      name: documentDisplayName,
       detectedType,
       extractionStatus: "Waiting for extraction",
-      fileName: selectedFile?.name || fileName || "No file selected",
-      mimeType: selectedFile?.type || mimeType,
-      sizeBytes: selectedFile?.size || sizeBytes,
-      storageBucket: storagePath ? DOCUMENT_STORAGE_BUCKET : "",
+      fileName: fileLabel,
+      mimeType: file?.type || mimeType,
+      sizeBytes: file?.size || sizeBytes,
+      storageBucket: storagePath ? getDocumentStorageBucketLabel() : "",
       storagePath,
       storageStatus: storagePath ? "Stored" : "Pending storage setup",
       processingStatus: "uploaded",
@@ -378,27 +388,25 @@ export default function DocumentsPage() {
       invoiceId,
       createdAt: new Date().toISOString(),
       uploadedBy: user?.id,
-      originalFileName: normalization?.originalFileName || originalSelectedFile?.name || selectedFile?.name || "",
-      originalMimeType: normalization?.originalMimeType || originalSelectedFile?.type || selectedFile?.type || "",
-      originalSizeBytes: normalization?.originalSizeBytes ?? originalSelectedFile?.size ?? selectedFile?.size,
-      normalizedFileName: normalization?.normalizedFileName || selectedFile?.name || "",
-      normalizedMimeType: normalization?.normalizedMimeType || selectedFile?.type || "",
-      normalizedSizeBytes: normalization?.normalizedSizeBytes ?? selectedFile?.size,
-      normalizationStatus: normalization?.normalizationStatus || (selectedFile?.type.startsWith("image/") ? "kept_original" : "not_applicable"),
+      originalFileName: fileNormalization?.originalFileName || originalFile?.name || file?.name || "",
+      originalMimeType: fileNormalization?.originalMimeType || originalFile?.type || file?.type || "",
+      originalSizeBytes: fileNormalization?.originalSizeBytes ?? originalFile?.size ?? file?.size,
+      normalizedFileName: fileNormalization?.normalizedFileName || file?.name || "",
+      normalizedMimeType: fileNormalization?.normalizedMimeType || file?.type || "",
+      normalizedSizeBytes: fileNormalization?.normalizedSizeBytes ?? file?.size,
+      normalizationStatus: fileNormalization?.normalizationStatus || (file?.type.startsWith("image/") ? "kept_original" : "not_applicable"),
     };
 
     try {
-      if (isDatabaseMode && supabase && selectedFile && storagePath) {
-        await uploadDocumentFile({ workspaceId: activeWorkspace.id, path: storagePath, file: selectedFile });
+      if (isDatabaseMode && supabase && file && storagePath) {
+        await uploadDocumentFile({ workspaceId: activeWorkspace.id, path: storagePath, file });
       }
 
       const result = await createDocumentAction(documentsRepo, newDocument);
       if (!result.ok) {
         throw new Error(result.error);
       }
-      const created = result.data;
-      if (isDatabaseMode) setDatabaseDocuments((current) => [created, ...current]);
-      closeUploadModal();
+      return result.data;
     } catch (error) {
       if (isDatabaseMode && supabase && storagePath) {
         try {
@@ -407,6 +415,30 @@ export default function DocumentsPage() {
           console.error("Unable to clean up failed document upload.", cleanupError);
         }
       }
+      throw error;
+    }
+  }
+
+  async function saveUploadPlaceholder() {
+    if (!documentName.trim()) return;
+    setDocumentError("");
+    setDocumentNotice("");
+    setIsSavingDocument(true);
+
+    try {
+      const uploadItems = selectedFiles.length > 0 ? selectedFiles : [null];
+      const createdDocuments: StoredDocument[] = [];
+      for (const uploadItem of uploadItems) {
+        createdDocuments.push(await createStoredDocumentFromUpload(uploadItem, uploadItems.length));
+      }
+      if (isDatabaseMode) setDatabaseDocuments((current) => [...createdDocuments, ...current]);
+      setDocumentNotice(
+        createdDocuments.length === 1
+          ? "Document uploaded."
+          : `${createdDocuments.length} documents uploaded.`
+      );
+      closeUploadModal();
+    } catch (error) {
       setDocumentError(error instanceof Error ? error.message : "Unable to save document.");
     } finally {
       setIsSavingDocument(false);
@@ -423,7 +455,11 @@ export default function DocumentsPage() {
 
     try {
       if (isDatabaseMode && supabase && document?.storagePath) {
-        await removeDocumentFile({ workspaceId: document.workspaceId, path: document.storagePath });
+        await removeDocumentFile({
+          workspaceId: document.workspaceId,
+          path: document.storagePath,
+          bucket: document.storageBucket,
+        });
       }
       const result = await deleteDocumentAction(
         documentsRepo,
@@ -449,7 +485,11 @@ export default function DocumentsPage() {
         return;
       }
 
-      const url = await createDocumentDownloadUrl({ workspaceId: document.workspaceId, path: document.storagePath });
+      const url = await createDocumentDownloadUrl({
+        workspaceId: document.workspaceId,
+        path: document.storagePath,
+        bucket: document.storageBucket,
+      });
       window.open(url, "_blank", "noopener,noreferrer");
     } catch (error) {
       setDocumentError(error instanceof Error ? error.message : "Unable to download document.");
@@ -690,40 +730,53 @@ export default function DocumentsPage() {
     };
   }
 
-  async function handleSelectedFile(file: File | null) {
-    setOriginalSelectedFile(file);
+  async function prepareUploadFile(file: File): Promise<UploadFileItem> {
+    if (!file.type.startsWith("image/")) {
+      return { file, originalFile: file, normalization: null };
+    }
+    const normalized = await normalizeImageForAi(file);
+    return { file: normalized.file, originalFile: file, normalization: normalized };
+  }
+
+  async function handleSelectedFiles(files: FileList | File[]) {
     setDocumentError("");
     setNormalization(null);
 
-    if (!file) {
+    const nextFiles = Array.from(files);
+    if (nextFiles.length === 0) {
+      setSelectedFiles([]);
       setSelectedFile(null);
+      setOriginalSelectedFile(null);
       setFileName("");
       setMimeType("");
       setSizeBytes(0);
-      return;
-    }
-
-    if (!file.type.startsWith("image/")) {
-      setSelectedFile(file);
-      setFileName(file.name);
-      setMimeType(file.type);
-      setSizeBytes(file.size);
       return;
     }
 
     try {
-      const normalized = await normalizeImageForAi(file);
-      setNormalization(normalized);
-      setSelectedFile(normalized.file);
-      setFileName(normalized.file.name);
-      setMimeType(normalized.file.type);
-      setSizeBytes(normalized.file.size);
+      const preparedFiles = [];
+      for (const file of nextFiles) {
+        preparedFiles.push(await prepareUploadFile(file));
+      }
+      const primary = preparedFiles[0];
+      setSelectedFiles(preparedFiles);
+      setOriginalSelectedFile(primary.originalFile);
+      setSelectedFile(primary.file);
+      setNormalization(primary.normalization);
+      setFileName(primary.file.name);
+      setMimeType(primary.file.type);
+      setSizeBytes(primary.file.size);
+      if (!documentName.trim() && nextFiles.length === 1) {
+        setDocumentName(primary.originalFile.name.replace(/\.[^.]+$/, ""));
+      }
     } catch (error) {
+      setSelectedFiles([]);
       setSelectedFile(null);
+      setOriginalSelectedFile(null);
       setFileName("");
       setMimeType("");
       setSizeBytes(0);
-      setDocumentError(error instanceof Error ? error.message : "Unable to normalize image.");
+      setDocumentError(error instanceof Error ? error.message : "Unable to prepare selected files.");
     }
   }
 
@@ -1300,17 +1353,47 @@ export default function DocumentsPage() {
 
               <div>
                 <label className="mb-2 block text-base font-medium text-gray-900 dark:text-gray-100 sm:text-lg">
-                  File
+                  Files
                 </label>
 
-                <input
-                  type="file"
-                  onChange={(event) => {
-                    const file = event.target.files?.[0];
-                    void handleSelectedFile(file ?? null);
+                <div
+                  onDragOver={(event) => {
+                    event.preventDefault();
                   }}
-                  className="block w-full text-sm text-gray-900 dark:text-gray-100"
-                />
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    void handleSelectedFiles(event.dataTransfer.files);
+                  }}
+                  className="rounded-xl border border-dashed border-gray-300 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-950/40"
+                >
+                  <input
+                    type="file"
+                    multiple
+                    onChange={(event) => {
+                      void handleSelectedFiles(event.target.files ?? []);
+                    }}
+                    className="block w-full text-sm text-gray-900 dark:text-gray-100"
+                  />
+                  <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
+                    Select or drag multiple PDFs, images, receipts, notes, or client documents.
+                  </p>
+                </div>
+                {selectedFiles.length > 0 && (
+                  <div className="mt-3 rounded-lg border border-gray-200 p-3 text-sm dark:border-gray-800">
+                    <p className="font-semibold text-gray-900 dark:text-gray-100">
+                      {selectedFiles.length} file{selectedFiles.length === 1 ? "" : "s"} queued
+                    </p>
+                    <ul className="mt-2 space-y-1 text-gray-600 dark:text-gray-300">
+                      {selectedFiles.slice(0, 5).map((item) => (
+                        <li key={`${item.originalFile.name}-${item.originalFile.size}`}>
+                          {item.originalFile.name}
+                          {item.normalization ? ` -> ${item.file.name}` : ""}
+                        </li>
+                      ))}
+                      {selectedFiles.length > 5 && <li>+ {selectedFiles.length - 5} more</li>}
+                    </ul>
+                  </div>
+                )}
                 {normalization && (
                   <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
                     Image {normalization.normalizationStatus.replace("_", " ")}:

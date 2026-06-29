@@ -1,4 +1,9 @@
 export const DOCUMENT_STORAGE_BUCKET = "workspace-documents";
+export const R2_DOCUMENT_STORAGE_BUCKET_LABEL = "r2";
+
+export function getDocumentStorageBucketLabel() {
+  return R2_DOCUMENT_STORAGE_BUCKET_LABEL;
+}
 
 export type DocumentEntityType = "client" | "job" | "invoice" | "workspace";
 
@@ -71,11 +76,14 @@ export async function uploadDocumentFile({
 export async function createDocumentDownloadUrl({
   workspaceId,
   path,
+  bucket,
 }: {
   workspaceId: string;
   path: string;
+  bucket?: string | null;
 }) {
   const query = new URLSearchParams({ workspaceId, path });
+  if (bucket) query.set("bucket", bucket);
   const response = await fetch(`/api/documents/storage?${query.toString()}`);
   const payload = (await response.json()) as { url?: string; error?: string };
   if (!response.ok || !payload.url) throw new Error(payload.error || "Unable to create download link.");
@@ -85,14 +93,16 @@ export async function createDocumentDownloadUrl({
 export async function removeDocumentFile({
   workspaceId,
   path,
+  bucket,
 }: {
   workspaceId: string;
   path: string;
+  bucket?: string | null;
 }) {
   const response = await fetch("/api/documents/storage", {
     method: "DELETE",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ workspaceId, path }),
+    body: JSON.stringify({ workspaceId, path, bucket }),
   });
   const payload = (await response.json()) as { error?: string };
   if (!response.ok) throw new Error(payload.error || "Unable to remove document file.");
