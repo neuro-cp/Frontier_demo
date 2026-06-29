@@ -12,7 +12,13 @@ import {
   deleteInvoiceAction,
   updateInvoiceAction,
 } from "@/lib/actions/invoices";
-import { storageKeys, useStoredJsonState, writeStoredJson } from "@/lib/clientStorage";
+import {
+  readStoredString,
+  storageKeys,
+  useStoredJsonState,
+  writeStoredJson,
+  writeStoredString,
+} from "@/lib/clientStorage";
 import { createInvoicesRepository } from "@/lib/db/invoices";
 import {
   formatMoneyNumber,
@@ -54,6 +60,15 @@ export default function InvoiceDetailPage() {
   const invoice = useMemo(() => {
     return isDatabaseMode ? databaseInvoice : localInvoices.find((item) => item.id === invoiceId);
   }, [databaseInvoice, invoiceId, isDatabaseMode, localInvoices]);
+
+  useEffect(() => {
+    const previousTheme = readStoredString(storageKeys.theme, "dark");
+    writeStoredString(storageKeys.theme, "light");
+
+    return () => {
+      writeStoredString(storageKeys.theme, previousTheme);
+    };
+  }, []);
 
   useEffect(() => {
     if (!isDatabaseMode) return;
