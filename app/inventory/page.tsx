@@ -653,8 +653,8 @@ export default function InventoryPage() {
                 <FormInput label="Reorder Threshold" type="number" value={inventoryForm.reorderThreshold} onChange={(value) => setInventoryField("reorderThreshold", value)} />
               </FormSection>
               <FormSection title="Purchasing">
-                <FormInput label="Preferred Vendor" value={inventoryForm.preferredVendor} onChange={(value) => setInventoryField("preferredVendor", value)} />
-                <FormInput label="Vendor SKU / Part Number" value={inventoryForm.vendorSku} onChange={(value) => setInventoryField("vendorSku", value)} />
+                <FormInput label="Preferred Supplier" value={inventoryForm.preferredVendor} onChange={(value) => setInventoryField("preferredVendor", value)} />
+                <FormInput label="Supplier SKU / Part Number" value={inventoryForm.vendorSku} onChange={(value) => setInventoryField("vendorSku", value)} />
                 <FormInput label="Variant / Color / Size" value={inventoryForm.variantName} onChange={(value) => setInventoryField("variantName", value)} placeholder="Charcoal, 2 inch, left-hand" />
                 <FormInput label="Unit Cost" value={inventoryForm.unitCost} onChange={(value) => setInventoryField("unitCost", value)} placeholder="0.00" />
                 <FormInput label="Retail Price" value={inventoryForm.retailPrice} onChange={(value) => setInventoryField("retailPrice", value)} placeholder="0.00" />

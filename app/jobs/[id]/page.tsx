@@ -213,7 +213,7 @@ export default function JobPage() {
           const baseDetails = [
             catalog?.category,
             catalog?.unit ? `Unit: ${catalog.unit}` : item.unit ? `Unit: ${item.unit}` : undefined,
-            catalog?.preferred_vendor ? `Vendor: ${catalog.preferred_vendor}` : undefined,
+            catalog?.preferred_vendor ? `Supplier: ${catalog.preferred_vendor}` : undefined,
             catalog?.vendor_sku ? `SKU: ${catalog.vendor_sku}` : undefined,
             catalog?.variant_name,
             catalog?.default_cost_cents != null ? `Cost: $${(catalog.default_cost_cents / 100).toFixed(2)}` : undefined,
@@ -237,7 +237,7 @@ export default function JobPage() {
           if (!catalog) continue;
           for (const sku of skus.filter((row) => row.material_id === catalog.id)) {
             const skuDetails = [
-              `Vendor: ${sku.vendor_name}`,
+              `Supplier: ${sku.vendor_name}`,
               `SKU: ${sku.sku}`,
               sku.variant_name,
               sku.unit_cost_cents != null ? `Cost: $${(sku.unit_cost_cents / 100).toFixed(2)}` : undefined,

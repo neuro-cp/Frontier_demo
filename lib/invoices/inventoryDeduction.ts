@@ -2,7 +2,10 @@ import type { InvoiceRow } from "@/lib/frontierInvoices";
 
 export async function promptPaidInvoiceInventoryDeduction(invoice: InvoiceRow) {
   const hasInventoryLines = invoice.lineItems.some(
-    (item) => item.inventoryItemId && item.inventoryDeductionStatus !== "Deducted"
+    (item) =>
+      item.inventoryItemId &&
+      item.inventoryDeductionStatus !== "Deducted" &&
+      item.inventoryDeductionStatus !== "Pending"
   );
   if (!hasInventoryLines) return false;
 

@@ -276,9 +276,9 @@ export default function MaterialDetailPage() {
       setVendorRetailPrice("");
       setVendorNotes("");
       setSelectedVendorSkuId("");
-      setNotice("Vendor SKU added.");
+      setNotice("Supplier SKU added.");
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : "Unable to add vendor SKU.");
+      setError(saveError instanceof Error ? saveError.message : "Unable to add supplier SKU.");
     } finally {
       setIsSaving(false);
     }
@@ -399,15 +399,15 @@ export default function MaterialDetailPage() {
               <label className="text-sm font-semibold">Reorder Threshold<input type="number" value={editReorderThreshold} onChange={(event) => setEditReorderThreshold(event.target.value)} className="mt-2 w-full rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800" /></label>
               <label className="text-sm font-semibold">Default Unit Cost<input value={editDefaultCost} onChange={(event) => setEditDefaultCost(event.target.value)} placeholder="0.00" className="mt-2 w-full rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800" /></label>
               <label className="text-sm font-semibold">Retail Price<input value={editRetailPrice} onChange={(event) => setEditRetailPrice(event.target.value)} placeholder="0.00" className="mt-2 w-full rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800" /></label>
-              <label className="text-sm font-semibold">Preferred Vendor<input value={editPreferredVendor} onChange={(event) => setEditPreferredVendor(event.target.value)} className="mt-2 w-full rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800" /></label>
-              <label className="text-sm font-semibold">Vendor SKU / Part Number<input value={editVendorSku} onChange={(event) => setEditVendorSku(event.target.value)} className="mt-2 w-full rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800" /></label>
+              <label className="text-sm font-semibold">Preferred Supplier<input value={editPreferredVendor} onChange={(event) => setEditPreferredVendor(event.target.value)} className="mt-2 w-full rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800" /></label>
+              <label className="text-sm font-semibold">Supplier SKU / Part Number<input value={editVendorSku} onChange={(event) => setEditVendorSku(event.target.value)} className="mt-2 w-full rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800" /></label>
               <label className="text-sm font-semibold">Variant / Color / Size<input value={editVariantName} onChange={(event) => setEditVariantName(event.target.value)} className="mt-2 w-full rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800" /></label>
               <label className="text-sm font-semibold sm:col-span-2">Description<textarea rows={3} value={editDescription} onChange={(event) => setEditDescription(event.target.value)} className="mt-2 w-full rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800" /></label>
             </div>
             <button type="button" onClick={saveMaterialDetails} disabled={isSaving} className="mt-4 rounded-lg bg-blue-600 px-4 py-2 font-semibold text-white hover:bg-blue-700 disabled:opacity-50">Save Material Details</button>
           </section>
           <section>
-            <h2 className="text-xl font-bold">Vendor / SKU Variants</h2>
+            <h2 className="text-xl font-bold">Supplier / SKU Variants</h2>
             <div className="mt-3 overflow-hidden rounded-lg border border-gray-200 dark:border-gray-800">
               {detail?.vendorSkus.length ? detail.vendorSkus.map((row) => (
                 <button
@@ -432,21 +432,21 @@ export default function MaterialDetailPage() {
                     {detail.jobMaterials.length} linked job{detail.jobMaterials.length === 1 ? "" : "s"}
                   </span>
                 </button>
-              )) : <div className="p-6 text-gray-500 dark:text-gray-400">No vendor SKUs.</div>}
+              )) : <div className="p-6 text-gray-500 dark:text-gray-400">No supplier SKUs.</div>}
             </div>
           </section>
           {detail?.catalog?.id && (
             <section className="rounded-lg border border-gray-200 p-4 dark:border-gray-800">
-              <h2 className="text-xl font-bold">Add Vendor / SKU Variant</h2>
+              <h2 className="text-xl font-bold">Add Supplier / SKU Variant</h2>
               <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                <input value={vendorName} onChange={(event) => setVendorName(event.target.value)} placeholder="Vendor" className="rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800" />
+                <input value={vendorName} onChange={(event) => setVendorName(event.target.value)} placeholder="Supplier" className="rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800" />
                 <input value={vendorSku} onChange={(event) => setVendorSku(event.target.value)} placeholder="SKU" className="rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800" />
                 <input value={vendorVariantName} onChange={(event) => setVendorVariantName(event.target.value)} placeholder="Variant / Color / Size" className="rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800" />
                 <input value={vendorUnitCost} onChange={(event) => setVendorUnitCost(event.target.value)} placeholder="Unit cost" className="rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800" />
                 <input value={vendorRetailPrice} onChange={(event) => setVendorRetailPrice(event.target.value)} placeholder="Retail price" className="rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800" />
                 <input value={vendorNotes} onChange={(event) => setVendorNotes(event.target.value)} placeholder="Notes" className="rounded-lg border border-gray-300 p-3 dark:border-gray-700 dark:bg-gray-800" />
               </div>
-              <button type="button" onClick={addVendorSku} disabled={isSaving || !vendorName.trim() || !vendorSku.trim()} className="mt-4 rounded-lg bg-blue-600 px-4 py-2 font-semibold text-white hover:bg-blue-700 disabled:opacity-50">Add Vendor SKU</button>
+              <button type="button" onClick={addVendorSku} disabled={isSaving || !vendorName.trim() || !vendorSku.trim()} className="mt-4 rounded-lg bg-blue-600 px-4 py-2 font-semibold text-white hover:bg-blue-700 disabled:opacity-50">Add Supplier SKU</button>
             </section>
           )}
           <RelatedTable title="Inventory Lots" empty="No inventory lots." rows={detail?.lots.map((row) => `${row.quantity} - ${row.lot_reference || "No reference"} - ${row.received_at || "No received date"}`) ?? []} />
