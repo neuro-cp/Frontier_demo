@@ -62,7 +62,7 @@ export default function NotificationBell() {
       aria-label="Notifications"
       title="Notifications"
     >
-      <span>!</span>
+      <span>🔔</span>
       {unreadCount > 0 && (
         <span className="absolute -right-1 -top-1 min-w-5 rounded-full bg-red-600 px-1.5 py-0.5 text-center text-xs font-bold text-white">
           {unreadCount > 99 ? "99+" : unreadCount}
