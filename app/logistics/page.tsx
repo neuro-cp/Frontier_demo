@@ -31,7 +31,7 @@ const LogisticsMap = dynamic(() => import("./LogisticsMap"), {
   ssr: false,
 });
 
-const clientStatuses = ["All", "Lead", "Active", "Inactive"];
+const stopFilters = ["Scheduled", "All", "Lead", "Active", "Inactive"];
 const maxGoogleMapsUrlLength = 2048;
 
 type RouteApiResponse = {
@@ -112,7 +112,7 @@ export default function LogisticsPage() {
   const { isSupabaseConfigured, user } = useAuthSession();
   const isDatabaseMode = Boolean(isSupabaseConfigured && user);
 
-  const [selectedStatus, setSelectedStatus] = useState("All");
+  const [selectedStatus, setSelectedStatus] = useState("Scheduled");
   const [selectedDate, setSelectedDate] = useState(() =>
     formatDateInput(new Date())
   );
@@ -225,12 +225,15 @@ export default function LogisticsPage() {
   }, [clients, activeWorkspace.id]);
 
   const filteredClients = useMemo(() => {
+    if (selectedStatus === "Scheduled") return [];
     if (selectedStatus === "All") return workspaceClients;
 
     return workspaceClients.filter(
       (client) => client.status === selectedStatus
     );
   }, [workspaceClients, selectedStatus]);
+  const stopClientScope =
+    selectedStatus === "Scheduled" ? workspaceClients : filteredClients;
 
   const workspaceJobs = useMemo(() => {
     return jobs.filter((job) => job.workspaceId === activeWorkspace.id);
@@ -260,13 +263,13 @@ export default function LogisticsPage() {
   const visibleLocations = useMemo(() => {
     return dedupeLogisticsLocations([
       ...buildLogisticsLocations(filteredClients),
-      ...buildJobLogisticsLocations(scheduledJobs, filteredClients),
-      ...buildClientEventLogisticsLocations(scheduledClientEvents, filteredClients),
+      ...buildJobLogisticsLocations(scheduledJobs, stopClientScope),
+      ...buildClientEventLogisticsLocations(scheduledClientEvents, stopClientScope),
     ]).sort((a, b) =>
       (a.scheduledTime || "23:59").localeCompare(b.scheduledTime || "23:59") ||
       a.name.localeCompare(b.name)
     );
-  }, [filteredClients, scheduledClientEvents, scheduledJobs]);
+  }, [filteredClients, scheduledClientEvents, scheduledJobs, stopClientScope]);
 
   const missingCoordinateClients = useMemo(() => {
     return getMissingCoordinateClients(filteredClients);
@@ -608,7 +611,7 @@ export default function LogisticsPage() {
             }}
             className="w-full rounded-lg border border-gray-200 bg-white px-4 py-3 text-gray-900 shadow-sm sm:w-auto dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
           >
-            {clientStatuses.map((status) => (
+            {stopFilters.map((status) => (
               <option key={status}>{status}</option>
             ))}
           </select>
