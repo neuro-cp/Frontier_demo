@@ -96,6 +96,11 @@ type UploadFileItem = {
   normalization: NormalizedImageResult | null;
 };
 
+function debugUpload(label: string, data?: Record<string, unknown>) {
+  if (process.env.NEXT_PUBLIC_DEBUG_UPLOADS !== "1") return;
+  console.info(`[documents-upload] ${label}`, data ?? {});
+}
+
 type ApiReviewDraft = {
   id: string;
   sourceId: string | null;
@@ -363,10 +368,25 @@ export default function DocumentsPage() {
           fileName: storageFileName,
       })
       : "";
-    const baseName = documentName.trim();
-    const documentDisplayName =
-      total > 1 && file?.name ? `${baseName} - ${file.name}` : baseName;
+    const explicitName = documentName.trim();
+    const fallbackName = file?.name ? file.name.replace(/\.[^.]+$/, "") : fileName.trim();
+    const documentDisplayName = explicitName
+      ? total > 1 && file?.name
+        ? `${explicitName} - ${file.name}`
+        : explicitName
+      : fallbackName;
     const fileNormalization = uploadItem?.normalization ?? normalization;
+
+    if (!documentDisplayName.trim()) {
+      throw new Error("Enter a document name or choose at least one file.");
+    }
+
+    debugUpload("selected-files", {
+      fileName: file?.name ?? "",
+      hasFile: Boolean(file),
+      storagePath: storagePath ? "generated" : "none",
+      workspaceId: activeWorkspace.id ? "present" : "missing",
+    });
 
     const newDocument: StoredDocument = {
       id: documentId,
@@ -399,15 +419,22 @@ export default function DocumentsPage() {
 
     try {
       if (isDatabaseMode && supabase && file && storagePath) {
+        debugUpload("upload-request-start", { fileName: file.name, size: file.size });
         await uploadDocumentFile({ workspaceId: activeWorkspace.id, path: storagePath, file });
+        debugUpload("upload-response", { ok: true });
       }
 
+      debugUpload("metadata-create-start", { fileName: fileLabel, storageBucket: newDocument.storageBucket || "none" });
       const result = await createDocumentAction(documentsRepo, newDocument);
       if (!result.ok) {
         throw new Error(result.error);
       }
+      debugUpload("metadata-create-response", { ok: true, documentId });
       return result.data;
     } catch (error) {
+      debugUpload("error", {
+        message: error instanceof Error ? error.message : "Unable to save document.",
+      });
       if (isDatabaseMode && supabase && storagePath) {
         try {
           await removeDocumentFile({
@@ -424,13 +451,20 @@ export default function DocumentsPage() {
   }
 
   async function saveUploadPlaceholder() {
-    if (!documentName.trim()) return;
+    debugUpload("save-click", {
+      selectedFiles: selectedFiles.length,
+      hasSelectedFile: Boolean(selectedFile),
+      hasDocumentName: Boolean(documentName.trim()),
+    });
     setDocumentError("");
     setDocumentNotice("");
     setIsSavingDocument(true);
 
     try {
       const uploadItems = selectedFiles.length > 0 ? selectedFiles : [null];
+      if (!documentName.trim() && uploadItems.every((uploadItem) => !uploadItem?.file && !selectedFile)) {
+        throw new Error("Enter a document name or choose at least one file.");
+      }
       const createdDocuments: StoredDocument[] = [];
       for (const uploadItem of uploadItems) {
         createdDocuments.push(await createStoredDocumentFromUpload(uploadItem, uploadItems.length));
@@ -1236,6 +1270,18 @@ export default function DocumentsPage() {
             </div>
 
             <form className="space-y-5 sm:space-y-6">
+              {documentError && (
+                <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
+                  {documentError}
+                </div>
+              )}
+
+              {documentNotice && (
+                <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm font-semibold text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300">
+                  {documentNotice}
+                </div>
+              )}
+
               <div>
                 <label className="mb-2 block text-base font-medium text-gray-900 dark:text-gray-100 sm:text-lg">
                   Workspace
