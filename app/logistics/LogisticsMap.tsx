@@ -10,38 +10,54 @@ type LogisticsMapProps = {
   locations: LogisticsLocation[];
   selectedLocationIds: string[];
   routePath?: Array<[number, number]>;
+  isRoadRoute?: boolean;
   onToggleLocation: (locationId: string) => void;
 };
 
 const defaultCenter: [number, number] = [42.68, -83.15];
 
-const defaultMarkerIcon = new L.Icon({
-  iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
-  iconRetinaUrl:
-    "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
-  shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
-  iconSize: [25, 41],
-  iconAnchor: [12, 41],
-  popupAnchor: [1, -34],
-  shadowSize: [41, 41],
-});
+function colorMarkerIcon(color: "blue" | "green" | "orange") {
+  return new L.Icon({
+    iconUrl:
+      color === "blue"
+        ? "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png"
+        : `https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-${color}.png`,
+    iconRetinaUrl:
+      color === "blue"
+        ? "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png"
+        : `https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-${color}.png`,
+    shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
+    iconSize: [25, 41],
+    iconAnchor: [12, 41],
+    popupAnchor: [1, -34],
+    shadowSize: [41, 41],
+  });
+}
 
-const selectedMarkerIcon = new L.Icon({
-  iconUrl:
-    "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-green.png",
-  iconRetinaUrl:
-    "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-green.png",
-  shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
-  iconSize: [25, 41],
-  iconAnchor: [12, 41],
-  popupAnchor: [1, -34],
-  shadowSize: [41, 41],
-});
+const availableMarkerIcon = colorMarkerIcon("green");
+const selectedMarkerIcon = colorMarkerIcon("blue");
+const temporaryMarkerIcon = colorMarkerIcon("orange");
+
+function LegendItem({
+  className,
+  label,
+}: {
+  className: string;
+  label: string;
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className={className} />
+      <span>{label}</span>
+    </div>
+  );
+}
 
 export default function LogisticsMap({
   locations,
   selectedLocationIds,
   routePath = [],
+  isRoadRoute = false,
   onToggleLocation,
 }: LogisticsMapProps) {
   const center: [number, number] =
@@ -50,6 +66,7 @@ export default function LogisticsMap({
       : defaultCenter;
 
   return (
+    <div className="relative">
     <MapContainer
       center={center}
       zoom={13}
@@ -77,12 +94,17 @@ export default function LogisticsMap({
 
       {locations.map((location) => {
         const isSelected = selectedLocationIds.includes(location.id);
+        const icon = isSelected
+          ? selectedMarkerIcon
+          : location.coordinateSource === "temporary"
+            ? temporaryMarkerIcon
+            : availableMarkerIcon;
 
         return (
           <Marker
             key={location.id}
             position={[location.latitude, location.longitude]}
-            icon={isSelected ? selectedMarkerIcon : defaultMarkerIcon}
+            icon={icon}
             eventHandlers={{
               click: () => onToggleLocation(location.id),
             }}
@@ -102,8 +124,8 @@ export default function LogisticsMap({
                   onClick={() => onToggleLocation(location.id)}
                   className={`rounded px-3 py-1 text-sm font-semibold text-white ${
                     isSelected
-                      ? "bg-green-600 hover:bg-green-700"
-                      : "bg-blue-600 hover:bg-blue-700"
+                      ? "bg-blue-600 hover:bg-blue-700"
+                      : "bg-green-600 hover:bg-green-700"
                   }`}
                 >
                   {isSelected ? "Remove from Route" : "Add to Route"}
@@ -114,5 +136,26 @@ export default function LogisticsMap({
         );
       })}
     </MapContainer>
+      <div className="pointer-events-none absolute bottom-3 left-3 z-[500] max-w-[calc(100%-1.5rem)] rounded-lg border border-gray-200 bg-white/95 px-3 py-2 text-xs font-semibold text-gray-700 shadow dark:border-gray-700 dark:bg-gray-900/95 dark:text-gray-200">
+        <div className="grid gap-2">
+          <LegendItem
+            className="h-3 w-3 rounded-full bg-green-600"
+            label="Available location"
+          />
+          <LegendItem
+            className="h-3 w-3 rounded-full bg-blue-600"
+            label="Selected route stop"
+          />
+          <LegendItem
+            className="h-3 w-3 rounded-full bg-orange-500"
+            label="Approximate position"
+          />
+          <LegendItem
+            className="h-1 w-6 rounded-full bg-blue-600"
+            label={isRoadRoute ? "Road-following route" : "Simple route preview"}
+          />
+        </div>
+      </div>
+    </div>
   );
 }

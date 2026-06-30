@@ -281,6 +281,12 @@ export default function LogisticsPage() {
   const activeRoutePath = routePath.length >= 2
     ? routePath
     : selectedRouteableLocations.map((location) => [location.latitude, location.longitude] as [number, number]);
+  const hasRoadRoute =
+    routePath.length >= 2 &&
+    (routeSummary?.provider === "openroute_service" ||
+      routeSummary?.provider === "google_traffic");
+  const showingSimpleRoutePreview =
+    selectedRouteableLocations.length >= 2 && !hasRoadRoute;
 
   async function geocodeClient(clientId: string) {
     if (!isDatabaseMode) {
@@ -336,7 +342,7 @@ export default function LogisticsPage() {
     }
   }
 
-  async function optimizeRoute(provider: "nearest_neighbor" | "google_traffic" = "nearest_neighbor") {
+  async function optimizeRoute(provider: "openroute_service" | "google_traffic" = "openroute_service") {
     if (!isDatabaseMode) return;
     if (selectedRouteableLocations.length < 2) {
       setRouteError("Geocode at least two selected stops before optimizing the route.");
@@ -524,6 +530,7 @@ export default function LogisticsPage() {
               locations={visibleLocations}
               selectedLocationIds={selectedLocationIds}
               routePath={activeRoutePath}
+              isRoadRoute={hasRoadRoute}
               onToggleLocation={toggleLocation}
             />
           </div>
@@ -605,7 +612,7 @@ export default function LogisticsPage() {
                     disabled={selectedRouteableLocations.length < 2 || isOptimizingRoute}
                     className="w-full rounded-lg border border-blue-600 px-4 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-blue-300 dark:hover:bg-blue-950/30 sm:w-auto"
                   >
-                    {isOptimizingRoute ? "Optimizing..." : "Optimize Route"}
+                    {isOptimizingRoute ? "Calculating..." : "Optimize Road Route"}
                   </button>
 
                   {trafficStatus.available ? (
@@ -756,6 +763,12 @@ export default function LogisticsPage() {
                 <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
                   {selectedTemporaryLocations.length} selected stop
                   {selectedTemporaryLocations.length === 1 ? " uses" : "s use"} temporary map positioning. Google Maps will use the saved address; route optimization needs geocoded coordinates.
+                </div>
+              )}
+
+              {showingSimpleRoutePreview && (
+                <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-200">
+                  Showing a simple route preview. Use route optimization to calculate a road-following route.
                 </div>
               )}
 
