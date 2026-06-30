@@ -90,6 +90,26 @@ function isInvoiceLinkedToClient(invoice: InvoiceRow, client: ClientRow) {
   );
 }
 
+function clientHasAddress(client: ClientRow) {
+  return Boolean(
+    client.address?.trim() ||
+      client.city?.trim() ||
+      client.state?.trim() ||
+      client.zip?.trim()
+  );
+}
+
+function clientAddressKey(client: ClientRow) {
+  return [
+    client.address,
+    client.city,
+    client.state,
+    client.zip,
+  ]
+    .map((part) => String(part ?? "").trim().toLowerCase())
+    .join("|");
+}
+
 export default function ClientsPage() {
   const { activeWorkspace, canDeleteBusinessRecords } = useWorkspace();
   const { isSupabaseConfigured, user } = useAuthSession();
@@ -214,6 +234,47 @@ export default function ClientsPage() {
     (client) => client.workspaceId === activeWorkspace.id
   );
   const workspaceDisplayName = getWorkspaceDisplayName(activeWorkspace);
+
+  async function autoGeocodeSavedClient(client: ClientRow) {
+    if (!isDatabaseMode || !clientHasAddress(client)) return;
+    if (typeof client.latitude === "number" && typeof client.longitude === "number") {
+      return;
+    }
+
+    try {
+      const response = await fetch("/api/geocode", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          workspaceId: activeWorkspace.id,
+          clientId: client.id,
+        }),
+      });
+      const payload = (await response.json()) as {
+        data?: {
+          clientId: string;
+          latitude: number;
+          longitude: number;
+        };
+      };
+
+      if (!response.ok || !payload.data) return;
+
+      setDatabaseClientItems((current) =>
+        current.map((currentClient) =>
+          currentClient.id === payload.data?.clientId
+            ? {
+                ...currentClient,
+                latitude: payload.data.latitude,
+                longitude: payload.data.longitude,
+              }
+            : currentClient
+        )
+      );
+    } catch {
+      // Saving the client should not fail if the geocoder cannot resolve the address.
+    }
+  }
 
   const sortedWorkspaceClients = [...workspaceClients].sort((a, b) => {
     if (statusPriority === "default") {
@@ -380,6 +441,7 @@ export default function ClientsPage() {
 
       if (isDatabaseMode) {
         setDatabaseClientItems((current) => [...current, createdClient]);
+        void autoGeocodeSavedClient(createdClient);
       }
 
       setClientLoadError(null);
@@ -421,6 +483,16 @@ export default function ClientsPage() {
 
     if (!existingClient) return;
 
+    const addressChanged =
+      clientAddressKey(existingClient) !==
+      clientAddressKey({
+        ...existingClient,
+        address: clientAddress.trim(),
+        city: clientCity.trim(),
+        state: clientState.trim(),
+        zip: clientZip.trim(),
+      });
+
     const updatedClient = {
       ...existingClient,
       name: clientName.trim(),
@@ -433,6 +505,8 @@ export default function ClientsPage() {
       state: clientState.trim(),
       zip: clientZip.trim(),
       notes: clientNotes.trim(),
+      latitude: addressChanged ? undefined : existingClient.latitude,
+      longitude: addressChanged ? undefined : existingClient.longitude,
     };
 
     try {
@@ -451,6 +525,7 @@ export default function ClientsPage() {
             client.id === savedClient.id ? savedClient : client
           )
         );
+        void autoGeocodeSavedClient(savedClient);
       }
 
       setClientLoadError(null);
