@@ -70,6 +70,8 @@ type RouteOrigin = {
   address?: string;
 };
 
+type RouteMode = "road" | "traffic" | "schedule_aware" | "saved";
+
 type WorkspaceSettingsResponse = {
   settings?: {
     workspaceId?: string;
@@ -162,6 +164,22 @@ function minutesAfterSchedule(
   return Math.round((eta.getTime() - scheduled.getTime()) / 60000);
 }
 
+function distanceMeters(
+  a: { latitude: number; longitude: number },
+  b: { latitude: number; longitude: number }
+) {
+  const earthRadiusMeters = 6371000;
+  const toRadians = (value: number) => (value * Math.PI) / 180;
+  const dLat = toRadians(b.latitude - a.latitude);
+  const dLon = toRadians(b.longitude - a.longitude);
+  const lat1 = toRadians(a.latitude);
+  const lat2 = toRadians(b.latitude);
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+  return 2 * earthRadiusMeters * Math.asin(Math.sqrt(h));
+}
+
 export default function LogisticsPage() {
   const { activeWorkspace } = useWorkspace();
   const { isSupabaseConfigured, user } = useAuthSession();
@@ -199,6 +217,7 @@ export default function LogisticsPage() {
     totalDistanceMeters?: number;
     totalDurationSeconds?: number;
     provider?: "nearest_neighbor" | "openroute_service" | "google_traffic";
+    mode?: RouteMode;
     startsAtOrigin?: boolean;
     returnsToOrigin?: boolean;
     legDurationSource?: "provider" | "estimate";
@@ -427,7 +446,21 @@ export default function LogisticsPage() {
         .reduce((total, seconds) => total + seconds, 0);
       const serviceSeconds = defaultStopServiceSeconds * index;
       const elapsedSeconds = travelSeconds + serviceSeconds;
-      const eta = addSecondsToDateTime(selectedDate, routeStartTime, elapsedSeconds);
+      const firstScheduledTime = selectedLocations[0]?.scheduledTime;
+      const firstTravelSeconds = routeSummary?.startsAtOrigin
+        ? routeLegDurationSeconds[0] ?? 0
+        : 0;
+      const scheduleAwareBase =
+        routeSummary?.mode === "schedule_aware" && firstScheduledTime
+          ? new Date(
+              new Date(`${selectedDate}T${firstScheduledTime}`).getTime() -
+                firstTravelSeconds * 1000
+            )
+          : null;
+      const eta =
+        scheduleAwareBase && !Number.isNaN(scheduleAwareBase.getTime())
+          ? new Date(scheduleAwareBase.getTime() + elapsedSeconds * 1000)
+          : addSecondsToDateTime(selectedDate, routeStartTime, elapsedSeconds);
       const lateMinutes = minutesAfterSchedule(
         eta,
         location.scheduledDate,
@@ -435,7 +468,20 @@ export default function LogisticsPage() {
       );
       return { location, eta, lateMinutes };
     });
-  }, [hasRouteLegDurations, routeLegDurationSeconds, routeStartTime, routeSummary?.startsAtOrigin, selectedDate, selectedLocations]);
+  }, [hasRouteLegDurations, routeLegDurationSeconds, routeStartTime, routeSummary?.mode, routeSummary?.startsAtOrigin, selectedDate, selectedLocations]);
+  const lateStopSummary = useMemo(() => {
+    const lateStops = projectedStops.filter(
+      (stop) => stop.lateMinutes !== null && stop.lateMinutes > 0
+    );
+    const worstLateMinutes = lateStops.reduce(
+      (worst, stop) => Math.max(worst, stop.lateMinutes ?? 0),
+      0
+    );
+    return {
+      count: lateStops.length,
+      worstLateMinutes,
+    };
+  }, [projectedStops]);
 
   function toggleLocation(locationId: string) {
     setRoutePath([]);
@@ -524,7 +570,9 @@ export default function LogisticsPage() {
   const showingSimpleRoutePreview =
     selectedRouteableLocations.length >= 2 && !hasRoadRoute;
   let etaSourceLabel = "ETA unavailable until route is optimized";
-  if (hasRouteLegDurations && routeSummary?.provider === "google_traffic") {
+  if (hasRouteLegDurations && routeSummary?.mode === "schedule_aware") {
+    etaSourceLabel = "ETA from schedule-aware route";
+  } else if (hasRouteLegDurations && routeSummary?.provider === "google_traffic") {
     etaSourceLabel =
       routeSummary.legDurationSource === "estimate"
         ? "Approximate stop ETAs from estimated legs; total duration is traffic-aware"
@@ -633,6 +681,101 @@ export default function LogisticsPage() {
     setRouteError("");
   }
 
+  function isHardScheduledStop(location: LogisticsLocation) {
+    return location.scheduledDate === selectedDate && Boolean(location.scheduledTime);
+  }
+
+  function buildEstimatedScheduleSummary(orderedLocations: LogisticsLocation[]) {
+    const routePoints = [
+      ...(activeOrigin
+        ? [
+            {
+              latitude: activeOrigin.latitude,
+              longitude: activeOrigin.longitude,
+            },
+          ]
+        : []),
+      ...orderedLocations.map((location) => ({
+        latitude: location.latitude,
+        longitude: location.longitude,
+      })),
+      ...(activeOrigin
+        ? [
+            {
+              latitude: activeOrigin.latitude,
+              longitude: activeOrigin.longitude,
+            },
+          ]
+        : []),
+    ];
+    const legDistancesMeters = routePoints.slice(1).map((point, index) =>
+      distanceMeters(routePoints[index], point)
+    );
+    const totalDistanceMeters = legDistancesMeters.reduce(
+      (total, distance) => total + distance,
+      0
+    );
+    const legDurationSeconds = legDistancesMeters.map((distance) =>
+      Math.round(distance / 13.4)
+    );
+    return {
+      routePath: routePoints.map(
+        (point) => [point.latitude, point.longitude] as [number, number]
+      ),
+      legDurationSeconds,
+      totalDistanceMeters,
+      totalDurationSeconds: legDurationSeconds.reduce(
+        (total, seconds) => total + seconds,
+        0
+      ),
+    };
+  }
+
+  function optimizeAroundSchedule() {
+    if (selectedRouteableLocations.length < 1) {
+      setRouteError("Select at least one geocoded stop before optimizing around schedule.");
+      return;
+    }
+
+    const hardScheduledStops = selectedRouteableLocations
+      .filter(isHardScheduledStop)
+      .sort((a, b) =>
+        (a.scheduledTime || "23:59").localeCompare(b.scheduledTime || "23:59") ||
+        a.name.localeCompare(b.name)
+      );
+    const hardStopIds = new Set(hardScheduledStops.map((location) => location.id));
+    const flexibleStops = selectedRouteableLocations.filter(
+      (location) => !hardStopIds.has(location.id)
+    );
+    const temporarySelectedStops = selectedLocations.filter(
+      (location) => location.coordinateSource !== "saved"
+    );
+    const orderedLocations = [
+      ...hardScheduledStops,
+      ...flexibleStops,
+      ...temporarySelectedStops,
+    ];
+    const summary = buildEstimatedScheduleSummary(orderedLocations);
+
+    setSelectedLocationIds(orderedLocations.map((location) => location.id));
+    setRoutePath(summary.routePath);
+    setRouteLegDurationSeconds(summary.legDurationSeconds);
+    setRouteSummary({
+      totalDistanceMeters: summary.totalDistanceMeters,
+      totalDurationSeconds: summary.totalDurationSeconds,
+      provider: "nearest_neighbor",
+      mode: "schedule_aware",
+      startsAtOrigin: Boolean(activeOrigin),
+      returnsToOrigin: Boolean(activeOrigin),
+      legDurationSource: "estimate",
+      warning:
+        flexibleStops.length > 0
+          ? "Schedule-aware route keeps timed stops in order and places flexible stops after scheduled appointments."
+          : undefined,
+    });
+    setRouteError("");
+  }
+
   async function optimizeRoute(provider: "openroute_service" | "google_traffic" = "openroute_service") {
     if (!isDatabaseMode) return;
     if (selectedRouteableLocations.length < 2 && !activeOrigin) {
@@ -687,6 +830,7 @@ export default function LogisticsPage() {
         totalDistanceMeters: payload.data.totalDistanceMeters,
         totalDurationSeconds: payload.data.totalDurationSeconds,
         provider: payload.data.routeProvider,
+        mode: provider === "google_traffic" ? "traffic" : "road",
         startsAtOrigin: payload.data.startsAtOrigin,
         returnsToOrigin: payload.data.returnsToOrigin,
         legDurationSource: payload.data.legDurationSource,
@@ -765,6 +909,7 @@ export default function LogisticsPage() {
     setRouteSummary({
       totalDistanceMeters: route.totalDistanceMeters ?? undefined,
       totalDurationSeconds: route.totalDurationSeconds ?? undefined,
+      mode: "saved",
       warning: route.notes?.includes("Route provider:")
         ? undefined
         : route.notes,
@@ -966,6 +1111,15 @@ export default function LogisticsPage() {
                     {isOptimizingRoute ? "Calculating..." : "Optimize Road Route"}
                   </button>
 
+                  <button
+                    type="button"
+                    onClick={optimizeAroundSchedule}
+                    disabled={selectedRouteableLocations.length < 1}
+                    className="w-full rounded-lg border border-amber-600 px-4 py-2 text-sm font-semibold text-amber-700 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-amber-300 dark:hover:bg-amber-950/30 sm:w-auto"
+                  >
+                    Optimize Around Schedule
+                  </button>
+
                   {trafficStatus.available ? (
                     <button
                       type="button"
@@ -1165,7 +1319,9 @@ export default function LogisticsPage() {
               {routeSummary?.provider && (
                 <p className="text-xs text-gray-500 dark:text-gray-400">
                   Route source:{" "}
-                  {routeSummary.provider === "google_traffic"
+                  {routeSummary.mode === "schedule_aware"
+                    ? "Schedule-aware route"
+                    : routeSummary.provider === "google_traffic"
                     ? "Google traffic-aware route"
                     : routeSummary.provider === "openroute_service"
                       ? "OpenRouteService geometry"
@@ -1179,6 +1335,21 @@ export default function LogisticsPage() {
               <p className="text-xs font-semibold text-gray-500 dark:text-gray-400">
                 {etaSourceLabel}
               </p>
+
+              {lateStopSummary.count > 0 && (
+                <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200">
+                  <div className="font-semibold">
+                    {lateStopSummary.count} scheduled stop
+                    {lateStopSummary.count === 1 ? "" : "s"} projected late.
+                  </div>
+                  <p className="mt-1">
+                    Worst projected lateness: {lateStopSummary.worstLateMinutes} min.
+                    {routeSummary?.mode === "schedule_aware"
+                      ? " This route may still be impossible with the selected stops."
+                      : " Try Optimize Around Schedule before driving this route."}
+                  </p>
+                </div>
+              )}
 
               {routeSummary?.warning && (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">

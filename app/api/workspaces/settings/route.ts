@@ -183,7 +183,7 @@ export async function GET(request: NextRequest) {
 
   if (error) return jsonError(error.message || "Unable to load settings.", 500);
   return NextResponse.json({
-    settings: data ? dbToSettings(data as DbWorkspaceSettings) : null,
+    settings: data ? dbToSettings(data as unknown as DbWorkspaceSettings) : null,
   });
 }
 
@@ -278,7 +278,7 @@ export async function PATCH(request: NextRequest) {
   }
 
   if (error) return jsonError(error.message || "Unable to save settings.", 500);
-  const savedSettings = dbToSettings(data as DbWorkspaceSettings);
+  const savedSettings = dbToSettings(data as unknown as DbWorkspaceSettings);
   return NextResponse.json({
     settings: {
       ...savedSettings,
