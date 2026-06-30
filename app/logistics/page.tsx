@@ -559,6 +559,8 @@ export default function LogisticsPage() {
   const googleMapsSkippedStopCount = selectedLocations.filter(
     (location) => !googleMapsPoint(location)
   ).length;
+  const googleMapsExportLabel =
+    googleMapsAddressStopCount > 0 ? "Address-safe export" : "Coordinate export";
   const canOpenGoogleMaps =
     (selectedLocations.length >= 2 || Boolean(activeOrigin && selectedLocations.length >= 1)) &&
     Boolean(googleMapsUrl);
@@ -1293,7 +1295,7 @@ export default function LogisticsPage() {
 
               {googleMapsAddressStopCount > 0 && (
                 <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-200">
-                  Google Maps export uses visible address text for stops when available so stale saved coordinates do not send the route to the wrong place.
+                  Google Maps export uses visible address text for stops when available. Google may display business or place names for some addresses; confirm the destination still matches the saved address before starting navigation.
                 </div>
               )}
 
@@ -1352,6 +1354,12 @@ export default function LogisticsPage() {
                   {routeSummary.returnsToOrigin
                     ? " with return to route start"
                     : ""}
+                </p>
+              )}
+
+              {selectedLocations.length > 0 && (
+                <p className="text-xs font-semibold text-gray-500 dark:text-gray-400">
+                  Google Maps handoff: {googleMapsExportLabel}
                 </p>
               )}
 
