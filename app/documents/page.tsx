@@ -1416,13 +1416,20 @@ export default function DocumentsPage() {
                   }}
                   className="rounded-xl border border-dashed border-gray-300 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-950/40"
                 >
+                  <label
+                    htmlFor="document-upload-files"
+                    className="inline-flex cursor-pointer rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-700"
+                  >
+                    Choose Files
+                  </label>
                   <input
+                    id="document-upload-files"
                     type="file"
                     multiple
                     onChange={(event) => {
                       void handleSelectedFiles(event.target.files ?? []);
                     }}
-                    className="block w-full text-sm text-gray-900 dark:text-gray-100"
+                    className="sr-only"
                   />
                   <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
                     Select or drag multiple PDFs, images, receipts, notes, or client documents.
