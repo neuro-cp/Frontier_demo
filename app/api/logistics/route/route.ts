@@ -123,6 +123,7 @@ export async function POST(request: NextRequest) {
       googleMapsUrl,
       routeProvider: routeResult.routeProvider,
       routePath: routeResult.routePath,
+      legDurationSeconds: routeResult.legDurationSeconds,
       totalDistanceMeters: routeResult.totalDistanceMeters,
       totalDurationSeconds: routeResult.totalDurationSeconds,
       warning: routeResult.warning,

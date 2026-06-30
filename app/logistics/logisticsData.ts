@@ -1,4 +1,5 @@
 import type { ClientRow } from "@/lib/clientTypes";
+import type { ClientCalendarEvent } from "@/lib/db/calendarEvents";
 import type { Job } from "@/lib/jobTypes";
 
 export type LogisticsLocation = {
@@ -6,7 +7,8 @@ export type LogisticsLocation = {
   workspaceId: string;
   clientId: string;
   jobId?: string;
-  sourceType: "client" | "job";
+  eventId?: string;
+  sourceType: "client" | "job" | "event";
   name: string;
   status: string;
   address: string;
@@ -16,6 +18,8 @@ export type LogisticsLocation = {
   latitude: number;
   longitude: number;
   coordinateSource: "saved" | "temporary";
+  scheduledDate?: string;
+  scheduledTime?: string;
 };
 
 export type MissingCoordinateClient = {
@@ -92,6 +96,26 @@ export function buildLogisticsLocations(
     .filter((location): location is LogisticsLocation => Boolean(location));
 }
 
+function normalizeAddressKey(location: {
+  address?: string | null;
+  city?: string | null;
+  state?: string | null;
+  zip?: string | null;
+}) {
+  return [location.address, location.city, location.state, location.zip]
+    .map((part) =>
+      String(part ?? "")
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, " ")
+    )
+    .join("|");
+}
+
+function getStopKey(location: LogisticsLocation) {
+  return `${location.clientId}|${normalizeAddressKey(location)}`;
+}
+
 export function buildJobLogisticsLocations(
   jobs: Job[],
   clients: ClientRow[]
@@ -126,8 +150,65 @@ export function buildJobLogisticsLocations(
         latitude,
         longitude,
         coordinateSource: "saved" as const,
+        scheduledDate: job.date,
+        scheduledTime: job.time,
       }];
     });
+}
+
+export function buildClientEventLogisticsLocations(
+  events: ClientCalendarEvent[],
+  clients: ClientRow[]
+): LogisticsLocation[] {
+  const clientsById = new Map(clients.map((client) => [client.id, client]));
+
+  return events.flatMap((event) => {
+    const client = clientsById.get(event.clientId);
+    if (!client) return [];
+
+    const latitude = client.latitude;
+    const longitude = client.longitude;
+    if (typeof latitude !== "number" || typeof longitude !== "number") {
+      return [];
+    }
+
+    return [{
+      id: `event:${event.id}`,
+      workspaceId: event.workspaceId,
+      clientId: client.id,
+      eventId: event.id,
+      sourceType: "event" as const,
+      name: `${event.title} - ${client.name}`,
+      status: `${event.date}${event.time ? ` ${event.time}` : ""}`,
+      address: client.address ?? "",
+      city: client.city ?? "",
+      state: client.state ?? "",
+      zip: client.zip ?? "",
+      latitude,
+      longitude,
+      coordinateSource: "saved" as const,
+      scheduledDate: event.date,
+      scheduledTime: event.time,
+    }];
+  });
+}
+
+export function dedupeLogisticsLocations(
+  locations: LogisticsLocation[]
+): LogisticsLocation[] {
+  const priority = { job: 3, event: 2, client: 1 };
+  const byStopKey = new Map<string, LogisticsLocation>();
+
+  locations.forEach((location) => {
+    const stopKey = getStopKey(location);
+    const existing = byStopKey.get(stopKey);
+
+    if (!existing || priority[location.sourceType] > priority[existing.sourceType]) {
+      byStopKey.set(stopKey, location);
+    }
+  });
+
+  return [...byStopKey.values()];
 }
 
 export function getMissingCoordinateClients(

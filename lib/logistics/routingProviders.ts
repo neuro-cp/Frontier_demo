@@ -18,6 +18,7 @@ export type RoutingResult = {
   orderedStops: RoutingStop[];
   routeProvider: RoutingProviderName;
   routePath: Array<[number, number]>;
+  legDurationSeconds: number[];
   totalDistanceMeters: number;
   totalDurationSeconds: number;
   warning?: string;
@@ -68,13 +69,20 @@ function distanceMeters(a: LogisticsCoordinate, b: LogisticsCoordinate) {
 }
 
 function buildFallbackSummary(stops: RoutingStop[]) {
-  const totalDistanceMeters = stops.slice(1).reduce((total, stop, index) => {
-    return total + distanceMeters(stops[index], stop);
-  }, 0);
+  const legDistancesMeters = stops.slice(1).map((stop, index) =>
+    distanceMeters(stops[index], stop)
+  );
+  const totalDistanceMeters = legDistancesMeters.reduce(
+    (total, distance) => total + distance,
+    0
+  );
 
   return {
     routePath: stops.map(
       (stop) => [stop.latitude, stop.longitude] as [number, number]
+    ),
+    legDurationSeconds: legDistancesMeters.map((distance) =>
+      Math.round(distance / 13.4)
     ),
     totalDistanceMeters,
     totalDurationSeconds: Math.round(totalDistanceMeters / 13.4),
@@ -150,6 +158,10 @@ export async function buildOpenRouteServiceRoute(stops: RoutingStop[]) {
       ...fallback,
       routeProvider: "openroute_service" as const,
       routePath: directions.path,
+      legDurationSeconds:
+        directions.legDurationSeconds.length === fallback.legDurationSeconds.length
+          ? directions.legDurationSeconds
+          : fallback.legDurationSeconds,
       totalDistanceMeters:
         directions.distanceMeters ?? fallback.totalDistanceMeters,
       totalDurationSeconds:
@@ -230,6 +242,7 @@ export async function buildGoogleTrafficRoute(stops: RoutingStop[]) {
     routePath: encodedPolyline
       ? decodeGooglePolyline(encodedPolyline)
       : fallback.routePath,
+    legDurationSeconds: fallback.legDurationSeconds,
     totalDistanceMeters: route?.distanceMeters ?? fallback.totalDistanceMeters,
     totalDurationSeconds:
       parseGoogleDurationSeconds(route?.duration) ??

@@ -11,6 +11,7 @@ import {
 } from "@/lib/actions/routes";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
 import type { ClientRow } from "@/lib/clientTypes";
+import { createCalendarEventsRepository, type ClientCalendarEvent } from "@/lib/db/calendarEvents";
 import { createClientsRepository } from "@/lib/db/clients";
 import { createJobsRepository } from "@/lib/db/jobs";
 import { createRoutesRepository, type RoutePlan } from "@/lib/db/routes";
@@ -18,7 +19,9 @@ import type { Job } from "@/lib/jobTypes";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import {
   buildJobLogisticsLocations,
+  buildClientEventLogisticsLocations,
   buildLogisticsLocations,
+  dedupeLogisticsLocations,
   getClientFullAddress,
   getMissingCoordinateClients,
   LogisticsLocation,
@@ -37,6 +40,7 @@ type RouteApiResponse = {
     googleMapsUrl?: string;
     routeProvider?: "nearest_neighbor" | "openroute_service" | "google_traffic";
     routePath?: Array<[number, number]>;
+    legDurationSeconds?: number[];
     totalDistanceMeters?: number;
     totalDurationSeconds?: number;
     warning?: string;
@@ -70,12 +74,48 @@ function formatDuration(seconds?: number | null) {
   return remainingMinutes ? `${hours} hr ${remainingMinutes} min` : `${hours} hr`;
 }
 
+function formatDateInput(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function formatTime(value?: string | null) {
+  if (!value) return "Unscheduled";
+  const [rawHour, rawMinute = "00"] = value.split(":");
+  const hour = Number(rawHour);
+  if (!Number.isFinite(hour)) return value;
+  const suffix = hour >= 12 ? "PM" : "AM";
+  return `${hour % 12 || 12}:${rawMinute} ${suffix}`;
+}
+
+function addSecondsToDateTime(date: string, time: string, seconds: number) {
+  const base = new Date(`${date}T${time || "08:00"}`);
+  if (Number.isNaN(base.getTime())) return null;
+  return new Date(base.getTime() + seconds * 1000);
+}
+
+function minutesAfterSchedule(
+  eta: Date | null,
+  date?: string,
+  time?: string
+) {
+  if (!eta || !date || !time) return null;
+  const scheduled = new Date(`${date}T${time}`);
+  if (Number.isNaN(scheduled.getTime())) return null;
+  return Math.round((eta.getTime() - scheduled.getTime()) / 60000);
+}
+
 export default function LogisticsPage() {
   const { activeWorkspace } = useWorkspace();
   const { isSupabaseConfigured, user } = useAuthSession();
   const isDatabaseMode = Boolean(isSupabaseConfigured && user);
 
   const [selectedStatus, setSelectedStatus] = useState("All");
+  const [selectedDate, setSelectedDate] = useState(() =>
+    formatDateInput(new Date())
+  );
   const [selectedLocationIds, setSelectedLocationIds] = useState<string[]>([]);
   const [localClients, setLocalClients] = useStoredJsonState<ClientRow[]>(
     storageKeys.clients,
@@ -85,10 +125,17 @@ export default function LogisticsPage() {
     storageKeys.jobs,
     []
   );
+  const [localClientEvents, setLocalClientEvents] = useStoredJsonState<
+    ClientCalendarEvent[]
+  >(storageKeys.clientCalendarEvents, []);
   const [databaseClients, setDatabaseClients] = useState<ClientRow[]>([]);
   const [databaseJobs, setDatabaseJobs] = useState<Job[]>([]);
+  const [databaseClientEvents, setDatabaseClientEvents] = useState<
+    ClientCalendarEvent[]
+  >([]);
   const [routes, setRoutes] = useState<RoutePlan[]>([]);
   const [routePath, setRoutePath] = useState<Array<[number, number]>>([]);
+  const [routeLegDurationSeconds, setRouteLegDurationSeconds] = useState<number[]>([]);
   const [routeSummary, setRouteSummary] = useState<{
     totalDistanceMeters?: number;
     totalDurationSeconds?: number;
@@ -108,9 +155,11 @@ export default function LogisticsPage() {
   const supabase = useMemo(() => (isDatabaseMode ? createBrowserSupabaseClient() : null), [isDatabaseMode]);
   const clientsRepo = useMemo(() => createClientsRepository({ isSignedIn: isDatabaseMode, supabase, localClients, setLocalClients }), [isDatabaseMode, localClients, setLocalClients, supabase]);
   const jobsRepo = useMemo(() => createJobsRepository({ isSignedIn: isDatabaseMode, supabase, localJobs, setLocalJobs }), [isDatabaseMode, localJobs, setLocalJobs, supabase]);
+  const eventsRepo = useMemo(() => createCalendarEventsRepository({ isSignedIn: isDatabaseMode, supabase, localEvents: localClientEvents, setLocalEvents: setLocalClientEvents }), [isDatabaseMode, localClientEvents, setLocalClientEvents, supabase]);
   const routesRepo = useMemo(() => createRoutesRepository({ isSignedIn: isDatabaseMode, supabase }), [isDatabaseMode, supabase]);
   const clients = isDatabaseMode ? databaseClients : localClients;
   const jobs = isDatabaseMode ? databaseJobs : localJobs;
+  const clientEvents = isDatabaseMode ? databaseClientEvents : localClientEvents;
 
   useEffect(() => {
     if (!isDatabaseMode) return;
@@ -118,12 +167,14 @@ export default function LogisticsPage() {
     Promise.all([
       clientsRepo.getClients(activeWorkspace.id),
       jobsRepo.getJobs(activeWorkspace.id),
+      eventsRepo.getEvents(activeWorkspace.id),
       routesRepo.getRoutes(activeWorkspace.id),
     ])
-      .then(([loadedClients, loadedJobs, loadedRoutes]) => {
+      .then(([loadedClients, loadedJobs, loadedEvents, loadedRoutes]) => {
         if (!cancelled) {
           setDatabaseClients(loadedClients);
           setDatabaseJobs(loadedJobs);
+          setDatabaseClientEvents(loadedEvents);
           setRoutes(loadedRoutes);
         }
       })
@@ -137,7 +188,7 @@ export default function LogisticsPage() {
         }
       });
     return () => { cancelled = true; };
-  }, [activeWorkspace.id, clientsRepo, isDatabaseMode, jobsRepo, routesRepo]);
+  }, [activeWorkspace.id, clientsRepo, eventsRepo, isDatabaseMode, jobsRepo, routesRepo]);
 
   useEffect(() => {
     let cancelled = false;
@@ -185,14 +236,37 @@ export default function LogisticsPage() {
     return jobs.filter((job) => job.workspaceId === activeWorkspace.id);
   }, [jobs, activeWorkspace.id]);
 
+  const scheduledJobs = useMemo(
+    () =>
+      workspaceJobs.filter(
+        (job) =>
+          job.date === selectedDate &&
+          job.status !== "Completed" &&
+          job.status !== "Paid"
+      ),
+    [selectedDate, workspaceJobs]
+  );
+
+  const scheduledClientEvents = useMemo(
+    () =>
+      clientEvents.filter(
+        (event) =>
+          event.workspaceId === activeWorkspace.id &&
+          event.date === selectedDate
+      ),
+    [activeWorkspace.id, clientEvents, selectedDate]
+  );
+
   const visibleLocations = useMemo(() => {
-    return [
+    return dedupeLogisticsLocations([
       ...buildLogisticsLocations(filteredClients),
-      ...buildJobLogisticsLocations(workspaceJobs, filteredClients),
-    ].sort((a, b) =>
+      ...buildJobLogisticsLocations(scheduledJobs, filteredClients),
+      ...buildClientEventLogisticsLocations(scheduledClientEvents, filteredClients),
+    ]).sort((a, b) =>
+      (a.scheduledTime || "23:59").localeCompare(b.scheduledTime || "23:59") ||
       a.name.localeCompare(b.name)
     );
-  }, [filteredClients, workspaceJobs]);
+  }, [filteredClients, scheduledClientEvents, scheduledJobs]);
 
   const missingCoordinateClients = useMemo(() => {
     return getMissingCoordinateClients(filteredClients);
@@ -223,8 +297,35 @@ export default function LogisticsPage() {
     [selectedLocations]
   );
 
+  const routeBuilderLocations = useMemo(() => {
+    const selectedIds = new Set(selectedLocationIds);
+    return [
+      ...selectedLocations,
+      ...visibleLocations.filter((location) => !selectedIds.has(location.id)),
+    ];
+  }, [selectedLocationIds, selectedLocations, visibleLocations]);
+
+  const routeStartTime =
+    selectedLocations.find((location) => location.scheduledTime)?.scheduledTime ??
+    "08:00";
+  const projectedStops = useMemo(() => {
+    return selectedLocations.map((location, index) => {
+      const elapsedSeconds = routeLegDurationSeconds
+        .slice(0, index)
+        .reduce((total, seconds) => total + seconds, 0);
+      const eta = addSecondsToDateTime(selectedDate, routeStartTime, elapsedSeconds);
+      const lateMinutes = minutesAfterSchedule(
+        eta,
+        location.scheduledDate,
+        location.scheduledTime
+      );
+      return { location, eta, lateMinutes };
+    });
+  }, [routeLegDurationSeconds, routeStartTime, selectedDate, selectedLocations]);
+
   function toggleLocation(locationId: string) {
     setRoutePath([]);
+    setRouteLegDurationSeconds([]);
     setRouteSummary(null);
     setSelectedLocationIds((current) =>
       current.includes(locationId)
@@ -235,12 +336,14 @@ export default function LogisticsPage() {
 
   function selectAllVisibleLocations() {
     setRoutePath([]);
+    setRouteLegDurationSeconds([]);
     setRouteSummary(null);
     setSelectedLocationIds(visibleLocations.map((location) => location.id));
   }
 
   function clearRoute() {
     setRoutePath([]);
+    setRouteLegDurationSeconds([]);
     setRouteSummary(null);
     setSelectedLocationIds([]);
   }
@@ -379,6 +482,7 @@ export default function LogisticsPage() {
 
       setSelectedLocationIds(payload.data.orderedStopIds);
       setRoutePath(payload.data.routePath ?? []);
+      setRouteLegDurationSeconds(payload.data.legDurationSeconds ?? []);
       setRouteSummary({
         totalDistanceMeters: payload.data.totalDistanceMeters,
         totalDurationSeconds: payload.data.totalDurationSeconds,
@@ -454,6 +558,7 @@ export default function LogisticsPage() {
         )
         .map((stop) => [stop.latitude, stop.longitude] as [number, number])
     );
+    setRouteLegDurationSeconds([]);
     setRouteSummary({
       totalDistanceMeters: route.totalDistanceMeters ?? undefined,
       totalDurationSeconds: route.totalDurationSeconds ?? undefined,
@@ -485,20 +590,29 @@ export default function LogisticsPage() {
   return (
     <div className="space-y-8">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <select
-          value={selectedStatus}
-          onChange={(event) => {
-            setSelectedStatus(event.target.value);
-            setRoutePath([]);
-            setRouteSummary(null);
-            setSelectedLocationIds([]);
-          }}
-          className="w-full rounded-lg border border-gray-200 bg-white px-4 py-3 text-gray-900 shadow-sm lg:w-auto dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
-        >
-          {clientStatuses.map((status) => (
-            <option key={status}>{status}</option>
-          ))}
-        </select>
+        <div className="flex w-full flex-col gap-3 sm:flex-row lg:w-auto">
+          <input
+            type="date"
+            value={selectedDate}
+            onChange={(event) => {
+              setSelectedDate(event.target.value);
+              clearRoute();
+            }}
+            className="w-full rounded-lg border border-gray-200 bg-white px-4 py-3 text-gray-900 shadow-sm sm:w-auto dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+          />
+          <select
+            value={selectedStatus}
+            onChange={(event) => {
+              setSelectedStatus(event.target.value);
+              clearRoute();
+            }}
+            className="w-full rounded-lg border border-gray-200 bg-white px-4 py-3 text-gray-900 shadow-sm sm:w-auto dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+          >
+            {clientStatuses.map((status) => (
+              <option key={status}>{status}</option>
+            ))}
+          </select>
+        </div>
       </div>
 
       {routeError && (
@@ -691,8 +805,8 @@ export default function LogisticsPage() {
             )}
 
             <div className="mt-6 space-y-3">
-              {visibleLocations.length > 0 ? (
-                visibleLocations.map((location) => {
+              {routeBuilderLocations.length > 0 ? (
+                routeBuilderLocations.map((location) => {
                   const isSelected = selectedLocationIds.includes(location.id);
                   const routeNumber = getSelectedRouteNumber(location.id);
 
@@ -714,8 +828,18 @@ export default function LogisticsPage() {
                           </h3>
 
                           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                            {location.sourceType === "job" ? "Job" : "Client"} - {location.status}
+                            {location.sourceType === "job"
+                              ? "Job"
+                              : location.sourceType === "event"
+                                ? "Calendar"
+                                : "Client"} - {location.status}
                           </p>
+
+                          {location.scheduledTime && (
+                            <p className="mt-1 text-xs font-semibold text-blue-600 dark:text-blue-300">
+                              Scheduled {formatTime(location.scheduledTime)}
+                            </p>
+                          )}
 
                           <p className="mt-1 line-clamp-2 text-sm text-gray-500 dark:text-gray-400">
                             {getClientFullAddress(location)}
@@ -818,11 +942,15 @@ export default function LogisticsPage() {
                 </div>
               )}
 
-              {selectedLocations.length > 0 ? (
-                selectedLocations.map((location, index) => (
+              {projectedStops.length > 0 ? (
+                projectedStops.map(({ location, eta, lateMinutes }, index) => (
                   <div
                     key={location.id}
-                    className="rounded-xl border border-gray-200 p-4 dark:border-gray-800"
+                    className={`rounded-xl border p-4 ${
+                      lateMinutes !== null && lateMinutes > 0
+                        ? "border-red-300 bg-red-50 dark:border-red-900 dark:bg-red-950/30"
+                        : "border-gray-200 dark:border-gray-800"
+                    }`}
                   >
                     <div className="flex items-start gap-3">
                       <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-blue-600 text-sm font-bold text-white">
@@ -835,9 +963,24 @@ export default function LogisticsPage() {
                         </h3>
 
                         <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                          {location.sourceType === "job" ? "Job stop - " : "Client stop - "}
+                          {location.sourceType === "job"
+                            ? "Job stop - "
+                            : location.sourceType === "event"
+                              ? "Calendar stop - "
+                              : "Client stop - "}
                           {getClientFullAddress(location)}
                         </p>
+                        <p className="mt-2 text-xs font-semibold text-gray-600 dark:text-gray-300">
+                          ETA {eta ? formatTime(`${eta.getHours()}:${String(eta.getMinutes()).padStart(2, "0")}`) : "unknown"}
+                          {location.scheduledTime
+                            ? ` · Scheduled ${formatTime(location.scheduledTime)}`
+                            : ""}
+                        </p>
+                        {lateMinutes !== null && lateMinutes > 0 && (
+                          <p className="mt-1 text-xs font-semibold text-red-700 dark:text-red-300">
+                            Projected {lateMinutes} min late.
+                          </p>
+                        )}
                       </div>
                     </div>
                   </div>

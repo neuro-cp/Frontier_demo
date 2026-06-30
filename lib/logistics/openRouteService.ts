@@ -9,6 +9,7 @@ export type OpenRouteMatrixResult = {
 
 export type OpenRouteDirectionsResult = {
   path: Array<[number, number]>;
+  legDurationSeconds: number[];
   distanceMeters: number | null;
   durationSeconds: number | null;
 };
@@ -60,6 +61,9 @@ type OpenRouteDirectionsResponse = {
       coordinates?: Array<[number, number]>;
     };
     properties?: {
+      segments?: Array<{
+        duration?: number;
+      }>;
       summary?: {
         distance?: number;
         duration?: number;
@@ -109,6 +113,10 @@ export async function getOpenRouteServiceDirections(
         latitude,
         longitude,
       ]) ?? [],
+    legDurationSeconds:
+      feature?.properties?.segments?.map((segment) =>
+        Math.round(segment.duration ?? 0)
+      ) ?? [],
     distanceMeters: feature?.properties?.summary?.distance ?? null,
     durationSeconds: feature?.properties?.summary?.duration ?? null,
   };
