@@ -19,6 +19,7 @@ export const storageKeys = {
   jobs: "frontier-jobs",
   settings: "frontier-settings",
   theme: "frontier-theme",
+  workspaceFreshness: "frontier-workspace-freshness",
   workspaces: "frontier-workspaces",
 } as const;
 

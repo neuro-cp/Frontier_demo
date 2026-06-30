@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import Sidebar from "./Sidebar";
 import NotificationBell from "./NotificationBell";
@@ -8,10 +8,12 @@ import { useAuthSession } from "@/components/AuthSessionProvider";
 import { useWorkspace } from "@/components/WorkspaceContext";
 import { createWorkspaceAction } from "@/lib/actions/workspaces";
 import {
+  readStoredJson,
   removeStoredValue,
   storageKeys,
   useStoredJsonState,
   useStoredStringState,
+  writeStoredJson,
 } from "@/lib/clientStorage";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { defaultBusinessTypes } from "@/lib/workspaceOptions";
@@ -30,6 +32,15 @@ const localUserFallback = {
 };
 
 const welcomeDismissedKey = "frontier-welcome-dismissed";
+const workspaceFreshnessReloadKey = "frontier-workspace-freshness-reloaded";
+
+type WorkspaceFreshnessMap = Record<string, string>;
+
+type WorkspaceFreshnessResponse = {
+  workspaceId?: string;
+  serverUpdatedAt?: string | null;
+  error?: string;
+};
 
 function getWorkspaceInitials(name: string) {
   return name
@@ -60,6 +71,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     userId: string;
     isAdmin: boolean;
   } | null>(null);
+  const checkedFreshnessKeys = useRef(new Set<string>());
 
   const [workspaceName, setWorkspaceName] = useState("");
   const [workspaceType, setWorkspaceType] = useState<string>(
@@ -71,6 +83,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   ]);
   const [showWelcome, setShowWelcome] = useState(false);
   const [neverShowWelcome, setNeverShowWelcome] = useState(false);
+  const [workspaceRefreshNotice, setWorkspaceRefreshNotice] = useState("");
 
   const {
     workspaces,
@@ -120,6 +133,83 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       cancelled = true;
     };
   }, [user]);
+
+  useEffect(() => {
+    if (!user || !activeWorkspace.id || activeWorkspace.id === "create-workspace") {
+      return;
+    }
+
+    const refreshedWorkspaceId = window.sessionStorage.getItem(
+      workspaceFreshnessReloadKey
+    );
+    if (refreshedWorkspaceId !== activeWorkspace.id) return;
+
+    window.sessionStorage.removeItem(workspaceFreshnessReloadKey);
+    queueMicrotask(() =>
+      setWorkspaceRefreshNotice("Workspace data refreshed from server.")
+    );
+    const timeout = window.setTimeout(() => setWorkspaceRefreshNotice(""), 4000);
+    return () => window.clearTimeout(timeout);
+  }, [activeWorkspace.id, user]);
+
+  useEffect(() => {
+    if (
+      !user ||
+      adminViewWorkspace ||
+      !activeWorkspace.id ||
+      activeWorkspace.id === "create-workspace"
+    ) {
+      return;
+    }
+
+    const checkKey = `${user.id}:${activeWorkspace.id}`;
+    if (checkedFreshnessKeys.current.has(checkKey)) return;
+    checkedFreshnessKeys.current.add(checkKey);
+
+    let cancelled = false;
+
+    async function checkWorkspaceFreshness() {
+      const response = await fetch(
+        `/api/workspaces/freshness?workspaceId=${encodeURIComponent(
+          activeWorkspace.id
+        )}`
+      );
+      const payload = (await response.json()) as WorkspaceFreshnessResponse;
+      if (cancelled || !response.ok || !payload.serverUpdatedAt) return;
+
+      const freshnessMap = readStoredJson<WorkspaceFreshnessMap>(
+        storageKeys.workspaceFreshness,
+        {}
+      );
+      const lastSeenUpdatedAt = freshnessMap[activeWorkspace.id];
+      const nextFreshnessMap = {
+        ...freshnessMap,
+        [activeWorkspace.id]: payload.serverUpdatedAt,
+      };
+
+      if (lastSeenUpdatedAt && payload.serverUpdatedAt > lastSeenUpdatedAt) {
+        writeStoredJson(storageKeys.workspaceFreshness, nextFreshnessMap);
+        window.sessionStorage.setItem(
+          workspaceFreshnessReloadKey,
+          activeWorkspace.id
+        );
+        window.location.reload();
+        return;
+      }
+
+      if (payload.serverUpdatedAt !== lastSeenUpdatedAt) {
+        writeStoredJson(storageKeys.workspaceFreshness, nextFreshnessMap);
+      }
+    }
+
+    checkWorkspaceFreshness().catch(() => {
+      checkedFreshnessKeys.current.delete(checkKey);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeWorkspace.id, adminViewWorkspace, user]);
 
   useEffect(() => {
     let cancelled = false;
@@ -290,6 +380,22 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     const supabase = createBrowserSupabaseClient();
     await supabase.auth.signOut();
     window.location.href = "/";
+  }
+
+  function refreshWorkspaceData() {
+    if (!user || !activeWorkspace.id || activeWorkspace.id === "create-workspace") {
+      return;
+    }
+
+    const freshnessMap = readStoredJson<WorkspaceFreshnessMap>(
+      storageKeys.workspaceFreshness,
+      {}
+    );
+    const nextFreshnessMap = { ...freshnessMap };
+    delete nextFreshnessMap[activeWorkspace.id];
+    writeStoredJson(storageKeys.workspaceFreshness, nextFreshnessMap);
+    window.sessionStorage.setItem(workspaceFreshnessReloadKey, activeWorkspace.id);
+    window.location.reload();
   }
 
   function closeWelcome() {
@@ -487,6 +593,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                     )}
                     <button
                       type="button"
+                      onClick={refreshWorkspaceData}
+                      className="px-4 py-3 text-left font-medium hover:bg-gray-100 dark:hover:bg-gray-800"
+                    >
+                      Refresh Workspace Data
+                    </button>
+                    <button
+                      type="button"
                       onClick={signOut}
                       className="flex w-full items-center gap-4 px-4 py-4 text-left hover:bg-gray-100 dark:hover:bg-gray-800"
                     >
@@ -519,6 +632,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         <Sidebar />
 
         <main className="min-h-0 min-w-0 flex-1 overflow-y-auto p-3 sm:p-4 lg:p-6">
+          {workspaceRefreshNotice && (
+            <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm font-semibold text-blue-700 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-300">
+              {workspaceRefreshNotice}
+            </div>
+          )}
           {children}
         </main>
       </div>
