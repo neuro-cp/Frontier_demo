@@ -15,11 +15,10 @@ const navItems = [
   { label: "Document Extraction", href: "/documents", icon: "📁" },
   { label: "Logistics", href: "/logistics", icon: "🛣️" },
   { label: "Settings", href: "/settings", icon: "⚙️" },
-  { label: "Messages", href: "/messages", icon: "MS" },
-  { label: "Notifications", href: "/notifications", icon: "NT" },
-  { label: "Activity", href: "/activity", icon: "AC" },
-  { label: "Client Portal", href: "/client-portal", icon: "CP" },
-  { label: "Employee Portal", href: "/employee-portal", icon: "EP" },
+  { label: "Messages", href: "/messages", icon: "📨" },
+  { label: "Activity", href: "/activity", icon: "🕒" },
+  { label: "Client Portal", href: "/client-portal", icon: "🤝" },
+  { label: "Employee Portal", href: "/employee-portal", icon: "🧑‍🔧" },
 ];
 
 export default function Sidebar() {

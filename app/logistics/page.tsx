@@ -516,11 +516,15 @@ export default function LogisticsPage() {
 
   function googleMapsPoint(location: LogisticsLocation | RouteOrigin) {
     if ("coordinateSource" in location) {
+      const address = getClientFullAddress(location).trim();
+      if (address) return address;
       return location.coordinateSource === "saved"
         ? `${location.latitude},${location.longitude}`
-        : getClientFullAddress(location);
+        : "";
     }
-    return `${location.latitude},${location.longitude}`;
+    return location.type === "business" && location.address
+      ? location.address
+      : `${location.latitude},${location.longitude}`;
   }
 
   function buildGoogleMapsUrl(routeLocations: LogisticsLocation[]) {
@@ -529,17 +533,17 @@ export default function LogisticsPage() {
     const routePoints: Array<LogisticsLocation | RouteOrigin> = activeOrigin
       ? [activeOrigin, ...routeLocations, activeOrigin]
       : routeLocations;
-    if (routePoints.length < 2) return "#";
+    const exportPoints = routePoints
+      .map((location) => googleMapsPoint(location))
+      .filter(Boolean);
+    if (exportPoints.length < 2) return "#";
 
-    const origin = encodeURIComponent(googleMapsPoint(routePoints[0]));
+    const origin = encodeURIComponent(exportPoints[0]);
+    const destination = encodeURIComponent(exportPoints[exportPoints.length - 1]);
 
-    const destination = encodeURIComponent(
-      googleMapsPoint(routePoints[routePoints.length - 1])
-    );
-
-    const waypoints = routePoints
+    const waypoints = exportPoints
       .slice(1, -1)
-      .map((location) => encodeURIComponent(googleMapsPoint(location)))
+      .map((location) => encodeURIComponent(location))
       .join("|");
 
     const waypointParam = waypoints ? `&waypoints=${waypoints}` : "";
@@ -549,6 +553,12 @@ export default function LogisticsPage() {
   }
 
   const googleMapsUrl = buildGoogleMapsUrl(selectedLocations);
+  const googleMapsAddressStopCount = selectedLocations.filter((location) =>
+    Boolean(getClientFullAddress(location).trim())
+  ).length;
+  const googleMapsSkippedStopCount = selectedLocations.filter(
+    (location) => !googleMapsPoint(location)
+  ).length;
   const canOpenGoogleMaps =
     (selectedLocations.length >= 2 || Boolean(activeOrigin && selectedLocations.length >= 1)) &&
     Boolean(googleMapsUrl);
@@ -1277,7 +1287,20 @@ export default function LogisticsPage() {
               {selectedTemporaryLocations.length > 0 && (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
                   {selectedTemporaryLocations.length} selected stop
-                  {selectedTemporaryLocations.length === 1 ? " uses" : "s use"} temporary map positioning. Google Maps will use the saved address; route optimization needs geocoded coordinates.
+                  {selectedTemporaryLocations.length === 1 ? " uses" : "s use"} temporary map positioning. Google Maps will use address text; route optimization needs geocoded coordinates.
+                </div>
+              )}
+
+              {googleMapsAddressStopCount > 0 && (
+                <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-200">
+                  Google Maps export uses visible address text for stops when available so stale saved coordinates do not send the route to the wrong place.
+                </div>
+              )}
+
+              {googleMapsSkippedStopCount > 0 && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+                  {googleMapsSkippedStopCount} selected stop
+                  {googleMapsSkippedStopCount === 1 ? " is" : "s are"} missing an address and will be skipped by Google Maps export.
                 </div>
               )}
 
