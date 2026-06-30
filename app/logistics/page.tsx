@@ -43,6 +43,9 @@ type RouteApiResponse = {
     legDurationSeconds?: number[];
     totalDistanceMeters?: number;
     totalDurationSeconds?: number;
+    startsAtOrigin?: boolean;
+    returnsToOrigin?: boolean;
+    legDurationSource?: "provider" | "estimate";
     warning?: string;
   };
   error?: string;
@@ -196,6 +199,9 @@ export default function LogisticsPage() {
     totalDistanceMeters?: number;
     totalDurationSeconds?: number;
     provider?: "nearest_neighbor" | "openroute_service" | "google_traffic";
+    startsAtOrigin?: boolean;
+    returnsToOrigin?: boolean;
+    legDurationSource?: "provider" | "estimate";
     warning?: string;
   } | null>(null);
   const [trafficStatus, setTrafficStatus] = useState<{
@@ -385,6 +391,9 @@ export default function LogisticsPage() {
       ),
     [selectedLocations]
   );
+  const canOptimizeSelectedRoute =
+    selectedRouteableLocations.length >= 2 ||
+    Boolean(activeOrigin && selectedRouteableLocations.length >= 1);
 
   const selectedTemporaryLocations = useMemo(
     () =>
@@ -405,11 +414,19 @@ export default function LogisticsPage() {
   const routeStartTime =
     selectedLocations.find((location) => location.scheduledTime)?.scheduledTime ??
     "08:00";
+  const defaultStopServiceSeconds = 0;
+  const hasRouteLegDurations = routeLegDurationSeconds.length > 0;
   const projectedStops = useMemo(() => {
     return selectedLocations.map((location, index) => {
-      const elapsedSeconds = routeLegDurationSeconds
-        .slice(0, index)
+      if (!hasRouteLegDurations) {
+        return { location, eta: null, lateMinutes: null };
+      }
+      const travelLegCount = routeSummary?.startsAtOrigin ? index + 1 : index;
+      const travelSeconds = routeLegDurationSeconds
+        .slice(0, travelLegCount)
         .reduce((total, seconds) => total + seconds, 0);
+      const serviceSeconds = defaultStopServiceSeconds * index;
+      const elapsedSeconds = travelSeconds + serviceSeconds;
       const eta = addSecondsToDateTime(selectedDate, routeStartTime, elapsedSeconds);
       const lateMinutes = minutesAfterSchedule(
         eta,
@@ -418,7 +435,7 @@ export default function LogisticsPage() {
       );
       return { location, eta, lateMinutes };
     });
-  }, [routeLegDurationSeconds, routeStartTime, selectedDate, selectedLocations]);
+  }, [hasRouteLegDurations, routeLegDurationSeconds, routeStartTime, routeSummary?.startsAtOrigin, selectedDate, selectedLocations]);
 
   function toggleLocation(locationId: string) {
     setRoutePath([]);
@@ -490,13 +507,7 @@ export default function LogisticsPage() {
     (selectedLocations.length >= 2 || Boolean(activeOrigin && selectedLocations.length >= 1)) &&
     Boolean(googleMapsUrl);
   const activeRoutePath = routePath.length >= 2
-    ? activeOrigin
-      ? [
-          [activeOrigin.latitude, activeOrigin.longitude] as [number, number],
-          ...routePath,
-          [activeOrigin.latitude, activeOrigin.longitude] as [number, number],
-        ]
-      : routePath
+    ? routePath
     : [
         ...(activeOrigin && selectedRouteableLocations.length > 0
           ? [[activeOrigin.latitude, activeOrigin.longitude] as [number, number]]
@@ -512,6 +523,19 @@ export default function LogisticsPage() {
       routeSummary?.provider === "google_traffic");
   const showingSimpleRoutePreview =
     selectedRouteableLocations.length >= 2 && !hasRoadRoute;
+  let etaSourceLabel = "ETA unavailable until route is optimized";
+  if (hasRouteLegDurations && routeSummary?.provider === "google_traffic") {
+    etaSourceLabel =
+      routeSummary.legDurationSource === "estimate"
+        ? "Approximate stop ETAs from estimated legs; total duration is traffic-aware"
+        : "ETA from traffic-aware route";
+  } else if (hasRouteLegDurations && routeSummary?.provider === "openroute_service") {
+    etaSourceLabel = "ETA from road-following route";
+  } else if (hasRouteLegDurations && routeSummary?.provider === "nearest_neighbor") {
+    etaSourceLabel = "Approximate ETA from nearest-neighbor estimate";
+  } else if (showingSimpleRoutePreview) {
+    etaSourceLabel = "Approximate ETA from simple preview";
+  }
 
   async function geocodeClient(clientId: string) {
     if (!isDatabaseMode) {
@@ -611,8 +635,12 @@ export default function LogisticsPage() {
 
   async function optimizeRoute(provider: "openroute_service" | "google_traffic" = "openroute_service") {
     if (!isDatabaseMode) return;
-    if (selectedRouteableLocations.length < 2) {
+    if (selectedRouteableLocations.length < 2 && !activeOrigin) {
       setRouteError("Geocode at least two selected stops before optimizing the route.");
+      return;
+    }
+    if (selectedRouteableLocations.length < 1) {
+      setRouteError("Select at least one geocoded stop before optimizing the route.");
       return;
     }
 
@@ -636,6 +664,14 @@ export default function LogisticsPage() {
             longitude: location.longitude,
             addressSnapshot: getClientFullAddress(location),
           })),
+          origin: activeOrigin
+            ? {
+                id: `origin-${activeOrigin.type}`,
+                label: activeOrigin.label,
+                latitude: activeOrigin.latitude,
+                longitude: activeOrigin.longitude,
+              }
+            : undefined,
         }),
       });
       const payload = (await response.json()) as RouteApiResponse;
@@ -651,6 +687,9 @@ export default function LogisticsPage() {
         totalDistanceMeters: payload.data.totalDistanceMeters,
         totalDurationSeconds: payload.data.totalDurationSeconds,
         provider: payload.data.routeProvider,
+        startsAtOrigin: payload.data.startsAtOrigin,
+        returnsToOrigin: payload.data.returnsToOrigin,
+        legDurationSource: payload.data.legDurationSource,
         warning: payload.data.warning,
       });
     } catch (error) {
@@ -921,7 +960,7 @@ export default function LogisticsPage() {
                   <button
                     type="button"
                     onClick={() => optimizeRoute()}
-                    disabled={selectedRouteableLocations.length < 2 || isOptimizingRoute}
+                    disabled={!canOptimizeSelectedRoute || isOptimizingRoute}
                     className="w-full rounded-lg border border-blue-600 px-4 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-blue-300 dark:hover:bg-blue-950/30 sm:w-auto"
                   >
                     {isOptimizingRoute ? "Calculating..." : "Optimize Road Route"}
@@ -931,7 +970,7 @@ export default function LogisticsPage() {
                     <button
                       type="button"
                       onClick={() => optimizeRoute("google_traffic")}
-                      disabled={selectedRouteableLocations.length < 2 || isTrafficRouting}
+                      disabled={!canOptimizeSelectedRoute || isTrafficRouting}
                       className="w-full rounded-lg border border-purple-600 px-4 py-2 text-sm font-semibold text-purple-700 hover:bg-purple-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-purple-300 dark:hover:bg-purple-950/30 sm:w-auto"
                     >
                       {isTrafficRouting ? "Checking Traffic..." : "Use Traffic-Aware Route"}
@@ -1125,14 +1164,21 @@ export default function LogisticsPage() {
 
               {routeSummary?.provider && (
                 <p className="text-xs text-gray-500 dark:text-gray-400">
-                  Route line:{" "}
+                  Route source:{" "}
                   {routeSummary.provider === "google_traffic"
                     ? "Google traffic-aware route"
                     : routeSummary.provider === "openroute_service"
                       ? "OpenRouteService geometry"
                       : "nearest-neighbor fallback"}
+                  {routeSummary.returnsToOrigin
+                    ? " with return to route start"
+                    : ""}
                 </p>
               )}
+
+              <p className="text-xs font-semibold text-gray-500 dark:text-gray-400">
+                {etaSourceLabel}
+              </p>
 
               {routeSummary?.warning && (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
@@ -1169,7 +1215,7 @@ export default function LogisticsPage() {
                           {getClientFullAddress(location)}
                         </p>
                         <p className="mt-2 text-xs font-semibold text-gray-600 dark:text-gray-300">
-                          ETA {eta ? formatTime(`${eta.getHours()}:${String(eta.getMinutes()).padStart(2, "0")}`) : "unknown"}
+                          ETA {eta ? formatTime(`${eta.getHours()}:${String(eta.getMinutes()).padStart(2, "0")}`) : "unavailable"}
                           {location.scheduledTime
                             ? ` · Scheduled ${formatTime(location.scheduledTime)}`
                             : ""}

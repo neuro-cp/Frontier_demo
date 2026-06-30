@@ -27,19 +27,30 @@ type RouteStopInput = LogisticsCoordinate & {
 type RouteRequest = {
   workspaceId?: string;
   stops?: RouteStopInput[];
+  origin?: LogisticsCoordinate & {
+    id?: string;
+    label?: string;
+  };
   provider?: unknown;
 };
 
 function hasValidStops(stops: unknown): stops is RouteStopInput[] {
   return (
     Array.isArray(stops) &&
-    stops.length >= 2 &&
+    stops.length >= 1 &&
     stops.every(
       (stop) =>
         typeof stop?.id === "string" &&
         typeof stop.latitude === "number" &&
         typeof stop.longitude === "number"
     )
+  );
+}
+
+function hasValidOrigin(origin: RouteRequest["origin"]) {
+  return (
+    !origin ||
+    (typeof origin.latitude === "number" && typeof origin.longitude === "number")
   );
 }
 
@@ -78,9 +89,10 @@ export async function POST(request: NextRequest) {
 
   if (!body.workspaceId) return jsonError("Workspace is required.", 400);
   if (!featureFlags.routing()) return jsonError(featureDisabledMessage("Routing"), 503);
-  if (!hasValidStops(body.stops)) {
+  if (!hasValidStops(body.stops) || (!body.origin && body.stops.length < 2)) {
     return jsonError("At least two route stops are required.", 400);
   }
+  if (!hasValidOrigin(body.origin)) return jsonError("Route origin is invalid.", 400);
   if (body.stops.length > serviceLimits.route.absoluteMaxStops()) {
     return jsonError("Route has too many stops.", 400);
   }
@@ -104,7 +116,7 @@ export async function POST(request: NextRequest) {
   const provider = normalizeRoutingProvider(body.provider);
   let routeResult;
   try {
-    routeResult = await buildRouteForProvider(provider, body.stops);
+    routeResult = await buildRouteForProvider(provider, body.stops, body.origin);
   } catch (error) {
     if (error instanceof RoutingProviderError) {
       return jsonError(error.message, error.status);
@@ -112,7 +124,22 @@ export async function POST(request: NextRequest) {
     return jsonError("Route provider is temporarily unavailable.", 400);
   }
 
-  const googleMapsUrl = buildGoogleMapsDirectionsUrl(routeResult.orderedStops);
+  const googleMapsStops = body.origin
+    ? [
+        {
+          latitude: body.origin.latitude,
+          longitude: body.origin.longitude,
+          addressSnapshot: body.origin.label,
+        },
+        ...routeResult.orderedStops,
+        {
+          latitude: body.origin.latitude,
+          longitude: body.origin.longitude,
+          addressSnapshot: body.origin.label,
+        },
+      ]
+    : routeResult.orderedStops;
+  const googleMapsUrl = buildGoogleMapsDirectionsUrl(googleMapsStops);
   if (googleMapsUrl.length > serviceLimits.googleMaps.maxUrlLength) {
     return jsonError("Too many route stops for Google Maps export. Reduce stop count.", 400);
   }
@@ -126,6 +153,9 @@ export async function POST(request: NextRequest) {
       legDurationSeconds: routeResult.legDurationSeconds,
       totalDistanceMeters: routeResult.totalDistanceMeters,
       totalDurationSeconds: routeResult.totalDurationSeconds,
+      startsAtOrigin: routeResult.startsAtOrigin,
+      returnsToOrigin: routeResult.returnsToOrigin,
+      legDurationSource: routeResult.legDurationSource,
       warning: routeResult.warning,
     },
   });

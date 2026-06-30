@@ -14,6 +14,11 @@ export type RoutingStop = LogisticsCoordinate & {
   addressSnapshot?: string;
 };
 
+export type RoutingOrigin = LogisticsCoordinate & {
+  id?: string;
+  label?: string;
+};
+
 export type RoutingResult = {
   orderedStops: RoutingStop[];
   routeProvider: RoutingProviderName;
@@ -21,6 +26,9 @@ export type RoutingResult = {
   legDurationSeconds: number[];
   totalDistanceMeters: number;
   totalDurationSeconds: number;
+  startsAtOrigin?: boolean;
+  returnsToOrigin?: boolean;
+  legDurationSource: "provider" | "estimate";
   warning?: string;
 };
 
@@ -89,6 +97,40 @@ function buildFallbackSummary(stops: RoutingStop[]) {
   };
 }
 
+function orderStopsFromStart(start: LogisticsCoordinate, stops: RoutingStop[]) {
+  const remaining = [...stops];
+  const ordered: RoutingStop[] = [];
+  let current = start;
+
+  while (remaining.length > 0) {
+    let nearestIndex = 0;
+    let nearestDistance = Number.POSITIVE_INFINITY;
+    remaining.forEach((stop, index) => {
+      const distance = distanceMeters(current, stop);
+      if (distance < nearestDistance) {
+        nearestDistance = distance;
+        nearestIndex = index;
+      }
+    });
+    const [nextStop] = remaining.splice(nearestIndex, 1);
+    ordered.push(nextStop);
+    current = nextStop;
+  }
+
+  return ordered;
+}
+
+function buildRoutePoints(orderedStops: RoutingStop[], origin?: RoutingOrigin) {
+  if (!origin) return orderedStops;
+  const routeOrigin: RoutingStop = {
+    id: origin.id ?? "__route_origin",
+    latitude: origin.latitude,
+    longitude: origin.longitude,
+    addressSnapshot: origin.label,
+  };
+  return [routeOrigin, ...orderedStops, routeOrigin];
+}
+
 function decodeGooglePolyline(encoded: string) {
   const points: Array<[number, number]> = [];
   let index = 0;
@@ -125,6 +167,9 @@ type GoogleRouteResponse = {
   routes?: Array<{
     distanceMeters?: number;
     duration?: string;
+    legs?: Array<{
+      duration?: string;
+    }>;
     polyline?: {
       encodedPolyline?: string;
     };
@@ -138,21 +183,32 @@ function parseGoogleDurationSeconds(duration?: string) {
 }
 
 export async function buildNearestNeighborRoute(
-  stops: RoutingStop[]
+  stops: RoutingStop[],
+  origin?: RoutingOrigin
 ): Promise<RoutingResult> {
-  const orderedStops = orderStopsNearestNeighbor(stops);
+  const orderedStops = origin
+    ? orderStopsFromStart(origin, stops)
+    : orderStopsNearestNeighbor(stops);
+  const routePoints = buildRoutePoints(orderedStops, origin);
   return {
     orderedStops,
     routeProvider: "nearest_neighbor",
-    ...buildFallbackSummary(orderedStops),
+    ...buildFallbackSummary(routePoints),
+    startsAtOrigin: Boolean(origin),
+    returnsToOrigin: Boolean(origin),
+    legDurationSource: "estimate",
   };
 }
 
-export async function buildOpenRouteServiceRoute(stops: RoutingStop[]) {
-  const fallback = await buildNearestNeighborRoute(stops);
+export async function buildOpenRouteServiceRoute(
+  stops: RoutingStop[],
+  origin?: RoutingOrigin
+) {
+  const fallback = await buildNearestNeighborRoute(stops, origin);
+  const routePoints = buildRoutePoints(fallback.orderedStops, origin);
 
   try {
-    const directions = await getOpenRouteServiceDirections(fallback.orderedStops);
+    const directions = await getOpenRouteServiceDirections(routePoints);
     if (directions.path.length < 2) return fallback;
     return {
       ...fallback,
@@ -162,6 +218,10 @@ export async function buildOpenRouteServiceRoute(stops: RoutingStop[]) {
         directions.legDurationSeconds.length === fallback.legDurationSeconds.length
           ? directions.legDurationSeconds
           : fallback.legDurationSeconds,
+      legDurationSource:
+        directions.legDurationSeconds.length === fallback.legDurationSeconds.length
+          ? "provider" as const
+          : fallback.legDurationSource,
       totalDistanceMeters:
         directions.distanceMeters ?? fallback.totalDistanceMeters,
       totalDurationSeconds:
@@ -175,7 +235,10 @@ export async function buildOpenRouteServiceRoute(stops: RoutingStop[]) {
   }
 }
 
-export async function buildGoogleTrafficRoute(stops: RoutingStop[]) {
+export async function buildGoogleTrafficRoute(
+  stops: RoutingStop[],
+  routeOrigin?: RoutingOrigin
+) {
   const status = getGoogleTrafficStatus();
   if (!status.enabled) {
     throw new RoutingProviderError("disabled", status.message, 400);
@@ -184,10 +247,13 @@ export async function buildGoogleTrafficRoute(stops: RoutingStop[]) {
     throw new RoutingProviderError("unconfigured", status.message, 400);
   }
 
-  const fallback = await buildNearestNeighborRoute(stops);
-  const [origin, ...rest] = fallback.orderedStops;
-  const destination = rest.pop();
-  if (!destination) return fallback;
+  const fallback = await buildNearestNeighborRoute(stops, routeOrigin);
+  const origin = routeOrigin ?? fallback.orderedStops[0];
+  const destination = routeOrigin ?? fallback.orderedStops[fallback.orderedStops.length - 1];
+  const intermediates = routeOrigin
+    ? fallback.orderedStops
+    : fallback.orderedStops.slice(1, -1);
+  if (!destination || !origin) return fallback;
 
   const response = await fetch(
     "https://routes.googleapis.com/directions/v2:computeRoutes",
@@ -197,7 +263,7 @@ export async function buildGoogleTrafficRoute(stops: RoutingStop[]) {
         "Content-Type": "application/json",
         "X-Goog-Api-Key": process.env.GOOGLE_ROUTES_API_KEY ?? "",
         "X-Goog-FieldMask":
-          "routes.duration,routes.distanceMeters,routes.polyline.encodedPolyline",
+          "routes.duration,routes.distanceMeters,routes.legs.duration,routes.polyline.encodedPolyline",
       },
       body: JSON.stringify({
         origin: {
@@ -213,7 +279,7 @@ export async function buildGoogleTrafficRoute(stops: RoutingStop[]) {
             },
           },
         },
-        intermediates: rest.map((stop) => ({
+        intermediates: intermediates.map((stop) => ({
           location: {
             latLng: { latitude: stop.latitude, longitude: stop.longitude },
           },
@@ -236,13 +302,23 @@ export async function buildGoogleTrafficRoute(stops: RoutingStop[]) {
   const data = (await response.json()) as GoogleRouteResponse;
   const route = data.routes?.[0];
   const encodedPolyline = route?.polyline?.encodedPolyline;
+  const legDurationSeconds = route?.legs
+    ?.map((leg) => parseGoogleDurationSeconds(leg.duration))
+    .filter((duration): duration is number => typeof duration === "number");
+  const hasProviderLegs =
+    legDurationSeconds &&
+    legDurationSeconds.length === fallback.legDurationSeconds.length;
   return {
     ...fallback,
     routeProvider: "google_traffic" as const,
     routePath: encodedPolyline
       ? decodeGooglePolyline(encodedPolyline)
       : fallback.routePath,
-    legDurationSeconds: fallback.legDurationSeconds,
+    legDurationSeconds:
+      hasProviderLegs
+        ? legDurationSeconds
+        : fallback.legDurationSeconds,
+    legDurationSource: hasProviderLegs ? "provider" as const : fallback.legDurationSource,
     totalDistanceMeters: route?.distanceMeters ?? fallback.totalDistanceMeters,
     totalDurationSeconds:
       parseGoogleDurationSeconds(route?.duration) ??
@@ -252,9 +328,10 @@ export async function buildGoogleTrafficRoute(stops: RoutingStop[]) {
 
 export async function buildRouteForProvider(
   provider: RoutingProviderName,
-  stops: RoutingStop[]
+  stops: RoutingStop[],
+  origin?: RoutingOrigin
 ) {
-  if (provider === "google_traffic") return buildGoogleTrafficRoute(stops);
-  if (provider === "openroute_service") return buildOpenRouteServiceRoute(stops);
-  return buildNearestNeighborRoute(stops);
+  if (provider === "google_traffic") return buildGoogleTrafficRoute(stops, origin);
+  if (provider === "openroute_service") return buildOpenRouteServiceRoute(stops, origin);
+  return buildNearestNeighborRoute(stops, origin);
 }
