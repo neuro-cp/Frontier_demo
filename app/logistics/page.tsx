@@ -5,7 +5,10 @@ import { useEffect, useMemo, useState } from "react";
 
 import { useAuthSession } from "@/components/AuthSessionProvider";
 import { useWorkspace } from "@/components/WorkspaceContext";
-import { createRoutePlanAction } from "@/lib/actions/routes";
+import {
+  createRoutePlanAction,
+  deleteRoutePlanAction,
+} from "@/lib/actions/routes";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
 import type { ClientRow } from "@/lib/clientTypes";
 import { createClientsRepository } from "@/lib/db/clients";
@@ -100,6 +103,7 @@ export default function LogisticsPage() {
   const [geocodingClientId, setGeocodingClientId] = useState("");
   const [isOptimizingRoute, setIsOptimizingRoute] = useState(false);
   const [isTrafficRouting, setIsTrafficRouting] = useState(false);
+  const [deletingRouteId, setDeletingRouteId] = useState("");
 
   const supabase = useMemo(() => (isDatabaseMode ? createBrowserSupabaseClient() : null), [isDatabaseMode]);
   const clientsRepo = useMemo(() => createClientsRepository({ isSignedIn: isDatabaseMode, supabase, localClients, setLocalClients }), [isDatabaseMode, localClients, setLocalClients, supabase]);
@@ -115,9 +119,23 @@ export default function LogisticsPage() {
       clientsRepo.getClients(activeWorkspace.id),
       jobsRepo.getJobs(activeWorkspace.id),
       routesRepo.getRoutes(activeWorkspace.id),
-    ]).then(([loadedClients, loadedJobs, loadedRoutes]) => {
-      if (!cancelled) { setDatabaseClients(loadedClients); setDatabaseJobs(loadedJobs); setRoutes(loadedRoutes); }
-    });
+    ])
+      .then(([loadedClients, loadedJobs, loadedRoutes]) => {
+        if (!cancelled) {
+          setDatabaseClients(loadedClients);
+          setDatabaseJobs(loadedJobs);
+          setRoutes(loadedRoutes);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setRouteError(
+            error instanceof Error
+              ? error.message
+              : "Unable to load logistics data."
+          );
+        }
+      });
     return () => { cancelled = true; };
   }, [activeWorkspace.id, clientsRepo, isDatabaseMode, jobsRepo, routesRepo]);
 
@@ -189,6 +207,22 @@ export default function LogisticsPage() {
       .filter((location): location is LogisticsLocation => Boolean(location));
   }, [visibleLocations, selectedLocationIds]);
 
+  const selectedRouteableLocations = useMemo(
+    () =>
+      selectedLocations.filter(
+        (location) => location.coordinateSource === "saved"
+      ),
+    [selectedLocations]
+  );
+
+  const selectedTemporaryLocations = useMemo(
+    () =>
+      selectedLocations.filter(
+        (location) => location.coordinateSource === "temporary"
+      ),
+    [selectedLocations]
+  );
+
   function toggleLocation(locationId: string) {
     setRoutePath([]);
     setRouteSummary(null);
@@ -220,21 +254,20 @@ export default function LogisticsPage() {
   function buildGoogleMapsUrl(routeLocations: LogisticsLocation[]) {
     if (routeLocations.length < 2) return "#";
 
-    const origin = encodeURIComponent(
-      `${routeLocations[0].latitude},${routeLocations[0].longitude}`
-    );
+    const googleMapsPoint = (location: LogisticsLocation) =>
+      location.coordinateSource === "saved"
+        ? `${location.latitude},${location.longitude}`
+        : getClientFullAddress(location);
+
+    const origin = encodeURIComponent(googleMapsPoint(routeLocations[0]));
 
     const destination = encodeURIComponent(
-      `${routeLocations[routeLocations.length - 1].latitude},${
-        routeLocations[routeLocations.length - 1].longitude
-      }`
+      googleMapsPoint(routeLocations[routeLocations.length - 1])
     );
 
     const waypoints = routeLocations
       .slice(1, -1)
-      .map((location) =>
-        encodeURIComponent(`${location.latitude},${location.longitude}`)
-      )
+      .map((location) => encodeURIComponent(googleMapsPoint(location)))
       .join("|");
 
     const waypointParam = waypoints ? `&waypoints=${waypoints}` : "";
@@ -247,7 +280,7 @@ export default function LogisticsPage() {
   const canOpenGoogleMaps = selectedLocations.length >= 2 && Boolean(googleMapsUrl);
   const activeRoutePath = routePath.length >= 2
     ? routePath
-    : selectedLocations.map((location) => [location.latitude, location.longitude] as [number, number]);
+    : selectedRouteableLocations.map((location) => [location.latitude, location.longitude] as [number, number]);
 
   async function geocodeClient(clientId: string) {
     if (!isDatabaseMode) {
@@ -304,7 +337,11 @@ export default function LogisticsPage() {
   }
 
   async function optimizeRoute(provider: "nearest_neighbor" | "google_traffic" = "nearest_neighbor") {
-    if (!isDatabaseMode || selectedLocations.length < 2) return;
+    if (!isDatabaseMode) return;
+    if (selectedRouteableLocations.length < 2) {
+      setRouteError("Geocode at least two selected stops before optimizing the route.");
+      return;
+    }
 
     if (provider === "google_traffic") {
       setIsTrafficRouting(true);
@@ -320,7 +357,7 @@ export default function LogisticsPage() {
         body: JSON.stringify({
           workspaceId: activeWorkspace.id,
           provider,
-          stops: selectedLocations.map((location) => ({
+          stops: selectedRouteableLocations.map((location) => ({
             id: location.id,
             latitude: location.latitude,
             longitude: location.longitude,
@@ -370,8 +407,10 @@ export default function LogisticsPage() {
       stops: selectedLocations.map((location, index) => ({
         clientId: location.clientId,
         stopOrder: index + 1,
-        latitude: location.latitude,
-        longitude: location.longitude,
+        latitude:
+          location.coordinateSource === "saved" ? location.latitude : null,
+        longitude:
+          location.coordinateSource === "saved" ? location.longitude : null,
         addressSnapshot: getClientFullAddress(location),
       })),
     };
@@ -382,6 +421,59 @@ export default function LogisticsPage() {
     }
     setRouteError("");
     setRoutes((current) => [result.data, ...current]);
+  }
+
+  function loadSavedRoute(route: RoutePlan) {
+    const visibleLocationIds = new Set(visibleLocations.map((location) => location.id));
+    const orderedClientIds = route.stops
+      .slice()
+      .sort((a, b) => a.stopOrder - b.stopOrder)
+      .map((stop) => stop.clientId)
+      .filter((clientId) => visibleLocationIds.has(clientId));
+
+    if (orderedClientIds.length === 0) {
+      setRouteError("Saved route stops are not visible in the current filter.");
+      return;
+    }
+
+    setSelectedLocationIds(orderedClientIds);
+    setRoutePath(
+      route.stops
+        .slice()
+        .sort((a, b) => a.stopOrder - b.stopOrder)
+        .filter(
+          (stop) =>
+            typeof stop.latitude === "number" &&
+            typeof stop.longitude === "number"
+        )
+        .map((stop) => [stop.latitude, stop.longitude] as [number, number])
+    );
+    setRouteSummary({
+      totalDistanceMeters: route.totalDistanceMeters ?? undefined,
+      totalDurationSeconds: route.totalDurationSeconds ?? undefined,
+      warning: route.notes?.includes("Route provider:")
+        ? undefined
+        : route.notes,
+    });
+    setRouteError("");
+  }
+
+  async function deleteSavedRoute(routeId: string) {
+    setDeletingRouteId(routeId);
+    const result = await deleteRoutePlanAction(
+      routesRepo,
+      routeId,
+      activeWorkspace.id
+    );
+    setDeletingRouteId("");
+
+    if (!result.ok) {
+      setRouteError(result.error);
+      return;
+    }
+
+    setRoutes((current) => current.filter((route) => route.id !== routeId));
+    setRouteError("");
   }
 
   return (
@@ -510,7 +602,7 @@ export default function LogisticsPage() {
                   <button
                     type="button"
                     onClick={() => optimizeRoute()}
-                    disabled={selectedLocations.length < 2 || isOptimizingRoute}
+                    disabled={selectedRouteableLocations.length < 2 || isOptimizingRoute}
                     className="w-full rounded-lg border border-blue-600 px-4 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-blue-300 dark:hover:bg-blue-950/30 sm:w-auto"
                   >
                     {isOptimizingRoute ? "Optimizing..." : "Optimize Route"}
@@ -520,7 +612,7 @@ export default function LogisticsPage() {
                     <button
                       type="button"
                       onClick={() => optimizeRoute("google_traffic")}
-                      disabled={selectedLocations.length < 2 || isTrafficRouting}
+                      disabled={selectedRouteableLocations.length < 2 || isTrafficRouting}
                       className="w-full rounded-lg border border-purple-600 px-4 py-2 text-sm font-semibold text-purple-700 hover:bg-purple-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-purple-300 dark:hover:bg-purple-950/30 sm:w-auto"
                     >
                       {isTrafficRouting ? "Checking Traffic..." : "Use Traffic-Aware Route"}
@@ -544,8 +636,44 @@ export default function LogisticsPage() {
             </div>
 
             {routes.length > 0 && (
-              <div className="mt-4 rounded-lg bg-gray-50 p-3 text-sm text-gray-600 dark:bg-gray-800 dark:text-gray-300">
-                {routes.length} saved route{routes.length === 1 ? "" : "s"}
+              <div className="mt-4 space-y-3 rounded-lg bg-gray-50 p-3 text-sm text-gray-600 dark:bg-gray-800 dark:text-gray-300">
+                <div className="font-semibold">
+                  {routes.length} saved route{routes.length === 1 ? "" : "s"}
+                </div>
+
+                {routes.slice(0, 5).map((route) => (
+                  <div
+                    key={route.id}
+                    className="flex flex-col gap-2 rounded-lg bg-white p-3 dark:bg-gray-900 sm:flex-row sm:items-center sm:justify-between"
+                  >
+                    <div>
+                      <div className="font-semibold text-gray-900 dark:text-gray-100">
+                        {route.name}
+                      </div>
+                      <div className="text-xs text-gray-500 dark:text-gray-400">
+                        {route.stops.length} stop{route.stops.length === 1 ? "" : "s"}
+                      </div>
+                    </div>
+
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => loadSavedRoute(route)}
+                        className="rounded-lg border border-blue-600 px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-50 dark:text-blue-300 dark:hover:bg-blue-950/30"
+                      >
+                        Load
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => deleteSavedRoute(route.id)}
+                        disabled={deletingRouteId === route.id}
+                        className="rounded-lg border border-red-600 px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-red-300 dark:hover:bg-red-950/30"
+                      >
+                        {deletingRouteId === route.id ? "Deleting..." : "Delete"}
+                      </button>
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
 
@@ -624,6 +752,13 @@ export default function LogisticsPage() {
             </p>
 
             <div className="mt-6 space-y-4">
+              {selectedTemporaryLocations.length > 0 && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+                  {selectedTemporaryLocations.length} selected stop
+                  {selectedTemporaryLocations.length === 1 ? " uses" : "s use"} temporary map positioning. Google Maps will use the saved address; route optimization needs geocoded coordinates.
+                </div>
+              )}
+
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                 <div className="rounded-xl border border-gray-200 p-3 dark:border-gray-800">
                   <div className="text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">
