@@ -9,6 +9,12 @@ import { LogisticsLocation } from "./logisticsData";
 type LogisticsMapProps = {
   locations: LogisticsLocation[];
   selectedLocationIds: string[];
+  origin?: {
+    label: string;
+    latitude: number;
+    longitude: number;
+    type: "business" | "current";
+  } | null;
   routePath?: Array<[number, number]>;
   isRoadRoute?: boolean;
   onToggleLocation: (locationId: string) => void;
@@ -16,7 +22,7 @@ type LogisticsMapProps = {
 
 const defaultCenter: [number, number] = [42.68, -83.15];
 
-function colorMarkerIcon(color: "blue" | "green" | "orange") {
+function colorMarkerIcon(color: "blue" | "green" | "orange" | "red") {
   return new L.Icon({
     iconUrl:
       color === "blue"
@@ -37,6 +43,7 @@ function colorMarkerIcon(color: "blue" | "green" | "orange") {
 const availableMarkerIcon = colorMarkerIcon("green");
 const selectedMarkerIcon = colorMarkerIcon("blue");
 const temporaryMarkerIcon = colorMarkerIcon("orange");
+const originMarkerIcon = colorMarkerIcon("red");
 
 function LegendItem({
   className,
@@ -56,12 +63,13 @@ function LegendItem({
 export default function LogisticsMap({
   locations,
   selectedLocationIds,
+  origin = null,
   routePath = [],
   isRoadRoute = false,
   onToggleLocation,
 }: LogisticsMapProps) {
   const center: [number, number] =
-    locations.length > 0
+    origin ? [origin.latitude, origin.longitude] : locations.length > 0
       ? [locations[0].latitude, locations[0].longitude]
       : defaultCenter;
 
@@ -90,6 +98,24 @@ export default function LogisticsMap({
             opacity: 0.85,
           }}
         />
+      )}
+
+      {origin && (
+        <Marker
+          position={[origin.latitude, origin.longitude]}
+          icon={originMarkerIcon}
+        >
+          <Popup>
+            <div className="space-y-1">
+              <div className="font-semibold">{origin.label}</div>
+              <div className="text-sm">
+                {origin.type === "current"
+                  ? "Current route start/end"
+                  : "Business route start/end"}
+              </div>
+            </div>
+          </Popup>
+        </Marker>
       )}
 
       {locations.map((location) => {
@@ -138,6 +164,10 @@ export default function LogisticsMap({
     </MapContainer>
       <div className="pointer-events-none absolute bottom-3 left-3 z-[500] max-w-[calc(100%-1.5rem)] rounded-lg border border-gray-200 bg-white/95 px-3 py-2 text-xs font-semibold text-gray-700 shadow dark:border-gray-700 dark:bg-gray-900/95 dark:text-gray-200">
         <div className="grid gap-2">
+          <LegendItem
+            className="h-3 w-3 rounded-full bg-red-600"
+            label="Route start/end"
+          />
           <LegendItem
             className="h-3 w-3 rounded-full bg-green-600"
             label="Available location"

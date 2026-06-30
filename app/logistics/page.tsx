@@ -59,6 +59,58 @@ type RouteProviderStatus = {
   };
 };
 
+type RouteOrigin = {
+  type: "business" | "current";
+  label: string;
+  latitude: number;
+  longitude: number;
+  address?: string;
+};
+
+type WorkspaceSettingsResponse = {
+  settings?: {
+    workspaceId?: string;
+    companyName?: string;
+    companyAddress?: string;
+    companyCity?: string;
+    companyState?: string;
+    companyZip?: string;
+    businessLatitude?: number;
+    businessLongitude?: number;
+  } | null;
+  error?: string;
+};
+
+type CachedWorkspaceSettings = NonNullable<WorkspaceSettingsResponse["settings"]>;
+
+function settingsToRouteOrigin(
+  settings: CachedWorkspaceSettings | null | undefined
+): RouteOrigin | null {
+  if (
+    typeof settings?.businessLatitude !== "number" ||
+    typeof settings.businessLongitude !== "number"
+  ) {
+    return null;
+  }
+
+  const address = [
+    settings.companyAddress,
+    settings.companyCity,
+    settings.companyState,
+    settings.companyZip,
+  ]
+    .filter(Boolean)
+    .join(", ");
+
+  return {
+    type: "business",
+    label: settings.companyName || "Business Location",
+    latitude: settings.businessLatitude,
+    longitude: settings.businessLongitude,
+    address,
+  };
+}
+
 function formatDistance(meters?: number | null) {
   if (typeof meters !== "number") return "Not calculated";
   const miles = meters / 1609.344;
@@ -128,6 +180,10 @@ export default function LogisticsPage() {
   const [localClientEvents, setLocalClientEvents] = useStoredJsonState<
     ClientCalendarEvent[]
   >(storageKeys.clientCalendarEvents, []);
+  const [cachedSettings] = useStoredJsonState<CachedWorkspaceSettings[]>(
+    storageKeys.settings,
+    []
+  );
   const [databaseClients, setDatabaseClients] = useState<ClientRow[]>([]);
   const [databaseJobs, setDatabaseJobs] = useState<Job[]>([]);
   const [databaseClientEvents, setDatabaseClientEvents] = useState<
@@ -147,6 +203,10 @@ export default function LogisticsPage() {
     message: string;
   }>({ available: false, message: "Traffic-aware routing is disabled for this workspace/environment." });
   const [routeError, setRouteError] = useState("");
+  const [businessOrigin, setBusinessOrigin] = useState<RouteOrigin | null>(null);
+  const [currentOrigin, setCurrentOrigin] = useState<RouteOrigin | null>(null);
+  const [originMode, setOriginMode] = useState<"business" | "current">("business");
+  const [isLocating, setIsLocating] = useState(false);
   const [geocodingClientId, setGeocodingClientId] = useState("");
   const [isOptimizingRoute, setIsOptimizingRoute] = useState(false);
   const [isTrafficRouting, setIsTrafficRouting] = useState(false);
@@ -160,6 +220,10 @@ export default function LogisticsPage() {
   const clients = isDatabaseMode ? databaseClients : localClients;
   const jobs = isDatabaseMode ? databaseJobs : localJobs;
   const clientEvents = isDatabaseMode ? databaseClientEvents : localClientEvents;
+  const cachedWorkspaceSettings = cachedSettings.find(
+    (settings) => settings.workspaceId === activeWorkspace.id
+  );
+  const activeOrigin = originMode === "current" ? currentOrigin : businessOrigin;
 
   useEffect(() => {
     if (!isDatabaseMode) return;
@@ -217,6 +281,36 @@ export default function LogisticsPage() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!isDatabaseMode) {
+      Promise.resolve().then(() => {
+        setBusinessOrigin(settingsToRouteOrigin(cachedWorkspaceSettings));
+      });
+      return;
+    }
+
+    let cancelled = false;
+    fetch(`/api/workspaces/settings?workspaceId=${activeWorkspace.id}`)
+      .then((response) => response.json())
+      .then((payload: WorkspaceSettingsResponse) => {
+        if (cancelled) return;
+        const origin =
+          settingsToRouteOrigin(payload.settings) ||
+          settingsToRouteOrigin(cachedWorkspaceSettings);
+        setBusinessOrigin(origin);
+        setOriginMode((current) => (currentOrigin && current === "current" ? current : "business"));
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setBusinessOrigin(settingsToRouteOrigin(cachedWorkspaceSettings));
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeWorkspace.id, cachedWorkspaceSettings, currentOrigin, isDatabaseMode]);
 
   const workspaceClients = useMemo(() => {
     return clients.filter(
@@ -357,21 +451,30 @@ export default function LogisticsPage() {
     );
   }
 
-  function buildGoogleMapsUrl(routeLocations: LogisticsLocation[]) {
-    if (routeLocations.length < 2) return "#";
-
-    const googleMapsPoint = (location: LogisticsLocation) =>
-      location.coordinateSource === "saved"
+  function googleMapsPoint(location: LogisticsLocation | RouteOrigin) {
+    if ("coordinateSource" in location) {
+      return location.coordinateSource === "saved"
         ? `${location.latitude},${location.longitude}`
         : getClientFullAddress(location);
+    }
+    return `${location.latitude},${location.longitude}`;
+  }
 
-    const origin = encodeURIComponent(googleMapsPoint(routeLocations[0]));
+  function buildGoogleMapsUrl(routeLocations: LogisticsLocation[]) {
+    if (routeLocations.length < 2 && !activeOrigin) return "#";
+    if (routeLocations.length === 0) return "#";
+    const routePoints: Array<LogisticsLocation | RouteOrigin> = activeOrigin
+      ? [activeOrigin, ...routeLocations, activeOrigin]
+      : routeLocations;
+    if (routePoints.length < 2) return "#";
+
+    const origin = encodeURIComponent(googleMapsPoint(routePoints[0]));
 
     const destination = encodeURIComponent(
-      googleMapsPoint(routeLocations[routeLocations.length - 1])
+      googleMapsPoint(routePoints[routePoints.length - 1])
     );
 
-    const waypoints = routeLocations
+    const waypoints = routePoints
       .slice(1, -1)
       .map((location) => encodeURIComponent(googleMapsPoint(location)))
       .join("|");
@@ -383,10 +486,26 @@ export default function LogisticsPage() {
   }
 
   const googleMapsUrl = buildGoogleMapsUrl(selectedLocations);
-  const canOpenGoogleMaps = selectedLocations.length >= 2 && Boolean(googleMapsUrl);
+  const canOpenGoogleMaps =
+    (selectedLocations.length >= 2 || Boolean(activeOrigin && selectedLocations.length >= 1)) &&
+    Boolean(googleMapsUrl);
   const activeRoutePath = routePath.length >= 2
-    ? routePath
-    : selectedRouteableLocations.map((location) => [location.latitude, location.longitude] as [number, number]);
+    ? activeOrigin
+      ? [
+          [activeOrigin.latitude, activeOrigin.longitude] as [number, number],
+          ...routePath,
+          [activeOrigin.latitude, activeOrigin.longitude] as [number, number],
+        ]
+      : routePath
+    : [
+        ...(activeOrigin && selectedRouteableLocations.length > 0
+          ? [[activeOrigin.latitude, activeOrigin.longitude] as [number, number]]
+          : []),
+        ...selectedRouteableLocations.map((location) => [location.latitude, location.longitude] as [number, number]),
+        ...(activeOrigin && selectedRouteableLocations.length > 0
+          ? [[activeOrigin.latitude, activeOrigin.longitude] as [number, number]]
+          : []),
+      ];
   const hasRoadRoute =
     routePath.length >= 2 &&
     (routeSummary?.provider === "openroute_service" ||
@@ -446,6 +565,48 @@ export default function LogisticsPage() {
     } finally {
       setGeocodingClientId("");
     }
+  }
+
+  function useCurrentLocation() {
+    if (!navigator.geolocation) {
+      setRouteError("Current location is not available in this browser.");
+      return;
+    }
+
+    setIsLocating(true);
+    setRouteError("");
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setCurrentOrigin({
+          type: "current",
+          label: "Current Location",
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+        });
+        setOriginMode("current");
+        setRoutePath([]);
+        setRouteSummary(null);
+        setRouteLegDurationSeconds([]);
+        setIsLocating(false);
+      },
+      () => {
+        setRouteError("Current location could not be loaded.");
+        setIsLocating(false);
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+    );
+  }
+
+  function useBusinessLocation() {
+    if (!businessOrigin) {
+      setRouteError("Save and geocode your business address in Settings first.");
+      return;
+    }
+    setOriginMode("business");
+    setRoutePath([]);
+    setRouteSummary(null);
+    setRouteLegDurationSeconds([]);
+    setRouteError("");
   }
 
   async function optimizeRoute(provider: "openroute_service" | "google_traffic" = "openroute_service") {
@@ -616,6 +777,39 @@ export default function LogisticsPage() {
             ))}
           </select>
         </div>
+        <div className="flex flex-col gap-2 rounded-xl border border-gray-200 bg-white p-3 text-sm shadow-sm dark:border-gray-800 dark:bg-gray-900 lg:max-w-md">
+          <div className="font-semibold text-gray-900 dark:text-gray-100">
+            Route Start
+          </div>
+          <div className="text-gray-500 dark:text-gray-400">
+            {activeOrigin
+              ? `${activeOrigin.label}${activeOrigin.address ? ` - ${activeOrigin.address}` : ""}`
+              : "No route start selected."}
+          </div>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <button
+              type="button"
+              onClick={useBusinessLocation}
+              disabled={!businessOrigin || originMode === "business"}
+              className="rounded-lg border border-red-600 px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-red-300 dark:hover:bg-red-950/30"
+            >
+              Use Business Location
+            </button>
+            <button
+              type="button"
+              onClick={useCurrentLocation}
+              disabled={isLocating}
+              className="rounded-lg bg-red-600 px-3 py-2 text-xs font-semibold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isLocating ? "Locating..." : "Use Current Location"}
+            </button>
+          </div>
+          {!businessOrigin && (
+            <p className="text-xs text-amber-700 dark:text-amber-300">
+              Save your business address in Settings to show it here.
+            </p>
+          )}
+        </div>
       </div>
 
       {routeError && (
@@ -646,6 +840,7 @@ export default function LogisticsPage() {
             <LogisticsMap
               locations={visibleLocations}
               selectedLocationIds={selectedLocationIds}
+              origin={activeOrigin}
               routePath={activeRoutePath}
               isRoadRoute={hasRoadRoute}
               onToggleLocation={toggleLocation}

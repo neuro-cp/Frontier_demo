@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useAuthSession } from "@/components/AuthSessionProvider";
 import { useWorkspace } from "@/components/WorkspaceContext";
 import { deleteWorkspaceAction } from "@/lib/actions/workspaces";
 import { storageKeys, useStoredJsonState } from "@/lib/clientStorage";
@@ -48,7 +49,24 @@ type WorkspaceSettings = {
   workspaceNickname: string;
   businessType: string;
   notes: string;
+  businessLatitude?: number;
+  businessLongitude?: number;
+  businessGeocodedAt?: string;
 };
+
+function settingsAddressKey(settings: Pick<
+  WorkspaceSettings,
+  "companyAddress" | "companyCity" | "companyState" | "companyZip"
+>) {
+  return [
+    settings.companyAddress,
+    settings.companyCity,
+    settings.companyState,
+    settings.companyZip,
+  ]
+    .map((part) => part.trim().toLowerCase().replace(/\s+/g, " "))
+    .join("|");
+}
 
 function getDefaultSettings(
   workspaceId: string,
@@ -85,6 +103,8 @@ function getDefaultSettings(
 
 export default function SettingsPage() {
   const { activeWorkspace, canManageWorkspace, deleteWorkspace } = useWorkspace();
+  const { isSupabaseConfigured, user } = useAuthSession();
+  const isDatabaseMode = Boolean(isSupabaseConfigured && user);
   const [allSettings, setAllSettings] = useStoredJsonState<WorkspaceSettings[]>(
     storageKeys.settings,
     []
@@ -104,6 +124,7 @@ export default function SettingsPage() {
       setAllSettings={setAllSettings}
       canManageWorkspace={canManageWorkspace}
       deleteWorkspace={deleteWorkspace}
+      isDatabaseMode={isDatabaseMode}
     />
   );
 }
@@ -116,6 +137,7 @@ function SettingsWorkspacePanel({
   setAllSettings,
   canManageWorkspace,
   deleteWorkspace,
+  isDatabaseMode,
 }: {
   activeWorkspaceId: string;
   activeWorkspaceName: string;
@@ -124,14 +146,43 @@ function SettingsWorkspacePanel({
   setAllSettings: (settings: WorkspaceSettings[]) => void;
   canManageWorkspace: boolean;
   deleteWorkspace: (workspaceId: string) => Promise<boolean>;
+  isDatabaseMode: boolean;
 }) {
 
   const [tab, setTab] = useState<SettingsTab>("business");
   const [settings, setSettings] = useState<WorkspaceSettings>(initialSettings);
+  const [lastSavedAddressKey, setLastSavedAddressKey] = useState(
+    settingsAddressKey(initialSettings)
+  );
   const [deleteConfirmation, setDeleteConfirmation] = useState("");
   const [isDeletingWorkspace, setIsDeletingWorkspace] = useState(false);
+  const [isSavingSettings, setIsSavingSettings] = useState(false);
 
   const [savedNotice, setSavedNotice] = useState("");
+
+  useEffect(() => {
+    if (!isDatabaseMode) return;
+
+    let cancelled = false;
+    fetch(`/api/workspaces/settings?workspaceId=${activeWorkspaceId}`)
+      .then((response) => response.json())
+      .then((payload: { settings?: WorkspaceSettings | null; error?: string }) => {
+        if (cancelled) return;
+        if (payload.settings) {
+          setSettings(payload.settings);
+          setLastSavedAddressKey(settingsAddressKey(payload.settings));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          showSavedNotice("Settings could not be refreshed from the database.");
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeWorkspaceId, isDatabaseMode]);
 
   function updateSetting<K extends keyof WorkspaceSettings>(
     key: K,
@@ -148,18 +199,57 @@ function SettingsWorkspacePanel({
     window.setTimeout(() => setSavedNotice(""), 2500);
   }
 
-  function saveSettings() {
+  function saveSettingsCache(nextSettings: WorkspaceSettings) {
     const withoutCurrentWorkspace = allSettings.filter(
       (item) => item.workspaceId !== activeWorkspaceId
     );
 
-    const updatedSettings = [...withoutCurrentWorkspace, settings];
+    const updatedSettings = [...withoutCurrentWorkspace, nextSettings];
 
     setAllSettings(updatedSettings);
-
-    showSavedNotice("Settings saved.");
-
     window.dispatchEvent(new Event("frontier-settings-updated"));
+  }
+
+  async function saveSettings() {
+    if (!isDatabaseMode) {
+      saveSettingsCache(settings);
+      setLastSavedAddressKey(settingsAddressKey(settings));
+      showSavedNotice("Settings saved.");
+      return;
+    }
+
+    setIsSavingSettings(true);
+    try {
+      const response = await fetch("/api/workspaces/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...settings,
+          workspaceId: activeWorkspaceId,
+          previousAddressKey: lastSavedAddressKey,
+        }),
+      });
+      const payload = (await response.json()) as {
+        settings?: WorkspaceSettings;
+        warning?: string;
+        error?: string;
+      };
+
+      if (!response.ok || !payload.settings) {
+        throw new Error(payload.error || "Settings could not be saved.");
+      }
+
+      setSettings(payload.settings);
+      setLastSavedAddressKey(settingsAddressKey(payload.settings));
+      saveSettingsCache(payload.settings);
+      showSavedNotice(payload.warning || "Settings saved.");
+    } catch (error) {
+      showSavedNotice(
+        error instanceof Error ? error.message : "Settings could not be saved."
+      );
+    } finally {
+      setIsSavingSettings(false);
+    }
   }
 
   function resetWorkspaceSettings() {
@@ -242,9 +332,10 @@ function SettingsWorkspacePanel({
           <button
             type="button"
             onClick={saveSettings}
+            disabled={isSavingSettings}
             className="rounded-lg bg-blue-600 px-5 py-2 font-semibold text-white hover:bg-blue-700"
           >
-            Save Settings
+            {isSavingSettings ? "Saving..." : "Save Settings"}
           </button>
         </div>
       </div>
@@ -404,6 +495,12 @@ function SettingsWorkspacePanel({
                   className={inputClass}
                 />
               </div>
+            </div>
+
+            <div className="xl:col-span-2 rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-600 dark:border-gray-800 dark:bg-gray-950 dark:text-gray-300">
+              {settings.businessLatitude && settings.businessLongitude
+                ? "Business location is geocoded and ready for Logistics."
+                : "Save the business address to geocode it for Logistics."}
             </div>
           </div>
         </section>
