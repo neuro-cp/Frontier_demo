@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { executeReviewDraft } from "@/lib/ai/executeReviewDraft";
 import {
   getReviewDraftById,
+  purgeExecutedReviewDraftPayload,
   updateReviewDraftExecution,
 } from "@/lib/db/aiReviewDrafts";
 import { isUuid } from "@/lib/db/ids";
@@ -112,7 +113,20 @@ export async function POST(request: NextRequest) {
       executionResult,
       executionError: null,
     });
-    return NextResponse.json({ reviewDraft, executionResult });
+    let purgeError: string | null = null;
+    let purgedReviewDraft = reviewDraft;
+    try {
+      await purgeExecutedReviewDraftPayload(auth.serviceClient, reviewDraft);
+      purgedReviewDraft =
+        (await getReviewDraftById(auth.serviceClient, workspaceId, draftId)) ??
+        reviewDraft;
+    } catch (error) {
+      purgeError =
+        error instanceof Error
+          ? error.message
+          : "Review draft executed, but payload cleanup did not complete.";
+    }
+    return NextResponse.json({ reviewDraft: purgedReviewDraft, executionResult, purgeError });
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Unable to execute review draft.";

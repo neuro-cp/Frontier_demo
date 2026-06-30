@@ -356,6 +356,85 @@ export async function updateReviewDraftExecution(
   return dbToAiReviewDraft(data as DbAiReviewDraft);
 }
 
+export async function purgeExecutedReviewDraftPayload(
+  supabase: SupabaseClient,
+  draft: AiReviewDraft
+) {
+  if (draft.executionStatus !== "Executed") return;
+
+  const purgedAt = new Date().toISOString();
+  const auditSummary = {
+    purgedAt,
+    sourceType: draft.sourceType,
+    sourceId: draft.sourceId,
+    retained: [
+      "review draft id",
+      "source label",
+      "actions",
+      "warnings",
+      "execution result",
+      "timestamps",
+      "created records",
+    ],
+  };
+
+  // Compact bulky OCR/AI intermediates after command execution so Postgres
+  // keeps durable audit state without retaining large raw payloads forever.
+  const { error: draftError } = await supabase
+    .from("ai_review_drafts")
+    .update({
+      raw_input: null,
+      execution_result: {
+        ...(draft.executionResult ?? {}),
+        retention: auditSummary,
+      },
+    })
+    .eq("id", draft.id)
+    .eq("workspace_id", draft.workspaceId);
+  if (draftError) throw new Error(draftError.message || "Unable to purge review draft payload.");
+
+  if (draft.sourceId && (draft.sourceType === "ocr" || draft.sourceType === "image")) {
+    const documentPatch =
+      draft.sourceType === "ocr"
+        ? {
+            extracted_text: null,
+            extracted_json: null,
+          }
+        : {};
+
+    if (Object.keys(documentPatch).length > 0) {
+      const { error } = await supabase
+        .from("documents")
+        .update(documentPatch)
+        .eq("id", draft.sourceId)
+        .eq("workspace_id", draft.workspaceId);
+      if (error) throw new Error(error.message || "Unable to purge document OCR payload.");
+    }
+
+    const { error } = await supabase
+      .from("ai_jobs")
+      .update({
+        input_json: {},
+        output_json: null,
+      })
+      .eq("document_id", draft.sourceId)
+      .eq("workspace_id", draft.workspaceId);
+    if (error) throw new Error(error.message || "Unable to purge AI job payload.");
+  }
+
+  if (draft.sourceId && draft.sourceType === "transcript") {
+    const { error } = await supabase
+      .from("speech_transcripts")
+      .update({
+        transcript_text: null,
+        segments: [],
+      })
+      .eq("id", draft.sourceId)
+      .eq("workspace_id", draft.workspaceId);
+    if (error) throw new Error(error.message || "Unable to purge transcript payload.");
+  }
+}
+
 export async function getReviewDrafts(
   supabase: SupabaseClient,
   workspaceId: string
